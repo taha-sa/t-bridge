@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["core", "desktop/src-tauri"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Masaüstü ikilisi boyut için optimize edilir; çekirdek hız için (aynı profil, crate bazında).
+[profile.release.package.kopru-desktop]
+opt-level = "s"
