@@ -33,6 +33,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Telefonun kendi kamerasıyla QR okutulunca da eşleşme açılsın. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kopru" android:host="pair" />
+            </intent-filter>
         </activity>
 
         <!-- Panoyu okumak için görünmez, odak alan kısa ömürlü etkinlik (Android 10+ kısıtı). -->

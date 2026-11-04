@@ -1,6 +1,8 @@
 package app.kopru
 
 import android.content.ClipboardManager
+import android.content.Intent
+import android.widget.Toast
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         KopruService.start(this)
         Core.start()
+        handlePairLink(intent)
         setContent {
             KopruTheme {
                 val ui by Core.ui.collectAsStateWithLifecycle()
@@ -59,6 +62,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handlePairLink(intent)
+    }
+
+    private fun handlePairLink(i: Intent?) {
+        val data = i?.data ?: return
+        if (data.scheme != "kopru" || data.host != "pair") return
+        i.data = null
+        runCatching { Core.node?.pairUri(data.toString()) }
+            .onFailure { Toast.makeText(this, "Geçersiz eşleştirme bağlantısı", Toast.LENGTH_LONG).show() }
     }
 
     override fun onResume() {
