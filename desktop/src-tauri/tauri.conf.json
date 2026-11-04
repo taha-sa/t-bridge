@@ -10,18 +10,9 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Köprü",
-        "width": 900,
-        "height": 620,
-        "minWidth": 640,
-        "minHeight": 480
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -35,6 +26,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Köprü",
+    "shortDescription": "Telefon ↔ PC paylaşım",
+    "longDescription": "Aynı Wi-Fi üzerinden pano, dosya, bildirim ve uzaktan kumanda",
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": [
+          "Turkish"
+        ],
+        "installerHooks": "./installer-hooks.nsh"
+      }
+    }
   }
 }

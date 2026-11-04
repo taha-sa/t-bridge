@@ -1,0 +1,211 @@
+//! Arayüzün çağırdığı Tauri komutları.
+use std::sync::Arc;
+
+use kopru_core::*;
+use serde::Serialize;
+use tauri::State;
+use tauri_plugin_dialog::DialogExt;
+
+use crate::{
+    app::{Battery, Settings, Shared, lk},
+    win,
+};
+
+type S<'a> = State<'a, Arc<Shared>>;
+
+fn node<'a>(s: &'a S<'_>) -> Result<&'a Arc<Node>, String> {
+    s.node().ok_or_else(|| "çekirdek başlatılamadı".to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    device_name: String,
+    fingerprint: String,
+    port: u16,
+    state: ConnState,
+    peer: Option<PeerInfo>,
+    peers: Vec<PeerInfo>,
+    transfers: Vec<TransferInfo>,
+    notifications: Vec<NotificationData>,
+    icons: std::collections::HashMap<String, String>,
+    battery: Option<Battery>,
+    now_playing: Option<NowPlaying>,
+    settings: Settings,
+    download_dir: String,
+    error: Option<String>,
+}
+
+#[tauri::command]
+pub fn snapshot(s: S<'_>) -> Snapshot {
+    let n = s.node();
+    Snapshot {
+        device_name: crate::device_name(),
+        fingerprint: n.map(|n| n.fingerprint()).unwrap_or_default(),
+        port: n.map(|n| n.port()).unwrap_or(0),
+        state: n.map(|n| n.state()).unwrap_or(ConnState::Disconnected),
+        peer: n.and_then(|n| n.current_peer()),
+        peers: n.map(|n| n.peers()).unwrap_or_default(),
+        transfers: n.map(|n| n.transfers()).unwrap_or_default(),
+        notifications: lk(&s.notifications).iter().cloned().collect(),
+        icons: lk(&s.icons).clone(),
+        battery: *lk(&s.battery),
+        now_playing: lk(&s.now_playing).clone(),
+        settings: lk(&s.settings).clone(),
+        download_dir: crate::download_dir(&s.app, &lk(&s.settings)).to_string_lossy().into(),
+        error: crate::START_ERROR.get().cloned(),
+    }
+}
+
+#[derive(Serialize)]
+pub struct Pairing {
+    code: String,
+    svg: String,
+    addrs: Vec<String>,
+    name: String,
+}
+
+#[tauri::command]
+pub fn pairing(s: S<'_>) -> Result<Pairing, String> {
+    let info = node(&s)?.pairing_info();
+    let svg = qrcode::QrCode::with_error_correction_level(info.uri.as_bytes(), qrcode::EcLevel::M)
+        .map_err(|e| e.to_string())?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(240, 240)
+        .quiet_zone(true)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    Ok(Pairing { code: info.code, svg, addrs: info.addrs, name: info.name })
+}
+
+#[tauri::command]
+pub fn unpair(s: S<'_>, id: String) -> Result<(), String> {
+    node(&s)?.unpair(id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn send_paths(s: S<'_>, paths: Vec<String>) -> Result<usize, String> {
+    node(&s)?.send_paths(paths).map(|v| v.len()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn pick_and_send(s: S<'_>, folder: bool) -> Result<usize, String> {
+    let d = s.app.dialog().file().set_title(if folder { "Gönderilecek klasör" } else { "Gönderilecek dosyalar" });
+    let paths: Vec<String> = if folder {
+        d.blocking_pick_folder().into_iter().filter_map(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into()).collect()
+    } else {
+        d.blocking_pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|p| p.into_path().ok())
+            .map(|p| p.to_string_lossy().into())
+            .collect()
+    };
+    if paths.is_empty() {
+        return Ok(0);
+    }
+    node(&s)?.send_paths(paths).map(|v| v.len()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn pause_transfer(s: S<'_>, id: u64, direction: Direction) -> Result<(), String> {
+    node(&s)?.pause_transfer(id, direction).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn resume_transfer(s: S<'_>, id: u64, direction: Direction) -> Result<(), String> {
+    node(&s)?.resume_transfer(id, direction).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn cancel_transfer(s: S<'_>, id: u64, direction: Direction) -> Result<(), String> {
+    node(&s)?.cancel_transfer(id, direction);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_finished(s: S<'_>) -> Result<(), String> {
+    node(&s)?.clear_finished();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reveal(path: String) {
+    win::system::reveal(&path);
+}
+
+#[tauri::command]
+pub fn open_downloads(s: S<'_>) {
+    let dir = crate::download_dir(&s.app, &lk(&s.settings));
+    let _ = std::fs::create_dir_all(&dir);
+    win::system::reveal(&dir.to_string_lossy());
+}
+
+#[tauri::command]
+pub fn dismiss_notification(s: S<'_>, key: String) -> Result<(), String> {
+    lk(&s.notifications).retain(|n| n.key != key);
+    node(&s)?.send_phone(PhoneCommand::DismissNotification { key });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_notifications(s: S<'_>) -> Result<(), String> {
+    let keys: Vec<String> = lk(&s.notifications).drain(..).map(|n| n.key).collect();
+    let n = node(&s)?;
+    for key in keys {
+        n.send_phone(PhoneCommand::DismissNotification { key });
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mute_app(s: S<'_>, package: String, muted: bool) {
+    {
+        let mut st = lk(&s.settings);
+        st.muted_apps.retain(|p| p != &package);
+        if muted {
+            st.muted_apps.push(package.clone());
+        }
+    }
+    if muted {
+        lk(&s.notifications).retain(|n| n.package != package);
+    }
+    s.save_settings();
+}
+
+#[tauri::command]
+pub fn phone_cmd(s: S<'_>, cmd: PhoneCommand) -> Result<bool, String> {
+    Ok(node(&s)?.send_phone(cmd))
+}
+
+#[tauri::command]
+pub fn set_settings(s: S<'_>, settings: Settings) -> Result<bool, String> {
+    let restart_needed = {
+        let old = lk(&s.settings);
+        old.download_dir != settings.download_dir
+    };
+    if settings.autostart != win::system::autostart_enabled() {
+        win::system::set_autostart(settings.autostart);
+    }
+    *lk(&s.settings) = settings;
+    s.save_settings();
+    Ok(restart_needed)
+}
+
+#[tauri::command]
+pub async fn pick_download_dir(s: S<'_>) -> Result<Option<String>, String> {
+    Ok(s.app
+        .dialog()
+        .file()
+        .set_title("İndirme klasörü")
+        .blocking_pick_folder()
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into()))
+}
+
+#[tauri::command]
+pub fn restart_app(s: S<'_>) {
+    s.app.restart();
+}

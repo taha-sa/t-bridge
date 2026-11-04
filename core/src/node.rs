@@ -832,7 +832,8 @@ impl Inner {
         let peer = self.default_peer().ok_or_else(|| anyhow!("eşleşmiş cihaz yok"))?;
         let mut ids = Vec::new();
         for src in files {
-            let id = rand::random::<u64>() >> 1;
+            // JS sayıları 2^53 altında tam kesin: arayüzde id kaybı olmasın.
+            let id = rand::random::<u64>() & ((1u64 << 53) - 1);
             ids.push(id);
             self.put_transfer(TransferInfo {
                 id,
