@@ -177,6 +177,9 @@ pub fn run() {
             });
             if first_run {
                 shared.save_settings();
+            }
+            // Her açılışta kaydı güncel exe yoluna yaz (güncelleme/taşıma sonrası eski yol kalmasın).
+            if lk(&shared.settings).autostart {
                 win::system::set_autostart(true);
             }
             app.manage(shared.clone());
