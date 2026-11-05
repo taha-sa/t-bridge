@@ -91,7 +91,7 @@ fun HomeScreen(ui: UiState) {
         PermissionsCard()
 
         Text(
-            "İpucu: Ana ekrana “Köprü: Panoyu gönder” widget'ını ya da hızlı ayarlara “Panoyu PC'ye” kutucuğunu ekleyerek kopyaladığını tek dokunuşla gönderebilirsin.",
+            "İpucu: Ana ekrana “T-Bridge: Panoyu gönder” widget'ını ya da hızlı ayarlara “Panoyu PC'ye” kutucuğunu ekleyerek kopyaladığını tek dokunuşla gönderebilirsin.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -170,7 +170,7 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Bilgisayarı eşleştir", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Bilgisayarda Köprü'yü aç; ekranda bir QR kod ve 6 haneli kod görünecek.",
+                "Bilgisayarda T-Bridge'i aç; ekranda bir QR kod ve 6 haneli kod görünecek.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(onScan, Modifier.fillMaxWidth()) {

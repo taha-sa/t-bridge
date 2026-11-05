@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Köprü</string>
-    <string name="share_label">Köprü ile PC\'ye gönder</string>
+    <string name="app_name">T-Bridge</string>
+    <string name="share_label">T-Bridge ile PC\'ye gönder</string>
     <string name="tile_label">Panoyu PC\'ye</string>
-    <string name="widget_label">Köprü: Panoyu gönder</string>
+    <string name="widget_label">T-Bridge: Panoyu gönder</string>
 </resources>

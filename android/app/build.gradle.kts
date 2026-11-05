@@ -10,6 +10,10 @@ val uniffiOut = layout.buildDirectory.dir("generated/uniffi/kotlin")
 val jniOut = layout.buildDirectory.dir("generated/jniLibs")
 
 // İmzalama: android/keystore.properties varsa release imzalı olur (yoksa debug anahtarı).
+// Sürüm tek kaynaktan: repo kökündeki version.txt (x.y.z → versionCode x*10000+y*100+z).
+val appVersion: String = repoRoot.resolve("version.txt").readText().trim()
+val appVersionCode: Int = appVersion.split('.').map { it.toInt() }.let { (a, b, c) -> a * 10000 + b * 100 + c }
+
 val keyProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
@@ -23,8 +27,8 @@ android {
         applicationId = "app.kopru"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -48,7 +52,10 @@ android {
         }
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     sourceSets {
         getByName("main") {

@@ -34,6 +34,9 @@ pub struct Snapshot {
     settings: Settings,
     download_dir: String,
     error: Option<String>,
+    firewall_ok: bool,
+    version: String,
+    update: crate::updater::UpdateState,
 }
 
 #[tauri::command]
@@ -62,6 +65,9 @@ pub fn snapshot(s: S<'_>) -> Snapshot {
         settings,
         download_dir,
         error: crate::START_ERROR.get().cloned(),
+        firewall_ok: s.firewall_ok.load(std::sync::atomic::Ordering::Relaxed),
+        version: s.app.package_info().version.to_string(),
+        update: crate::updater::state(&s.app),
     }
 }
 
@@ -216,4 +222,32 @@ pub async fn pick_download_dir(s: S<'_>) -> Result<Option<String>, String> {
 #[tauri::command]
 pub fn restart_app(s: S<'_>) {
     s.app.restart();
+}
+
+/// Güvenlik duvarı iznini yeniden iste (kullanıcı ilk seferde reddettiyse).
+#[tauri::command]
+pub async fn fix_firewall(s: S<'_>) -> Result<bool, String> {
+    let ok = tauri::async_runtime::spawn_blocking(win::firewall::add_rule_elevated).await.map_err(|e| e.to_string())?;
+    s.firewall_ok.store(ok, std::sync::atomic::Ordering::Relaxed);
+    Ok(ok)
+}
+
+/// Bağlantıyı varsayılan tarayıcıda aç (yalnızca https).
+#[tauri::command]
+pub fn open_url(url: String) {
+    if url.starts_with("https://") {
+        win::system::reveal_url(&url);
+    }
+}
+
+/// Şimdi denetle (Ayarlar düğmesi). Bulunursa indirir; kurulum için `install_update` beklenir.
+#[tauri::command]
+pub async fn check_update(s: S<'_>) -> Result<bool, String> {
+    crate::updater::check(s.inner().clone(), false).await
+}
+
+/// İndirilmiş güncellemeyi hemen kur (uygulama yeniden açılır).
+#[tauri::command]
+pub fn install_update(s: S<'_>) -> Result<(), String> {
+    crate::updater::install_now(&s)
 }

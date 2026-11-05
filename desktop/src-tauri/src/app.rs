@@ -31,6 +31,9 @@ pub struct Settings {
     pub autostart: bool,
     pub download_dir: String,
     pub muted_apps: Vec<String>,
+    /// "dark" | "system" | "light"
+    pub theme: String,
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -43,6 +46,8 @@ impl Default for Settings {
             autostart: true,
             download_dir: String::new(),
             muted_apps: Vec::new(),
+            theme: "dark".into(),
+            auto_update: true,
         }
     }
 }
@@ -64,6 +69,9 @@ pub struct Shared {
     pub low_warned: Mutex<bool>,
     /// Bağlanınca telefon tüm etkin bildirimleri yeniden yollar: bu süre içinde Windows bildirimi gösterilmez.
     pub quiet_until: Mutex<Option<Instant>>,
+    /// Güvenlik duvarı kuralı var mı (arayüzde uyarı için).
+    pub firewall_ok: std::sync::atomic::AtomicBool,
+    pub updater: crate::updater::Updater,
     pub node: OnceLock<Arc<Node>>,
 }
 
@@ -99,9 +107,9 @@ impl Shared {
         let state = node.map(|n| n.state()).unwrap_or(ConnState::Disconnected);
         let peer = node.and_then(|n| n.current_peer());
         let mut tip = match (state, peer) {
-            (ConnState::Connected, Some(p)) => format!("Köprü — {} bağlı", p.name),
-            (ConnState::Connecting, _) => "Köprü — bağlanıyor…".to_string(),
-            _ => "Köprü — telefon bağlı değil".to_string(),
+            (ConnState::Connected, Some(p)) => format!("T-Bridge — {} bağlı", p.name),
+            (ConnState::Connecting, _) => "T-Bridge — bağlanıyor…".to_string(),
+            _ => "T-Bridge — telefon bağlı değil".to_string(),
         };
         if state == ConnState::Connected
             && let Some(b) = *lk(&self.battery) {

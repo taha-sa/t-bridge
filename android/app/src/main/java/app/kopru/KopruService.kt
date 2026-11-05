@@ -179,7 +179,7 @@ class KopruService : Service() {
         )
         return Notification.Builder(this, CH_STATUS)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("Köprü")
+            .setContentTitle("T-Bridge")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)

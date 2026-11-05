@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod updater;
 mod win;
 
 use std::{
@@ -9,7 +10,7 @@ use std::{
 
 use kopru_core::{Node, NodeConfig, Platform, Role};
 use tauri::{
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -31,7 +32,7 @@ pub fn download_dir(app: &AppHandle, s: &Settings) -> PathBuf {
     app.path()
         .download_dir()
         .unwrap_or_else(|_| PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default()).join("Downloads"))
-        .join("Köprü")
+        .join("T-Bridge")
 }
 
 /// Pencere yoksa oluşturur, varsa öne getirir. Kapatılınca WebView tamamen yok edilir.
@@ -43,9 +44,13 @@ pub fn show_main(app: &AppHandle) {
         return;
     }
     if let Err(e) = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
-        .title("Köprü")
-        .inner_size(960.0, 660.0)
-        .min_inner_size(720.0, 520.0)
+        .title("T-Bridge")
+        .inner_size(1040.0, 700.0)
+        .min_inner_size(820.0, 560.0)
+        // Kendi başlık çubuğumuz (arayüzde); Windows 11 gölge ve yuvarlak köşe korunur.
+        .decorations(false)
+        .shadow(true)
+        .background_color(tauri::window::Color(10, 10, 11, 255))
         .center()
         .build()
     {
@@ -54,7 +59,7 @@ pub fn show_main(app: &AppHandle) {
 }
 
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Köprü'yü aç", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "T-Bridge'i aç", true, None::<&str>)?;
     let ring = MenuItem::with_id(app, "ring", "Telefonu çaldır", true, None::<&str>)?;
     let send = MenuItem::with_id(app, "send", "Dosya gönder…", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
@@ -62,7 +67,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open, &send, &ring, &sep, &quit])?;
     TrayIconBuilder::with_id("tray")
         .icon(app.default_window_icon().cloned().expect("uygulama ikonu yok"))
-        .tooltip("Köprü")
+        .tooltip("T-Bridge")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id.as_ref() {
@@ -135,6 +140,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::pairing,
@@ -154,6 +160,10 @@ pub fn run() {
             commands::set_settings,
             commands::pick_download_dir,
             commands::restart_app,
+            commands::fix_firewall,
+            commands::open_url,
+            commands::check_update,
+            commands::install_update,
         ])
         .setup(move |app| {
             let data_dir = app.path().app_data_dir()?;
@@ -174,18 +184,32 @@ pub fn run() {
                 now_playing: Default::default(),
                 low_warned: Default::default(),
                 quiet_until: Default::default(),
+                firewall_ok: std::sync::atomic::AtomicBool::new(true),
+                updater: updater::Updater::new(),
                 node: OnceLock::new(),
             });
             if first_run {
                 shared.save_settings();
             }
             // Her açılışta kaydı güncel exe yoluna yaz (güncelleme/taşıma sonrası eski yol kalmasın).
+            win::system::remove_legacy_autostart();
             if lk(&shared.settings).autostart {
                 win::system::set_autostart(true);
             }
             app.manage(shared.clone());
             setup_tray(app)?;
             start_node(&shared, data_dir);
+            updater::spawn(shared.clone());
+            // Güvenlik duvarı: kural yoksa bir kez onay iste (arka planda; açılışı bekletmez).
+            let sh = shared.clone();
+            std::thread::spawn(move || {
+                let mut ok = win::firewall::rule_exists();
+                if !ok && !win::firewall::is_dev_build() {
+                    ok = win::firewall::add_rule_elevated();
+                }
+                sh.firewall_ok.store(ok, std::sync::atomic::Ordering::Relaxed);
+                let _ = sh.app.emit("kopru", serde_json::json!({ "type": "firewall", "ok": ok }));
+            });
             if !hidden {
                 show_main(app.handle());
             }

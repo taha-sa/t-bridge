@@ -68,7 +68,7 @@ fun FilesScreen(ui: UiState) {
                 Text("Bilgisayara dosya gönder")
             }
             Text(
-                "Gelen dosyalar: İndirilenler/Köprü. Herhangi bir uygulamadan “Paylaş → Köprü” ile de gönderebilirsin.",
+                "Gelen dosyalar: İndirilenler/T-Bridge. Herhangi bir uygulamadan “Paylaş → T-Bridge” ile de gönderebilirsin.",
                 Modifier.padding(top = 8.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -48,7 +48,7 @@ pub enum ConnState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct PairingInfo {
-    /// QR içeriği: kopru://pair?...
+    /// QR içeriği: tbridge://pair?... (eski kopru:// da kabul edilir)
     pub uri: String,
     /// 6 haneli kod (elle giriş için).
     pub code: String,

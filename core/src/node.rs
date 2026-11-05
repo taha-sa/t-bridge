@@ -774,7 +774,7 @@ impl Inner {
         let port = self.port();
         let addrs: Vec<String> = discovery::local_ipv4s().into_iter().map(|ip| format!("{ip}:{port}")).collect();
         let uri = format!(
-            "kopru://pair?i={}&n={}&f={}&c={}&a={}",
+            "tbridge://pair?i={}&n={}&f={}&c={}&a={}",
             self.ident.id,
             pct_encode(&self.cfg.device_name),
             self.fp,
@@ -785,7 +785,10 @@ impl Inner {
     }
 
     pub fn pair_uri(&self, uri: &str) -> Result<()> {
-        let q = uri.strip_prefix("kopru://pair?").ok_or_else(|| anyhow!("geçersiz QR"))?;
+        let q = uri
+            .strip_prefix("tbridge://pair?")
+            .or_else(|| uri.strip_prefix("kopru://pair?"))
+            .ok_or_else(|| anyhow!("geçersiz QR"))?;
         let mut map = HashMap::new();
         for kv in q.split('&') {
             if let Some((k, v)) = kv.split_once('=') {

@@ -13,7 +13,9 @@ use windows::{
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const RUN_KEY: windows::core::PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const RUN_VALUE: windows::core::PCWSTR = w!("Kopru");
+const RUN_VALUE: windows::core::PCWSTR = w!("T-Bridge");
+/// v0.1 (Köprü) kaydı: güncellemede temizlenir.
+const OLD_RUN_VALUE: windows::core::PCWSTR = w!("Kopru");
 
 pub fn power(a: PowerAction) {
     match a {
@@ -57,8 +59,23 @@ pub fn set_autostart(on: bool) -> bool {
     }
 }
 
+/// Eski adla kalmış otomatik başlatma kaydını siler.
+pub fn remove_legacy_autostart() {
+    unsafe {
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, OLD_RUN_VALUE);
+    }
+}
+
 pub fn autostart_enabled() -> bool {
     unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE, RRF_RT_REG_SZ, None, None, None).is_ok() }
+}
+
+/// URL'yi varsayılan tarayıcıda aç.
+pub fn reveal_url(url: &str) {
+    use windows::{Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL}, core::HSTRING};
+    unsafe {
+        ShellExecuteW(None, w!("open"), &HSTRING::from(url), None, None, SW_SHOWNORMAL);
+    }
 }
 
 /// Dosyayı Gezgin'de seçili göster; klasörse aç.

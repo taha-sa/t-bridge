@@ -1,10 +1,11 @@
-; Köprü kurulum kancaları: Windows Güvenlik Duvarı'nda uygulamaya gelen UDP izni (QUIC + mDNS).
+; T-Bridge kurulum kancaları (kullanıcı başına kurulum: yönetici izni gerekmez).
+; Güvenlik duvarı kuralını uygulama ilk açılışta bir kez, onay alarak ekler.
 !macro NSIS_HOOK_POSTINSTALL
-  nsExec::Exec 'netsh advfirewall firewall delete rule name="Köprü"'
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Köprü" dir=in action=allow protocol=UDP program="$INSTDIR\kopru-desktop.exe" profile=private,public enable=yes'
+  ; v0.1 (Köprü) otomatik başlatma kaydı
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Kopru"
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  nsExec::Exec 'netsh advfirewall firewall delete rule name="Köprü"'
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "T-Bridge"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Kopru"
 !macroend

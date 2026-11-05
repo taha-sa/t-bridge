@@ -53,6 +53,19 @@ export interface Settings {
   autostart: boolean
   downloadDir: string
   mutedApps: string[]
+  theme: Theme
+  autoUpdate: boolean
+}
+
+export type Theme = 'dark' | 'system' | 'light'
+
+export type UpdatePhase = 'idle' | 'checking' | 'latest' | 'downloading' | 'ready' | 'installing' | 'error'
+export interface UpdateState {
+  phase: UpdatePhase
+  version: string | null
+  notes: string | null
+  progress: number
+  error: string | null
 }
 
 export interface Snapshot {
@@ -70,6 +83,9 @@ export interface Snapshot {
   settings: Settings
   downloadDir: string
   error: string | null
+  firewallOk: boolean
+  version: string
+  update: UpdateState
 }
 
 export interface Pairing {

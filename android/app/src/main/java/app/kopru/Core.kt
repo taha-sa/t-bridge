@@ -147,7 +147,7 @@ object Core : Host {
     private fun setClipboard(text: String) {
         val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return
         lastClipSet = text
-        cm.setPrimaryClip(ClipData.newPlainText("Köprü", text))
+        cm.setPrimaryClip(ClipData.newPlainText("T-Bridge", text))
     }
 
     /** Uygulamanın kendi yazdığı son metin: ön plandaki dinleyici bunu geri göndermesin. */

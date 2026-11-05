@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePairLink(i: Intent?) {
         val data = i?.data ?: return
-        if (data.scheme != "kopru" || data.host != "pair") return
+        if ((data.scheme != "tbridge" && data.scheme != "kopru") || data.host != "pair") return
         i.data = null
         runCatching { Core.node?.pairUri(data.toString()) }
             .onFailure { Toast.makeText(this, "Geçersiz eşleştirme bağlantısı", Toast.LENGTH_LONG).show() }

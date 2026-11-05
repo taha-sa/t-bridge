@@ -1,4 +1,4 @@
-//! Köprü çekirdeği: aynı Wi-Fi üzerinde PC ↔ telefon bağlantısı.
+//! T-Bridge çekirdeği: aynı Wi-Fi üzerinde PC ↔ telefon bağlantısı.
 //!
 //! - QUIC (quinn) + karşılıklı TLS, sertifika parmak izi pinleme
 //! - mDNS ile bulma, QR/6 haneli kod ile eşleştirme

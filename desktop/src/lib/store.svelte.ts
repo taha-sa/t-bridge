@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { CoreEvent, Snapshot, TransferInfo } from './types'
+import type { CoreEvent, Snapshot, Theme, TransferInfo, UpdateState } from './types'
 
 const empty: Snapshot = {
   deviceName: '',
@@ -22,9 +22,14 @@ const empty: Snapshot = {
     autostart: true,
     downloadDir: '',
     mutedApps: [],
+    theme: 'dark',
+    autoUpdate: true,
   },
   downloadDir: '',
   error: null,
+  firewallOk: true,
+  version: '',
+  update: { phase: 'idle', version: null, notes: null, progress: 0, error: null },
 }
 
 export const app = $state<{ s: Snapshot; ready: boolean; toast: string | null; lastClip: string | null }>({
@@ -45,8 +50,16 @@ export function flash(msg: string) {
 
 export async function refresh() {
   app.s = await invoke<Snapshot>('snapshot')
+  applyTheme(app.s.settings.theme)
   app.ready = true
 }
+
+const media = window.matchMedia('(prefers-color-scheme: dark)')
+export function applyTheme(t: Theme) {
+  const dark = t === 'dark' || (t === 'system' && media.matches)
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+}
+media.addEventListener('change', () => applyTheme(app.s.settings.theme))
 
 function upsertTransfer(info: TransferInfo) {
   const list = app.s.transfers
@@ -109,6 +122,12 @@ function onEvent(e: CoreEvent) {
       s.battery = { level: ev.level, charging: ev.charging }
       break
     }
+    case 'firewall':
+      s.firewallOk = (e as unknown as { ok: boolean }).ok
+      break
+    case 'update':
+      s.update = (e as unknown as { state: UpdateState }).state
+      break
     case 'nowPlaying':
       s.nowPlaying = (e as Extract<CoreEvent, { type: 'nowPlaying' }>).info
       break

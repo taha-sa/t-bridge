@@ -11,14 +11,14 @@ import uniffi.kopru_core.FileSource
 import uniffi.kopru_core.OpenedFd
 
 /**
- * Gelen dosyalar MediaStore üzerinden "İndirilenler/Köprü" altına yazılır.
+ * Gelen dosyalar MediaStore üzerinden "İndirilenler/T-Bridge" altına yazılır.
  * Aktarım bitene kadar IS_PENDING=1 (diğer uygulamalara görünmez). Devam için key→uri kalıcıdır.
  */
 @SuppressLint("StaticFieldLeak") // yalnızca applicationContext tutulur
 object IncomingFiles {
     private lateinit var ctx: Context
     private lateinit var prefs: SharedPreferences
-    private const val ROOT = "Download/Köprü"
+    private const val ROOT = "Download/T-Bridge"
 
     fun init(c: Context) {
         ctx = c
@@ -67,7 +67,7 @@ object IncomingFiles {
         val cr = ctx.contentResolver
         return if (ok) {
             cr.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-            // Görünen yol: İndirilenler/Köprü/…/ad
+            // Görünen yol: İndirilenler/T-Bridge/…/ad
             cr.query(uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                 if (c.moveToFirst()) "${c.getString(0)}${c.getString(1)}" else null
             } ?: uri.toString()
