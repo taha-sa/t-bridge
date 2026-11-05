@@ -173,6 +173,7 @@ pub fn run() {
                 battery: Default::default(),
                 now_playing: Default::default(),
                 low_warned: Default::default(),
+                quiet_until: Default::default(),
                 node: OnceLock::new(),
             });
             if first_run {

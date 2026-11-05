@@ -648,6 +648,10 @@ impl Inner {
                 false
             }
         };
+        // Yerine yeni oturum geçtiyse (hızlı yeniden bağlanma) ortak tablolar yeni oturumundur: dokunma.
+        if !is_current {
+            return;
+        }
         lk(&self.pending_accept).clear();
         lk(&self.pending_result).clear();
         lk(&self.inc_open).clear();
@@ -663,10 +667,8 @@ impl Inner {
                 t.speed = 0;
             });
         }
-        if is_current {
-            self.set_state(ConnState::Disconnected);
-            self.nudge.notify_one();
-        }
+        self.set_state(ConnState::Disconnected);
+        self.nudge.notify_one();
     }
 
     async fn dispatch(self: &Arc<Self>, s: &Arc<Session>, m: Msg) {
@@ -733,6 +735,8 @@ impl Inner {
         if text.is_empty() || text.len() > proto::MAX_CLIP {
             return false;
         }
+        // Bağlı değilken kaydetme: bağlandıktan sonra aynı metin yeniden kopyalanınca gidebilsin.
+        let Some(s) = self.session() else { return false };
         let h = blake3::hash(text.as_bytes());
         {
             let mut g = lk(&self.last_clip);
@@ -741,13 +745,8 @@ impl Inner {
             }
             *g = Some(h);
         }
-        match self.session() {
-            Some(s) => {
-                s.send(Msg::Clip { text });
-                true
-            }
-            None => false,
-        }
+        s.send(Msg::Clip { text });
+        true
     }
 
     pub fn send_msg(&self, m: Msg) -> bool {
@@ -1006,13 +1005,11 @@ impl Inner {
                 Ok(()) => {}
                 Err(e) => {
                     if s.conn.close_reason().is_some() {
-                        *lk(&self.active_out) = None;
                         return;
                     }
                     lk(&self.pending_result).remove(&id);
                     if e.downcast_ref::<Interrupted>().is_some() {
                         // Duraklatma/iptal veya geçici kesinti: öğe kuyrukta kalır.
-                        *lk(&self.active_out) = None;
                         let still = lk(&self.queue).iter().any(|i| i.id == id && !i.paused && !i.cancelled);
                         if still {
                             self.patch_transfer(Direction::Outgoing, id, |t| {
@@ -1037,7 +1034,6 @@ impl Inner {
                     });
                 }
             }
-            *lk(&self.active_out) = None;
         }
     }
 
@@ -1053,10 +1049,20 @@ impl Inner {
     }
 
     async fn send_one(&self, s: &Arc<Session>, item: &OutItem) -> Result<()> {
+        let ctl = Arc::new(AtomicU8::new(RUN));
+        *lk(&self.active_out) = Some((item.id, ctl.clone()));
+        let r = self.send_one_inner(s, item, &ctl).await;
+        // Yalnızca kendi kaydını temizle: eski oturumun işçisi yenisinin denetimini silmesin.
+        let mut g = lk(&self.active_out);
+        if g.as_ref().is_some_and(|(_, c)| Arc::ptr_eq(c, &ctl)) {
+            *g = None;
+        }
+        r
+    }
+
+    async fn send_one_inner(&self, s: &Arc<Session>, item: &OutItem, ctl: &AtomicU8) -> Result<()> {
         let id = item.id;
         let size = item.src.size;
-        let ctl = Arc::new(AtomicU8::new(RUN));
-        *lk(&self.active_out) = Some((id, ctl.clone()));
         let (atx, arx) = oneshot::channel();
         lk(&self.pending_accept).insert(id, atx);
         self.patch_transfer(Direction::Outgoing, id, |t| {
@@ -1418,13 +1424,17 @@ fn pct_encode(s: &str) -> String {
 }
 
 fn pct_decode(s: &str) -> String {
+    // Bayt düzeyinde çözülür: "%" ardından çok baytlı karakter gelse de dilimleme paniği olmaz.
+    fn hex(c: u8) -> Option<u8> {
+        (c as char).to_digit(16).map(|d| d as u8)
+    }
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%' && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
+            && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push(h << 4 | l);
                 i += 3;
                 continue;
             }
@@ -1444,5 +1454,9 @@ mod tests {
         assert_eq!(pct_decode(&pct_encode(n)), n);
         assert!(constant_eq("123456", " 123456 "));
         assert!(!constant_eq("123456", "123457"));
+        // Bozuk/kötü niyetli girdi panik yaratmamalı.
+        assert_eq!(pct_decode("%ğ1%"), "%ğ1%");
+        assert_eq!(pct_decode("a%2"), "a%2");
+        assert_eq!(pct_decode("%41"), "A");
     }
 }

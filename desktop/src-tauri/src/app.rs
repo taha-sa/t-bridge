@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
+    time::{Duration, Instant},
 };
 
 use base64::Engine;
@@ -61,6 +62,8 @@ pub struct Shared {
     pub battery: Mutex<Option<Battery>>,
     pub now_playing: Mutex<Option<NowPlaying>>,
     pub low_warned: Mutex<bool>,
+    /// Bağlanınca telefon tüm etkin bildirimleri yeniden yollar: bu süre içinde Windows bildirimi gösterilmez.
+    pub quiet_until: Mutex<Option<Instant>>,
     pub node: OnceLock<Arc<Node>>,
 }
 
@@ -124,7 +127,11 @@ impl Shared {
                 }
             }
             Event::State { state, .. } => {
-                if *state != ConnState::Connected {
+                if *state == ConnState::Connected {
+                    // Telefon güncel listeyi baştan gönderecek: bağlantı yokken kalkanlar burada kalmasın.
+                    lk(&self.notifications).clear();
+                    *lk(&self.quiet_until) = Some(Instant::now() + Duration::from_secs(5));
+                } else {
                     *lk(&self.battery) = None;
                     *lk(&self.now_playing) = None;
                 }
@@ -157,13 +164,16 @@ impl Shared {
                 if muted {
                     return;
                 }
-                {
+                let same = {
                     let mut n = lk(&self.notifications);
+                    let same = n.iter().any(|x| x.key == data.key && x.title == data.title && x.text == data.text);
                     n.retain(|x| x.key != data.key);
                     n.push_front(data.clone());
                     n.truncate(MAX_NOTIFS);
-                }
-                if toast && !self.window_visible() {
+                    same
+                };
+                let quiet = lk(&self.quiet_until).is_some_and(|t| Instant::now() < t);
+                if toast && !same && !quiet && !self.window_visible() {
                     let title = if data.title.is_empty() { data.app_name.clone() } else { format!("{} · {}", data.app_name, data.title) };
                     self.toast(&title, &data.text);
                 }

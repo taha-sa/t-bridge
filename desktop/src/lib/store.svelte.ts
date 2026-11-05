@@ -62,7 +62,10 @@ function onEvent(e: CoreEvent) {
       const ev = e as Extract<CoreEvent, { type: 'state' }>
       s.state = ev.state
       s.peer = ev.peer
-      if (ev.state !== 'Connected') {
+      if (ev.state === 'Connected') {
+        // Telefon etkin bildirimleri baştan gönderir (arka uç da listeyi temizledi).
+        s.notifications = []
+      } else {
         s.battery = null
         s.nowPlaying = null
       }

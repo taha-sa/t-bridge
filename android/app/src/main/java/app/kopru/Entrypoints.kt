@@ -91,7 +91,6 @@ class ClipWidget : AppWidgetProvider() {
 class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        KopruService.start(this)
         Core.start()
         val uris = mutableListOf<Uri>()
         when (intent?.action) {
@@ -104,8 +103,10 @@ class ShareActivity : Activity() {
                 intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let(uris::addAll)
             }
         }
+        KopruService.startHolding(this, uris)
         val msg = if (uris.isNotEmpty()) {
-            val files = uris.mapNotNull { OutgoingFiles.describe(this, it, persist = false) }
+            // Kalıcı izin verilmişse al (çoğu uygulama vermez; o durumda izni servis tutar).
+            val files = uris.mapNotNull { OutgoingFiles.describe(this, it, persist = true) }
             val n = Core.sendFiles(files)
             when {
                 n == 0 -> "Gönderilemedi (eşleşmiş bilgisayar yok?)"

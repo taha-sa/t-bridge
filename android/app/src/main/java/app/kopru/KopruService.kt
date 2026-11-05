@@ -47,6 +47,21 @@ class KopruService : Service() {
             ctx.startForegroundService(Intent(ctx, KopruService::class.java))
         }
 
+        /**
+         * Paylaş menüsünden gelen URI izni etkinlik kapanınca düşer. Aynı URI'leri izinle servise de
+         * vererek izni servisin ömrüne bağlarız: bilgisayar sonradan bağlansa da kuyruktaki dosya okunabilir.
+         */
+        fun startHolding(ctx: Context, uris: List<android.net.Uri>) {
+            if (uris.isEmpty()) return start(ctx)
+            val clip = android.content.ClipData.newRawUri("kopru", uris[0])
+            uris.drop(1).forEach { clip.addItem(android.content.ClipData.Item(it)) }
+            val i = Intent(ctx, KopruService::class.java).apply {
+                clipData = clip
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            ctx.startForegroundService(i)
+        }
+
         fun onConnState(state: ConnState) {
             instance?.apply {
                 updateMulticast(state != ConnState.CONNECTED)
