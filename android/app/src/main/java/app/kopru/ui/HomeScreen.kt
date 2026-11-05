@@ -65,9 +65,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import app.kopru.Core
 import app.kopru.NotifListener
 import app.kopru.UiState
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import uniffi.kopru_core.ConnState
 import uniffi.kopru_core.PcCommand
 import uniffi.kopru_core.PowerAction
@@ -78,6 +75,7 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
     val ctx = LocalContext.current
     var pairing by remember { mutableStateOf(false) }
     var codeFor by remember { mutableStateOf<ServerInfo?>(null) }
+    var scanning by remember { mutableStateOf(false) }
     val on = ui.conn == ConnState.CONNECTED
     val showPair = (pairing || ui.peers.isEmpty()) && !on
     if (pairing && on) pairing = false
@@ -91,12 +89,22 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
         ui.startError?.let { ErrorCard("Çekirdek başlatılamadı: $it") }
         if (on) QuickActions(go)
         if (showPair) {
-            PairCard(ui, onScan = { scanQr(ctx) }, onPick = { codeFor = it })
+            PairCard(ui, onScan = { scanning = true }, onPick = { codeFor = it })
         } else {
             PeersCard(ui, onNew = { pairing = true })
         }
+        if (!on) HelpCard(defaultOpen = false)
         PermissionsCard()
         Tip()
+    }
+
+    if (scanning) {
+        QrScanner(onClose = { scanning = false }) { raw ->
+            scanning = false
+            runCatching { Core.node?.pairUri(raw) }.onFailure {
+                Toast.makeText(ctx, "Bu QR kod T-Bridge'e ait değil.", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     codeFor?.let { srv ->
@@ -112,8 +120,12 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
             onDismissRequest = { Core.clearPairError() },
             containerColor = tb.s2,
             confirmButton = { TextButton({ Core.clearPairError() }) { Text("Tamam") } },
-            title = { Text("Eşleştirilemedi") },
-            text = { Text(err, color = tb.text2) },
+            title = { Text(explainPairError(err).first) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    explainPairError(err).second.forEach { Text("• $it", color = tb.text2, style = MaterialTheme.typography.bodyMedium) }
+                }
+            },
         )
     }
 }
@@ -194,18 +206,65 @@ private fun ActionTile(label: String, icon: ImageVector, modifier: Modifier, onC
     }
 }
 
-private fun scanQr(ctx: Context) {
-    val opts = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).enableAutoZoom().build()
-    GmsBarcodeScanning.getClient(ctx, opts).startScan()
-        .addOnSuccessListener { code ->
-            val raw = code.rawValue.orEmpty()
-            runCatching { Core.node?.pairUri(raw) }.onFailure {
-                Toast.makeText(ctx, "Geçersiz QR: ${it.message}", Toast.LENGTH_LONG).show()
+/** Çekirdekten gelen teknik hatayı başlık + çözüm adımlarına çevirir. IP/port gösterilmez. */
+private fun explainPairError(raw: String): Pair<String, List<String>> {
+    val r = raw.lowercase()
+    return when {
+        "kod" in r || "reddedildi" in r -> "Kod kabul edilmedi" to listOf(
+            "Kodu yanlış girmiş olabilirsin ya da süresi dolmuştur (5 dakika).",
+            "Bilgisayardaki güncel kodu gir veya QR'ı yeniden okut.",
+        )
+        "sürüm" in r -> "Sürümler uyuşmuyor" to listOf("İki cihazda da T-Bridge'i güncelle: Ayarlar → Şimdi denetle.")
+        "certificate" in r || "sertifika" in r || "tls" in r || "fingerprint" in r -> "Bilgisayar doğrulanamadı" to listOf(
+            "Bu QR eski bir kuruluma ait olabilir.",
+            "Bilgisayardaki güncel QR'ı yeniden okut.",
+        )
+        else -> "Bilgisayara ulaşılamadı" to listOf(
+            "Bilgisayarda T-Bridge açık mı?",
+            "İki cihaz da aynı Wi‑Fi'da mı? Mobil veriyi ve VPN'i kapat.",
+            "Bilgisayarda T-Bridge → Ayarlar → Güvenlik: güvenlik duvarı izni verilmiş olmalı.",
+            "Misafir ağındaysan veya modemde istemci izolasyonu açıksa cihazlar birbirini göremez.",
+        )
+    }
+}
+
+/** Bağlantı yokken gösterilen çözüm önerileri + hızlı eylemler. */
+@Composable
+private fun HelpCard(defaultOpen: Boolean) {
+    val c = tb
+    val ctx = LocalContext.current
+    var open by remember { mutableStateOf(defaultOpen) }
+    TbCard {
+        Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+            Text("Bağlanamıyor musun?", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.titleSmall)
+            Text(if (open) "Kapat" else "Çözümler", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
+        }
+        if (open) {
+            Spacer(Modifier.height(10.dp))
+            listOf(
+                "Bilgisayarda T-Bridge açık olmalı.",
+                "İki cihaz aynı Wi‑Fi'da olmalı; mobil veriyi ve VPN'i kapat.",
+                "Bilgisayarda T-Bridge → Ayarlar → Güvenlik: güvenlik duvarı izni verilmiş olmalı.",
+                "Bilgisayar listede çıkmıyorsa Yeniden tara'ya bas ya da Wi‑Fi'ı kapatıp aç.",
+                "Misafir ağları ve modemdeki istemci izolasyonu cihazların birbirini görmesini engeller.",
+            ).forEachIndexed { i, s ->
+                Row(Modifier.padding(vertical = 4.dp)) {
+                    Text("${i + 1}.", Modifier.width(22.dp), color = c.gold, style = MaterialTheme.typography.bodyMedium)
+                    Text(s, color = c.text2, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TbButton("Yeniden tara", {
+                    Core.node?.rescan()
+                    Toast.makeText(ctx, "Ağ yeniden taranıyor", Toast.LENGTH_SHORT).show()
+                }, Modifier.weight(1f), height = 44.dp)
+                TbButton("Wi‑Fi ayarları", {
+                    runCatching { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+                }, Modifier.weight(1f), height = 44.dp)
             }
         }
-        .addOnFailureListener {
-            Toast.makeText(ctx, "QR okuyucu açılamadı; listeden seçip kodu gir.", Toast.LENGTH_LONG).show()
-        }
+    }
 }
 
 @Composable
@@ -251,7 +310,7 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.name, color = c.text, style = MaterialTheme.typography.titleSmall)
-                    Text(s.addrs.firstOrNull().orEmpty(), color = c.muted, style = MaterialTheme.typography.bodySmall)
+                    Text("Aynı ağda", color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
                 Text("Kodu gir", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
             }
@@ -282,7 +341,7 @@ private fun PeersCard(ui: UiState, onNew: () -> Unit) {
                             Pill("bağlı")
                         }
                     }
-                    Text(p.addrs.firstOrNull().orEmpty(), color = c.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(if (live) "Şifreli bağlantı" else "Eşleşti", color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
                 TextButton({ confirm = p.id }) { Text("Kaldır", color = c.muted) }
             }

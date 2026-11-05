@@ -119,6 +119,11 @@ impl Node {
         self.inner.nudge()
     }
 
+    /// Ağ taramasını baştan başlatır.
+    pub fn rescan(&self) {
+        self.inner.rescan()
+    }
+
     /// Yerel panodaki metni gönderir. Aynı metin tekrar gönderilmez (döngü önleme).
     pub fn send_clipboard(&self, text: String) -> bool {
         self.inner.send_clipboard(text)

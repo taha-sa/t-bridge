@@ -1,6 +1,8 @@
 package app.kopru.ui
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -37,13 +39,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.BuildConfig
-import app.kopru.Core
+import app.kopru.CrashLog
 import app.kopru.UiState
 import app.kopru.Updater
 
@@ -68,6 +69,7 @@ fun SettingsScreen(@Suppress("UNUSED_PARAMETER") ui: UiState) {
         ThemeCard()
         UpdateCard()
         SecurityCard()
+        CrashCard()
         About()
         SignatureFooter {
             val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/_u/tdesk.studio")).setPackage("com.instagram.android")
@@ -189,26 +191,35 @@ private fun UpdateCard() {
 @Composable
 private fun SecurityCard() {
     val c = tb
-    val fp = remember { Core.node?.fingerprint().orEmpty() }
     TbCard {
         SectionTitle("Güvenlik")
         Spacer(Modifier.height(12.dp))
-        Text("Şifreleme", color = c.text, style = MaterialTheme.typography.titleSmall)
-        Text(
-            "QUIC + TLS 1.3, cihaz sertifikası sabitleme. Yalnızca eşleşmiş cihazlar bağlanır; veri ağın dışına çıkmaz.",
-            color = c.muted,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        if (fp.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            Hairline()
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "${Core.deviceName()} · ${fp.chunked(8).take(4).joinToString(" ")}",
-                color = c.faint,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-            )
+        Text("Bağlantın şifreli", color = c.text, style = MaterialTheme.typography.titleSmall)
+        Text("Yalnızca eşleştirdiğin cihazlar bağlanabilir.", color = c.muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Yalnızca kayıtlı bir çökme varsa görünür. */
+@Composable
+private fun CrashCard() {
+    val c = tb
+    val ctx = LocalContext.current
+    var log by remember { mutableStateOf(CrashLog.read()) }
+    val text = log ?: return
+    TbCard {
+        SectionTitle("Hata kaydı")
+        Spacer(Modifier.height(10.dp))
+        Text("Uygulama son açılışlardan birinde beklenmedik şekilde kapandı.", color = c.text2, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TbButton("Kaydı kopyala", {
+                ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("T-Bridge hata kaydı", text))
+                Toast.makeText(ctx, "Hata kaydı kopyalandı", Toast.LENGTH_SHORT).show()
+            }, Modifier.weight(1f), height = 44.dp)
+            TbButton("Sil", {
+                CrashLog.clear()
+                log = null
+            }, Modifier.weight(1f), height = 44.dp)
         }
     }
 }

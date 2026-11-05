@@ -32,6 +32,7 @@ use crate::{
 const CHUNK: usize = 256 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const PAIR_CODE_TTL: Duration = Duration::from_secs(300);
+const RESCAN_EVERY: Duration = Duration::from_secs(30);
 
 const RUN: u8 = 0;
 const PAUSE: u8 = 1;
@@ -439,8 +440,29 @@ impl Inner {
         lk(&self.discovered).clone()
     }
 
+    /// Ağ taramasını baştan başlatır (ağ değişti, kullanıcı istedi veya uzun süredir sonuç yok).
+    /// Uzun süreli sorgular seyrekleştiği ve kilitsiz gönderilen ilk sorgu kaybolabildiği için gerekir.
+    pub fn rescan(self: &Arc<Self>) {
+        if self.cfg.role != Role::Client || self.session().is_some() {
+            self.nudge.notify_one();
+            return;
+        }
+        let me = self.clone();
+        self.rt.spawn_blocking(move || {
+            *lk(&me.browser) = None;
+            *lk(&me.discovered) = Vec::new();
+            me.emit(Event::Discovered { servers: Vec::new() });
+            // Bu arada bağlandıysa tarama kapalı kalsın (pil).
+            if me.session().is_none() {
+                me.set_browsing(true);
+            }
+            me.nudge.notify_one();
+        });
+    }
+
     async fn client_loop(self: Arc<Self>, ep: Endpoint) {
         let mut backoff = Duration::from_secs(1);
+        let mut last_scan = Instant::now();
         loop {
             // Bekleyen eşleştirme isteği öncelikli.
             let pending = lk(&self.pending_pair).take();
@@ -497,6 +519,11 @@ impl Inner {
             }
             if connected {
                 continue;
+            }
+            // Sonuç yoksa taramayı tazele: bilgisayar sonradan açıldıysa veya ilk sorgu kaybolduysa bulunsun.
+            if self.discovered().is_empty() && last_scan.elapsed() >= RESCAN_EVERY {
+                last_scan = Instant::now();
+                self.rescan();
             }
             // Bekle: geri çekilme süresi veya dürtme (ağ değişti, mDNS buldu, eşleştirme istendi).
             let _ = timeout(backoff, self.nudge.notified()).await;

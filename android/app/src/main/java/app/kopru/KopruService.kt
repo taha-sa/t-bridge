@@ -116,7 +116,8 @@ class KopruService : Service() {
 
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            Core.node?.nudge()
+            // Yeni ağda eski tarama soketleri işe yaramaz: taramayı baştan başlat.
+            Core.node?.rescan()
         }
     }
 
@@ -138,6 +139,9 @@ class KopruService : Service() {
         updateMulticast(!Core.isConnected())
         updateNotification()
         Updater.schedule()
+        // Etkinlik çekirdeği servisten önce başlatmış olabilir: kilitsiz gönderilen ilk tarama yanıtları
+        // telefonda düşer. Kilit alındıktan sonra taramayı tekrarla.
+        if (!Core.isConnected()) Core.node?.rescan()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

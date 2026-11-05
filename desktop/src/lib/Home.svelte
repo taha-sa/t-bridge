@@ -222,6 +222,23 @@
     </div>
   {/if}
 
+  {#if !on}
+    <details class="card tight help rise" open={!s.firewallOk}>
+      <summary><Icon name="info" size={18} /> Telefon bağlanamıyor mu?</summary>
+      <ol>
+        <li><span class="n">1</span><span>Telefonda T-Bridge açık mı, iki cihaz da aynı Wi‑Fi’da mı? Misafir ağları cihazların birbirini görmesini engeller.</span></li>
+        <li><span class="n">2</span>
+          <span>
+            Güvenlik duvarı izni:
+            {#if s.firewallOk}<b>verilmiş</b>.{:else}<b>yok</b>. Yukarıdaki <b>İzin ver</b>’e bas.{/if}
+          </span>
+        </li>
+        <li><span class="n">3</span><span>Telefonda Wi‑Fi’ı kapatıp aç; VPN varsa kapat.</span></li>
+        <li><span class="n">4</span><span>Hâlâ olmuyorsa modemde “istemci izolasyonu / AP izolasyonu” kapalı olmalı.</span></li>
+      </ol>
+    </details>
+  {/if}
+
   {#if !showPair}
     <section class="card rise">
       <div class="row">
@@ -237,17 +254,13 @@
                 <b class="ellipsis">{p.name}</b>
                 {#if s.peer?.id === p.id}<span class="chip gold">bağlı</span>{/if}
               </div>
-              <div class="faint small ellipsis num">{p.fingerprint.slice(0, 8)} · {p.fingerprint.slice(8, 16)}</div>
+              <div class="faint small">{s.peer?.id === p.id ? 'Şifreli bağlantı' : 'Eşleşti'}</div>
             </div>
             <button class="ghost sm" onclick={() => unpair(p.id, p.name)}>Kaldır</button>
           </div>
         {:else}
           <div class="emptyline muted small">Henüz eşleşmiş telefon yok.</div>
         {/each}
-      </div>
-      <div class="thispc row small faint">
-        <Icon name="monitor" size={14} />
-        <span class="grow ellipsis">Bu bilgisayar: {s.deviceName}{s.port ? ` · UDP ${s.port}` : ''}</span>
       </div>
     </section>
   {/if}
@@ -580,10 +593,30 @@
   .pn {
     gap: 8px;
   }
-  .thispc {
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
-    gap: 8px;
+  .help summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    list-style: none;
+    font-weight: 600;
+  }
+  .help summary::-webkit-details-marker {
+    display: none;
+  }
+  .help summary :global(svg) {
+    color: var(--gold-hi);
+    flex: none;
+  }
+  .help ol {
+    margin: 12px 0 2px;
+  }
+  .help li {
+    display: flex;
+    gap: 2px;
+    align-items: flex-start;
+  }
+  .help li .n {
+    flex: none;
   }
 </style>

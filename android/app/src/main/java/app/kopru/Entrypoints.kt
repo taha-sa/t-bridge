@@ -20,6 +20,7 @@ import android.widget.Toast
 class KopruApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         Core.init(this)
         app.kopru.ui.ThemePref.init(this)
         Updater.init(this)

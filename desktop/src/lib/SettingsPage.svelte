@@ -176,12 +176,11 @@
     </div>
     <div class="item">
       <div class="grow">
-        <div class="il">Şifreleme</div>
-        <div class="ih">QUIC + TLS 1.3, cihaz sertifikası sabitleme. Yalnızca eşleşmiş cihazlar bağlanır; veri ağın dışına çıkmaz.</div>
+        <div class="il">Bağlantın şifreli</div>
+        <div class="ih">Yalnızca eşleştirdiğin cihazlar bağlanabilir.</div>
       </div>
       <Icon name="lock" size={18} />
     </div>
-    <div class="fp faint small num selectable">{s.deviceName} · UDP {s.port} · {s.fingerprint.match(/.{1,8}/g)?.slice(0, 4).join(' ')}</div>
   </section>
 
   <div class="about">
@@ -309,10 +308,6 @@
     margin: -4px 0 12px 52px;
     border-radius: 10px;
     background: var(--s3);
-  }
-  .fp {
-    padding: 4px 0 12px;
-    word-break: break-all;
   }
   .about {
     display: flex;

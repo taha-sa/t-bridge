@@ -125,7 +125,12 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // QR: Play Hizmetleri modülüne bağlı kalmadan uygulama içi kamera okuyucu.
+    val camerax = "1.6.2"
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    implementation("com.google.zxing:core:3.5.4")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
