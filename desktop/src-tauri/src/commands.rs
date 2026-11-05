@@ -39,6 +39,14 @@ pub struct Snapshot {
 #[tauri::command]
 pub fn snapshot(s: S<'_>) -> Snapshot {
     let n = s.node();
+    // Kilitleri tek tek al-bırak: yapı ifadesindeki geçici kilitler ifade sonuna kadar yaşar,
+    // aynı kilidi ikinci kez istemek ana iş parçacığını kilitler.
+    let settings = lk(&s.settings).clone();
+    let download_dir = crate::download_dir(&s.app, &settings).to_string_lossy().into();
+    let notifications = lk(&s.notifications).iter().cloned().collect();
+    let icons = lk(&s.icons).clone();
+    let battery = *lk(&s.battery);
+    let now_playing = lk(&s.now_playing).clone();
     Snapshot {
         device_name: crate::device_name(),
         fingerprint: n.map(|n| n.fingerprint()).unwrap_or_default(),
@@ -47,12 +55,12 @@ pub fn snapshot(s: S<'_>) -> Snapshot {
         peer: n.and_then(|n| n.current_peer()),
         peers: n.map(|n| n.peers()).unwrap_or_default(),
         transfers: n.map(|n| n.transfers()).unwrap_or_default(),
-        notifications: lk(&s.notifications).iter().cloned().collect(),
-        icons: lk(&s.icons).clone(),
-        battery: *lk(&s.battery),
-        now_playing: lk(&s.now_playing).clone(),
-        settings: lk(&s.settings).clone(),
-        download_dir: crate::download_dir(&s.app, &lk(&s.settings)).to_string_lossy().into(),
+        notifications,
+        icons,
+        battery,
+        now_playing,
+        settings,
+        download_dir,
         error: crate::START_ERROR.get().cloned(),
     }
 }
