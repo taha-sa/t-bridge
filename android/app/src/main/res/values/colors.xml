@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FFF6F7F9</color>
-    <color name="accent">#FF2563EB</color>
-    <color name="launcher_bg">#FF2563EB</color>
+    <color name="bg">#FF0A0A0B</color>
+    <color name="gold">#FFE3A92B</color>
+    <color name="gold_hi">#FFF5C542</color>
+    <color name="text">#FFF2F0EA</color>
+    <color name="muted">#FF8F8C84</color>
+    <color name="launcher_bg">#FF0D0C0A</color>
 </resources>

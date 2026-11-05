@@ -21,6 +21,8 @@ class KopruApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Core.init(this)
+        app.kopru.ui.ThemePref.init(this)
+        Updater.init(this)
         KopruService.appCtx = this
     }
 }

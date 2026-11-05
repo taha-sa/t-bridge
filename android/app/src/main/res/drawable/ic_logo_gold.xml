@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <!-- T-Bridge işareti (assets/logo.svg): T'nin üst çizgisi köprü kemeri. -->
+    <group android:scaleX="0.09" android:scaleY="0.09" android:translateX="0.96" android:translateY="0.96">
+        <path android:pathData="M100,222 Q256,92 412,222" android:strokeWidth="46" android:strokeLineCap="round" android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="110" android:startY="90" android:endX="400" android:endY="430">
+                    <item android:offset="0" android:color="#FFF7CF5A" />
+                    <item android:offset="0.55" android:color="#FFD99A0B" />
+                    <item android:offset="1" android:color="#FF9C6400" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M256,168 V404" android:strokeWidth="54" android:strokeLineCap="round" android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="110" android:startY="90" android:endX="400" android:endY="430">
+                    <item android:offset="0" android:color="#FFF7CF5A" />
+                    <item android:offset="0.55" android:color="#FFD99A0B" />
+                    <item android:offset="1" android:color="#FF9C6400" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:pathData="M120,226 V266 M392,226 V266" android:strokeWidth="22" android:strokeLineCap="round" android:fillColor="#00000000">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="110" android:startY="90" android:endX="400" android:endY="430">
+                    <item android:offset="0" android:color="#FFF7CF5A" />
+                    <item android:offset="0.55" android:color="#FFD99A0B" />
+                    <item android:offset="1" android:color="#FF9C6400" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

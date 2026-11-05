@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Kopru" parent="android:Theme.Material.Light.NoActionBar">
+    <!-- Açılışta siyah zemin: koyu tasarımla beyaz parlama olmasın. -->
+    <style name="Theme.Kopru" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/bg</item>
+        <item name="android:colorAccent">@color/gold</item>
     </style>
 
     <!-- Görünmez etkinlikler: animasyon yok, arka plan yok. -->

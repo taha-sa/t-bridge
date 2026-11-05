@@ -137,6 +137,7 @@ class KopruService : Service() {
         )
         updateMulticast(!Core.isConnected())
         updateNotification()
+        Updater.schedule()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

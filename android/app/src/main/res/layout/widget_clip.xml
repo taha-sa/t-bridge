@@ -7,16 +7,23 @@
     android:gravity="center"
     android:orientation="vertical"
     android:padding="8dp">
-    <ImageView
-        android:layout_width="28dp"
-        android:layout_height="28dp"
-        android:contentDescription="@string/widget_label"
-        android:src="@drawable/ic_clip" />
+    <FrameLayout
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/widget_icon_bg">
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/widget_label"
+            android:src="@drawable/ic_clip_dark" />
+    </FrameLayout>
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="6dp"
+        android:fontFamily="sans-serif-medium"
         android:text="@string/tile_label"
-        android:textColor="#FFFFFFFF"
+        android:textColor="#FFF2F0EA"
         android:textSize="12sp" />
 </LinearLayout>

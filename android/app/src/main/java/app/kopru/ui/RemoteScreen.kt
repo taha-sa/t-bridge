@@ -30,30 +30,37 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.kopru.Core
@@ -83,23 +90,33 @@ fun RemoteScreen(ui: UiState) {
     var confirm by remember { mutableStateOf<PowerAction?>(null) }
     val on = ui.conn == ConnState.CONNECTED
 
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (!on) Text("Bilgisayar bağlı değil.", color = MaterialTheme.colorScheme.error)
+    val c = tb
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.padding(top = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Kumanda", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
+            Pill(if (on) "canlı" else "bağlı değil", if (on) "violet" else "muted")
+        }
 
         Touchpad(sens)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilledTonalButton({ pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f)) { Text("Sol tık") }
-            FilledTonalButton({ pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f)) { Text("Orta") }
-            FilledTonalButton({ pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f)) { Text("Sağ tık") }
+            TbButton("Sol tık", { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f))
+            TbButton("Orta", { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f))
+            TbButton("Sağ tık", { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f))
         }
         Text(
             "Tek parmak: imleç · dokun: tık · iki parmakla dokun: sağ tık · iki parmak kaydır: kaydırma · basılı tut + sürükle: sürükle-bırak",
+            color = c.faint,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Hız", Modifier.width(48.dp))
-            Slider(sens, { sens = it; prefs.edit().putFloat("sens", it).apply() }, valueRange = 0.6f..4f, modifier = Modifier.weight(1f))
+            Text("Hız", Modifier.width(44.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Slider(
+                sens,
+                { sens = it; prefs.edit().putFloat("sens", it).apply() },
+                valueRange = 0.6f..4f,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
+            )
         }
 
         Section("Klavye") {
@@ -126,36 +143,39 @@ fun RemoteScreen(ui: UiState) {
         }
 
         Section("Medya ve ses") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalIconButton({ pc(PcCommand.Media(MediaAction.PREVIOUS)) }) { Icon(Icons.Outlined.SkipPrevious, "Önceki") }
-                FilledTonalIconButton({ pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }) { Icon(Icons.Outlined.PlayArrow, "Oynat/Duraklat") }
-                FilledTonalIconButton({ pc(PcCommand.Media(MediaAction.NEXT)) }) { Icon(Icons.Outlined.SkipNext, "Sonraki") }
-                Spacer(Modifier.width(12.dp))
-                FilledTonalIconButton({ pc(PcCommand.Volume(VolumeAction.DOWN)) }) { Icon(Icons.AutoMirrored.Outlined.VolumeDown, "Kıs") }
-                FilledTonalIconButton({ pc(PcCommand.Volume(VolumeAction.UP)) }) { Icon(Icons.AutoMirrored.Outlined.VolumeUp, "Aç") }
-                FilledTonalIconButton({ pc(PcCommand.Volume(VolumeAction.MUTE)) }) { Icon(Icons.AutoMirrored.Outlined.VolumeOff, "Sessiz") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(Icons.Outlined.SkipPrevious, "Önceki", { pc(PcCommand.Media(MediaAction.PREVIOUS)) })
+                Spacer(Modifier.width(16.dp))
+                RoundIcon(Icons.Outlined.PlayArrow, "Oynat/Duraklat", { pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }, size = 62.dp, primary = true)
+                Spacer(Modifier.width(16.dp))
+                RoundIcon(Icons.Outlined.SkipNext, "Sonraki", { pc(PcCommand.Media(MediaAction.NEXT)) })
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TbButton("Kıs", { pc(PcCommand.Volume(VolumeAction.DOWN)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeDown, height = 44.dp)
+                TbButton("Sessiz", { pc(PcCommand.Volume(VolumeAction.MUTE)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeOff, height = 44.dp)
+                TbButton("Aç", { pc(PcCommand.Volume(VolumeAction.UP)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeUp, height = 44.dp)
             }
         }
 
         Section("Sunum") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilledTonalButton({ key(SpecialKey.LEFT) }, Modifier.weight(1f).height(64.dp)) { Icon(Icons.Outlined.ChevronLeft, null); Text("Geri") }
-                FilledTonalButton({ key(SpecialKey.RIGHT) }, Modifier.weight(1f).height(64.dp)) { Text("İleri"); Icon(Icons.Outlined.ChevronRight, null) }
+                TbButton("Geri", { key(SpecialKey.LEFT) }, Modifier.weight(1f), icon = Icons.Outlined.ChevronLeft, height = 64.dp)
+                TbButton("İleri", { key(SpecialKey.RIGHT) }, Modifier.weight(1f), icon = Icons.Outlined.ChevronRight, height = 64.dp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton({ key(SpecialKey.F5) }, Modifier.weight(1f)) { Text("Başlat (F5)") }
-                OutlinedButton({ key(SpecialKey.ESCAPE) }, Modifier.weight(1f)) { Text("Bitir (Esc)") }
+                TbButton("Başlat (F5)", { key(SpecialKey.F5) }, Modifier.weight(1f), height = 44.dp)
+                TbButton("Bitir (Esc)", { key(SpecialKey.ESCAPE) }, Modifier.weight(1f), height = 44.dp)
             }
         }
 
         Section("Güç") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ pc(PcCommand.Power(PowerAction.LOCK)) }, Modifier.weight(1f)) { Text("Kilitle") }
-                OutlinedButton({ confirm = PowerAction.SLEEP }, Modifier.weight(1f)) { Text("Uyku") }
+                TbButton("Kilitle", { pc(PcCommand.Power(PowerAction.LOCK)) }, Modifier.weight(1f), height = 44.dp)
+                TbButton("Uyku", { confirm = PowerAction.SLEEP }, Modifier.weight(1f), height = 44.dp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ confirm = PowerAction.RESTART }, Modifier.weight(1f)) { Text("Yeniden başlat") }
-                OutlinedButton({ confirm = PowerAction.SHUTDOWN }, Modifier.weight(1f)) { Text("Kapat") }
+                TbButton("Yeniden başlat", { confirm = PowerAction.RESTART }, Modifier.weight(1f), danger = true, height = 44.dp)
+                TbButton("Kapat", { confirm = PowerAction.SHUTDOWN }, Modifier.weight(1f), danger = true, height = 44.dp)
             }
         }
     }
@@ -169,27 +189,39 @@ fun RemoteScreen(ui: UiState) {
         }
         AlertDialog(
             onDismissRequest = { confirm = null },
+            containerColor = c.s2,
             title = { Text("Bilgisayar $name mı?") },
-            text = { Text("Kaydedilmemiş işler kaybolabilir.") },
-            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }) { Text("Evet") } },
-            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç") } },
+            text = { Text("Kaydedilmemiş işler kaybolabilir.", color = c.text2) },
+            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }) { Text("Evet", color = c.bad) } },
+            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç", color = c.text2) } },
         )
     }
 }
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            content()
-        }
+    TbCard {
+        SectionTitle(title)
+        Spacer(Modifier.height(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
     }
 }
 
 @Composable
 private fun Chip(label: String, onClick: () -> Unit) {
-    OutlinedButton(onClick, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text(label) }
+    val c = tb
+    val shape = RoundedCornerShape(10.dp)
+    Text(
+        label,
+        Modifier
+            .clip(shape)
+            .background(c.s3)
+            .border(1.dp, c.line2, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        color = c.text,
+        style = MaterialTheme.typography.labelMedium,
+    )
 }
 
 /** Yazılan metin anında PC'ye gider: eklenen karakterler metin olarak, silinenler Backspace olarak. */
@@ -213,7 +245,9 @@ private fun LiveKeyboard() {
             text = if (new.length > 200) "" else new
         },
         modifier = Modifier.fillMaxWidth(),
-        placeholder = { Text("Buraya yaz, anında bilgisayara gider") },
+        placeholder = { Text("Buraya yaz, anında bilgisayara gider", color = tb.faint) },
+        shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = tb.gold, unfocusedBorderColor = tb.line2, cursorColor = tb.goldHi),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
         keyboardActions = KeyboardActions(onSend = { key(SpecialKey.ENTER); text = "" }),
         singleLine = true,
@@ -224,11 +258,18 @@ private fun LiveKeyboard() {
 @Composable
 private fun Touchpad(sens: Float) {
     val view = LocalView.current
+    val c = tb
+    val shape = RoundedCornerShape(24.dp)
+    val scope = rememberCoroutineScope()
+    val ripple = remember { Animatable(1f) }
+    var rippleAt by remember { mutableStateOf(Offset.Zero) }
     Box(
         Modifier
             .fillMaxWidth()
             .height(300.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(18.dp))
+            .clip(shape)
+            .background(c.cardBrush)
+            .border(1.dp, c.goldEdge, shape)
             .pointerInput(sens) {
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
@@ -243,6 +284,11 @@ private fun Touchpad(sens: Float) {
                     var hScrollRem = 0f
                     var lastT = t0
                     first.consume()
+                    rippleAt = first.position
+                    scope.launch {
+                        ripple.snapTo(0f)
+                        ripple.animateTo(1f, tween(520))
+                    }
                     while (true) {
                         val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
                         val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
@@ -306,6 +352,18 @@ private fun Touchpad(sens: Float) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text("Touchpad", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+        // Dokunulan noktada altın dalga (imleç kanalını etkilemez; yalnızca çizim).
+        Canvas(Modifier.fillMaxSize()) {
+            val p = ripple.value
+            if (p < 1f) {
+                drawCircle(
+                    Color(0xFFF5C542).copy(alpha = (1f - p) * 0.55f),
+                    radius = 18.dp.toPx() + p * 70.dp.toPx(),
+                    center = rippleAt,
+                    style = Stroke(1.5.dp.toPx()),
+                )
+            }
+        }
+        Text("TOUCHPAD", color = c.faint, style = MaterialTheme.typography.labelSmall)
     }
 }

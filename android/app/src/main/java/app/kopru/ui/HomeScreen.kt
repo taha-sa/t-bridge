@@ -2,6 +2,7 @@ package app.kopru.ui
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -13,32 +14,35 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Computer
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,10 +53,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -64,37 +69,34 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import uniffi.kopru_core.ConnState
+import uniffi.kopru_core.PcCommand
+import uniffi.kopru_core.PowerAction
 import uniffi.kopru_core.ServerInfo
 
 @Composable
-fun HomeScreen(ui: UiState) {
+fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
     val ctx = LocalContext.current
     var pairing by remember { mutableStateOf(false) }
     var codeFor by remember { mutableStateOf<ServerInfo?>(null) }
-    val showPair = pairing || ui.peers.isEmpty()
+    val on = ui.conn == ConnState.CONNECTED
+    val showPair = (pairing || ui.peers.isEmpty()) && !on
+    if (pairing && on) pairing = false
 
     Column(
-        Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        StatusCard(ui)
-
+        Header()
+        Hero(ui)
         ui.startError?.let { ErrorCard("Çekirdek başlatılamadı: $it") }
-
-        if (showPair && ui.conn != ConnState.CONNECTED) {
+        if (on) QuickActions(go)
+        if (showPair) {
             PairCard(ui, onScan = { scanQr(ctx) }, onPick = { codeFor = it })
         } else {
             PeersCard(ui, onNew = { pairing = true })
         }
-        if (pairing && ui.conn == ConnState.CONNECTED) pairing = false
-
         PermissionsCard()
-
-        Text(
-            "İpucu: Ana ekrana “T-Bridge: Panoyu gönder” widget'ını ya da hızlı ayarlara “Panoyu PC'ye” kutucuğunu ekleyerek kopyaladığını tek dokunuşla gönderebilirsin.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Tip()
     }
 
     codeFor?.let { srv ->
@@ -108,10 +110,87 @@ fun HomeScreen(ui: UiState) {
     ui.pairError?.let { err ->
         AlertDialog(
             onDismissRequest = { Core.clearPairError() },
+            containerColor = tb.s2,
             confirmButton = { TextButton({ Core.clearPairError() }) { Text("Tamam") } },
             title = { Text("Eşleştirilemedi") },
-            text = { Text(err) },
+            text = { Text(err, color = tb.text2) },
         )
+    }
+}
+
+@Composable
+private fun Header() {
+    val c = tb
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)) {
+        Logo(30.dp)
+        Spacer(Modifier.width(10.dp))
+        Text("T-Bridge", color = c.text, style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+@Composable
+private fun Hero(ui: UiState) {
+    val c = tb
+    val on = ui.conn == ConnState.CONNECTED
+    val (eyebrow, title, sub) = when (ui.conn) {
+        ConnState.CONNECTED -> Triple("Bağlı", ui.peer?.name ?: "Bilgisayar", "Pano, dosya, bildirim ve kumanda hazır.")
+        ConnState.CONNECTING -> Triple("Durum", "Bağlanıyor…", "Bilgisayar aranıyor.")
+        ConnState.DISCONNECTED ->
+            if (ui.peers.isEmpty()) Triple("Hoş geldin", "Bilgisayarını eşleştir", "Telefon ve bilgisayar aynı Wi‑Fi'da olmalı.")
+            else Triple("Durum", "Bilgisayar bekleniyor", "T-Bridge bilgisayarda açılınca kendiliğinden bağlanır.")
+    }
+    TbCard(gold = on, padding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusOrb(ui.conn, 72.dp)
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                SectionTitle(eyebrow, color = c.gold)
+                Spacer(Modifier.height(3.dp))
+                Text(title, color = c.text, style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Text(sub, color = c.muted, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActions(go: (Int) -> Unit) {
+    val ctx = LocalContext.current
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        ActionTile("Panoyu\ngönder", Icons.Outlined.ContentPaste, Modifier.weight(1f)) {
+            val cm = ctx.getSystemService(ClipboardManager::class.java)
+            val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
+            val msg = when {
+                text.isNullOrEmpty() -> "Panoda metin yok"
+                Core.sendClipboardText(text) -> "PC panosuna gönderildi"
+                else -> "Zaten gönderildi"
+            }
+            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+        }
+        ActionTile("Dosya\ngönder", Icons.Outlined.Upload, Modifier.weight(1f)) { go(1) }
+        ActionTile("PC'yi\nkilitle", Icons.Outlined.Lock, Modifier.weight(1f)) {
+            Core.node?.sendPc(PcCommand.Power(PowerAction.LOCK))
+            Toast.makeText(ctx, "Bilgisayar kilitlendi", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+@Composable
+private fun ActionTile(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    val c = tb
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(c.cardBrush)
+            .border(1.dp, c.line, shape)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+    ) {
+        IconTile(icon, size = 38.dp)
+        Spacer(Modifier.height(10.dp))
+        Text(label, color = c.text, style = MaterialTheme.typography.titleSmall)
     }
 }
 
@@ -130,76 +209,51 @@ private fun scanQr(ctx: Context) {
 }
 
 @Composable
-private fun StatusCard(ui: UiState) {
-    val (color, title) = when (ui.conn) {
-        ConnState.CONNECTED -> Color(0xFF16A34A) to "${ui.peer?.name ?: "Bilgisayar"} bağlı"
-        ConnState.CONNECTING -> Color(0xFFD97706) to "Bağlanıyor…"
-        ConnState.DISCONNECTED -> MaterialTheme.colorScheme.outline to if (ui.peers.isEmpty()) "Eşleşmiş bilgisayar yok" else "Bilgisayar bekleniyor"
-    }
-    Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(Modifier.size(12.dp), shape = CircleShape, color = color) {}
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (ui.conn == ConnState.CONNECTED) "Pano, dosya, bildirim ve kumanda hazır." else "Telefon ve bilgisayar aynı Wi-Fi'da olmalı.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (ui.conn == ConnState.CONNECTING) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-        }
-    }
-}
-
-@Composable
 private fun ErrorCard(msg: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.WarningAmber, null, tint = MaterialTheme.colorScheme.error)
+    val c = tb
+    TbCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.WarningAmber, null, tint = c.bad)
             Spacer(Modifier.width(10.dp))
-            Text(msg, color = MaterialTheme.colorScheme.error)
+            Text(msg, color = c.bad, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
 private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Bilgisayarı eşleştir", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Bilgisayarda T-Bridge'i aç; ekranda bir QR kod ve 6 haneli kod görünecek.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(onScan, Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.QrCodeScanner, null)
-                Spacer(Modifier.width(8.dp))
-                Text("QR ile eşleştir")
+    val c = tb
+    TbCard(gold = true) {
+        SectionTitle("Eşleştirme", color = c.gold)
+        Spacer(Modifier.height(4.dp))
+        Text("Bilgisayarı bağla", color = c.text, style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(4.dp))
+        Text("Bilgisayarda T-Bridge'i aç; ekranda bir QR kod ve 6 haneli kod görünür.", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(14.dp))
+        GoldButton("QR ile eşleştir", onScan, Modifier.fillMaxWidth(), icon = Icons.Outlined.QrCodeScanner)
+        Spacer(Modifier.height(16.dp))
+        SectionTitle("veya ağda bulunanlardan seç")
+        Spacer(Modifier.height(6.dp))
+        val list = ui.discovered.filter { !it.paired }
+        if (list.isEmpty()) {
+            Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(16.dp), color = c.gold, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("Aranıyor…", color = c.muted, style = MaterialTheme.typography.bodyMedium)
             }
-            Text("veya ağda bulunanlardan seç:", style = MaterialTheme.typography.labelLarge)
-            val list = ui.discovered.filter { !it.paired }
-            if (list.isEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Aranıyor…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        list.forEach { s ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onPick(s) }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconTile(Icons.Outlined.Computer, size = 38.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(s.name, color = c.text, style = MaterialTheme.typography.titleSmall)
+                    Text(s.addrs.firstOrNull().orEmpty(), color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
-            }
-            list.forEach { s ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { onPick(s) }.padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.Computer, null)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(s.name, fontWeight = FontWeight.Medium)
-                        Text(s.addrs.firstOrNull().orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text("Kodu gir", color = MaterialTheme.colorScheme.primary)
-                }
+                Text("Kodu gir", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -207,76 +261,84 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
 
 @Composable
 private fun PeersCard(ui: UiState, onNew: () -> Unit) {
+    val c = tb
     var confirm by remember { mutableStateOf<String?>(null) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Eşleşmiş bilgisayarlar", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                TextButton(onNew) { Text("Yeni ekle") }
-            }
-            ui.peers.forEach { p ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Computer, null)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(p.name, fontWeight = FontWeight.Medium)
-                        Text(
-                            if (ui.peer?.id == p.id) "Bağlı · ${p.addrs.firstOrNull().orEmpty()}" else p.addrs.firstOrNull().orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+    TbCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("Eşleşmiş bilgisayarlar", Modifier.weight(1f))
+            TextButton(onNew) { Text("Yeni ekle", color = c.goldHi) }
+        }
+        ui.peers.forEach { p ->
+            val live = ui.peer?.id == p.id
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (live) IconTile(Icons.Outlined.Computer, size = 40.dp)
+                else IconTile(Icons.Outlined.Computer, tint = c.muted, bg = c.s3, border = c.line, size = 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.name, Modifier.weight(1f, fill = false), color = c.text, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (live) {
+                            Spacer(Modifier.width(8.dp))
+                            Pill("bağlı")
+                        }
                     }
-                    TextButton({ confirm = p.id }) { Text("Kaldır") }
+                    Text(p.addrs.firstOrNull().orEmpty(), color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
+                TextButton({ confirm = p.id }) { Text("Kaldır", color = c.muted) }
             }
         }
     }
     confirm?.let { id ->
         AlertDialog(
             onDismissRequest = { confirm = null },
+            containerColor = c.s2,
             confirmButton = {
                 TextButton({
                     Core.node?.unpair(id)
                     Core.refreshPeers()
                     confirm = null
-                }) { Text("Kaldır") }
+                }) { Text("Kaldır", color = c.bad) }
             },
-            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç") } },
+            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç", color = c.text2) } },
             title = { Text("Eşleşme kaldırılsın mı?") },
-            text = { Text("Tekrar bağlanmak için yeniden eşleştirmen gerekir.") },
+            text = { Text("Tekrar bağlanmak için yeniden eşleştirmen gerekir.", color = c.text2) },
         )
     }
 }
 
 @Composable
 private fun CodeDialog(srv: ServerInfo, onDismiss: () -> Unit, onOk: (String) -> Unit) {
+    val c = tb
     var code by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = c.s2,
         title = { Text("${srv.name} ile eşleş") },
         text = {
             Column {
-                Text("Bilgisayar ekranındaki 6 haneli kodu gir.")
+                Text("Bilgisayar ekranındaki 6 haneli kodu gir.", color = c.text2)
                 Spacer(Modifier.size(10.dp))
                 OutlinedTextField(
                     value = code,
                     onValueChange = { v -> code = v.filter(Char::isDigit).take(6) },
                     singleLine = true,
+                    textStyle = MaterialTheme.typography.headlineMedium,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    placeholder = { Text("000000") },
+                    placeholder = { Text("000000", style = MaterialTheme.typography.headlineMedium, color = c.faint) },
                 )
             }
         },
-        confirmButton = { TextButton({ onOk(code) }, enabled = code.length == 6) { Text("Eşleştir") } },
-        dismissButton = { TextButton(onDismiss) { Text("Vazgeç") } },
+        confirmButton = { TextButton({ onOk(code) }, enabled = code.length == 6) { Text("Eşleştir", color = if (code.length == 6) c.goldHi else c.faint) } },
+        dismissButton = { TextButton(onDismiss) { Text("Vazgeç", color = c.text2) } },
     )
 }
 
-private data class Perm(val title: String, val desc: String, val ok: Boolean, val action: (Context) -> Unit)
+private data class Perm(val title: String, val desc: String, val ok: Boolean?, val action: (Context) -> Unit)
 
 @Composable
 private fun PermissionsCard() {
     val ctx = LocalContext.current
+    val c = tb
     var tick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }
@@ -305,30 +367,35 @@ private fun PermissionsCard() {
             )
         }
         if (Build.MANUFACTURER.equals("Xiaomi", true) || Build.MANUFACTURER.equals("Redmi", true) || Build.MANUFACTURER.equals("POCO", true)) {
-            add(Perm("MIUI: Otomatik başlatma", "Telefon açılınca ve arka planda çalışabilmek için “Otomatik başlat”ı aç.", false) { openMiuiAutostart(it) })
+            // MIUI bu ayarın durumunu uygulamalara bildirmez: ok = null (doğrulanamıyor).
+            add(Perm("MIUI: Otomatik başlatma", "Durumu okunamıyor; açık olduğundan emin ol.", null) { openMiuiAutostart(it) })
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Kurulum", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            perms.forEach { p ->
-                Row(
-                    Modifier.fillMaxWidth().clickable(enabled = !p.ok) { p.action(ctx) }.padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (p.ok) Icons.Outlined.CheckCircle else Icons.Outlined.WarningAmber, null,
-                        tint = if (p.ok) Color(0xFF16A34A) else Color(0xFFD97706),
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(p.title, fontWeight = FontWeight.Medium)
-                        Text(p.desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (!p.ok) Text("Aç", color = MaterialTheme.colorScheme.primary)
-                }
-            }
+    val checkable = perms.filter { it.ok != null }
+    val done = checkable.count { it.ok == true }
+    TbCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle("Kurulum", Modifier.weight(1f))
+            Text("$done / ${checkable.size}", color = if (done == checkable.size) c.ok else c.goldHi, style = MaterialTheme.typography.labelMedium)
         }
+        Spacer(Modifier.height(8.dp))
+        GoldProgress(if (checkable.isEmpty()) 1f else done.toFloat() / checkable.size, active = false, tone = if (done == checkable.size) "ok" else "gold")
+        Spacer(Modifier.height(6.dp))
+        perms.forEach { p ->
+            CheckRow(p.title, p.desc, p.ok == true) { p.action(ctx) }
+        }
+    }
+}
+
+@Composable
+private fun Tip() {
+    val c = tb
+    Box(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
+        Text(
+            "İpucu: Ana ekrana “T-Bridge: Panoyu gönder” widget'ını ya da hızlı ayarlara “Panoyu PC'ye” kutucuğunu ekleyerek kopyaladığını tek dokunuşla gönderebilirsin.",
+            color = c.faint,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

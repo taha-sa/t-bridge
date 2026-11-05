@@ -4,16 +4,17 @@ Telefon ile bilgisayar **aynı Wi‑Fi ağında** olmalı. İnternet bağlantıs
 
 ## 1. Bilgisayar (Windows 10/11)
 
-1. `T-Bridge_0.1.0_x64-setup.exe` dosyasını çalıştır. Windows'un yönetici onayına **Evet** de. Kurulum sırasında güvenlik duvarına
-   UDP 47800 için gelen bağlantı kuralı eklenir.
-2. T-Bridge açılır ve sistem tepsisine (saatin yanına) yerleşir. Pencereyi kapatınca uygulama tepside çalışmaya devam eder.
+1. `T-Bridge_x.y.z_x64-setup.exe` dosyasını çalıştır. Kullanıcı başına kurulur, yönetici izni istemez.
+   v0.1 (Köprü) kuruluysa önce Ayarlar → Uygulamalar'dan kaldır.
+2. T-Bridge ilk açılışta güvenlik duvarı için **bir kez** Windows onayı ister (UDP 47800). **Evet** de.
+   Reddedersen Ayarlar → Güvenlik'ten yeniden isteyebilirsin.
+3. Uygulama sistem tepsisine yerleşir. Pencereyi kapatınca tepside çalışmaya devam eder.
    Tamamen kapatmak için tepsi simgesine sağ tıklayıp **Çıkış**'ı seç.
-3. Uygulama Windows açılışında gizli başlar. İstersen Ayarlar'dan kapatabilirsin.
-4. Telefon PC'yi bulamazsa ağ profilini kontrol et: Ayarlar → Ağ ve İnternet → Wi‑Fi → bağlı ağ → **Özel ağ** seçili olmalı.
+4. Uygulama Windows açılışında gizli başlar. İstersen Ayarlar'dan kapatabilirsin.
 
 ## 2. Telefon (Android 10+, Xiaomi / MIUI / HyperOS)
 
-1. `app-release.apk` dosyasını yükle. "Bilinmeyen kaynak" uyarısında izin ver.
+1. `T-Bridge-x.y.z.apk` dosyasını yükle. "Bilinmeyen kaynak" uyarısında izin ver.
 2. T-Bridge'i aç. **Bağlantı** sekmesindeki izin listesini sırayla tamamla:
    - **Bildirimler**: kalıcı durum bildirimi ve "Panoyu PC'ye gönder" düğmesi için.
    - **Bildirim erişimi**: bildirimleri PC'de görmek, PC'den kapatmak ve medya kontrolü için.
@@ -42,7 +43,16 @@ Telefon ile bilgisayar **aynı Wi‑Fi ağında** olmalı. İnternet bağlantıs
 | Telefon → PC kumanda | **Kumanda** sekmesinde dokunmatik yüzey, klavye, medya, ses, sunum okları, kilit/uyku/kapatma. |
 | PC → telefon kumanda | PC'de **Kumanda** sekmesinde telefonu çaldırma (sessizdeyken de çalar), medya ve ses kontrolü. |
 
-## 4. Sorun giderme
+## 4. Güncelleme
+
+Yeni sürümü elle kurman gerekmez.
+
+- **Bilgisayar:** Açılışta ve 6 saatte bir denetler. Yeni sürüm arka planda iner, imzası doğrulanır, aktarım yokken sessizce kurulup yeniden açılır.
+- **Telefon:** Günde bir, Wi‑Fi'dayken denetler. Hazır olunca "T-Bridge x.y.z hazır" bildirimi çıkar; **Yükle**'ye dokun, sistem ekranında **bir kez onayla**. Android bu onayı zorunlu tutar. Eşleşme ve ayarlar korunur.
+- İlk güncellemede telefon "bu kaynaktan yüklemeye izin ver" diye sorar; bir kez açman yeterli.
+- İki uygulamada da Ayarlar → Güncelleme → **Şimdi denetle** ile elle de bakabilirsin.
+
+## 5. Sorun giderme
 
 - **Bağlanmıyor**:
   - İki cihazın aynı Wi‑Fi ağında olduğunu kontrol et. Misafir ağları ve "AP izolasyonu" cihazların birbirini görmesini engeller.
