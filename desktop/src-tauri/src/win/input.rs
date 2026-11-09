@@ -88,10 +88,10 @@ pub fn invalidate_monitors() {
 
 fn cached_monitors() -> Vec<MonRect> {
     let mut g = MON_CACHE.lock().unwrap();
-    if let Some((t, v)) = g.as_ref() {
-        if t.elapsed() < MON_TTL {
-            return v.clone();
-        }
+    if let Some((t, v)) = g.as_ref()
+        && t.elapsed() < MON_TTL
+    {
+        return v.clone();
     }
     let v: Vec<MonRect> = crate::win::screen::capture::monitors()
         .iter()

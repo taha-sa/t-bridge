@@ -67,14 +67,14 @@ pub fn placeholder_nv12(w: usize, h: usize) -> Vec<u8> {
     let (fy, fu, fv) = rgb_to_yuv(0xe3, 0xa9, 0x2b);
     let mut f = vec![0u8; w * h * 3 / 2];
     f[..w * h].fill(bg_y);
-    for px in f[w * h..].chunks_exact_mut(2) {
-        px[0] = bg_u;
-        px[1] = bg_v;
+    for [u, v] in f[w * h..].as_chunks_mut::<2>().0 {
+        *u = bg_u;
+        *v = bg_v;
     }
     let chars: Vec<char> = PLACEHOLDER_TEXT.chars().collect();
     let scale = (w / (chars.len() * 6 + 2)).clamp(2, 12);
     let text_w = chars.len() * 6 * scale;
-    let (x0, y0) = ((w.saturating_sub(text_w)) / 2 & !1, (h.saturating_sub(7 * scale)) / 2 & !1);
+    let (x0, y0) = (((w.saturating_sub(text_w)) / 2) & !1, ((h.saturating_sub(7 * scale)) / 2) & !1);
     for (ci, ch) in chars.iter().enumerate() {
         let g = glyph(*ch);
         for (row, bits) in g.iter().enumerate() {

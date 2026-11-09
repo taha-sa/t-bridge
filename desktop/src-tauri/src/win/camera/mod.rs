@@ -138,10 +138,10 @@ pub fn update_needed() -> bool {
 
 fn installed_state() -> (bool, bool) {
     let cached = *INSTALL_CACHE.lock().unwrap();
-    if let Some((t, v)) = cached {
-        if t.elapsed() < Duration::from_secs(5) {
-            return v;
-        }
+    if let Some((t, v)) = cached
+        && t.elapsed() < Duration::from_secs(5)
+    {
+        return v;
     }
     let mine = is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid();
     let stale = mine && !installed_dll_matches(&install_dir().join(DLL_NAME), EXPECTED_DLL_SHA256);
@@ -297,18 +297,18 @@ fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
     // 4 KB'tan küçük dosya build.rs'in bıraktığı yer tutucudur (geliştirme): gerçek DLL sayılmaz.
     let real = |p: &PathBuf| p.metadata().map(|m| m.len() > 4096).unwrap_or(false);
     let mut c: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            c.push(d.join("camera").join(DLL_NAME)); // Tauri kaynakları (kurulu sürüm)
-            c.push(d.join(DLL_NAME));
-            // geliştirme: <repo>/target/{release,debug}/ (exe zaten target\debug içinde)
-            let mut up = Some(d);
-            for _ in 0..4 {
-                if let Some(u) = up {
-                    c.push(u.join("release").join(DLL_NAME));
-                    c.push(u.join(DLL_NAME));
-                    up = u.parent();
-                }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(d) = exe.parent()
+    {
+        c.push(d.join("camera").join(DLL_NAME)); // Tauri kaynakları (kurulu sürüm)
+        c.push(d.join(DLL_NAME));
+        // geliştirme: <repo>/target/{release,debug}/ (exe zaten target\debug içinde)
+        let mut up = Some(d);
+        for _ in 0..4 {
+            if let Some(u) = up {
+                c.push(u.join("release").join(DLL_NAME));
+                c.push(u.join(DLL_NAME));
+                up = u.parent();
             }
         }
     }

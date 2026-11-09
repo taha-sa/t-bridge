@@ -29,10 +29,10 @@ pub const SECTION_NAME: &str = r"Global\TBridgeCameraRing";
 /// SID kayıt sırasında HKLM kaynak anahtarına yazılır, DLL oradan okur. SID yoksa/geçersizse kullanıcı ACE'si eklenmez (kapalı güvenli).
 pub fn build_sddl(owner_sid: Option<&str>) -> String {
     let mut s = String::from("D:(A;;GA;;;SY)(A;;GA;;;LS)");
-    if let Some(sid) = owner_sid {
-        if is_valid_sid(sid) {
-            s.push_str(&format!("(A;;GRGW;;;{sid})"));
-        }
+    if let Some(sid) = owner_sid
+        && is_valid_sid(sid)
+    {
+        s.push_str(&format!("(A;;GRGW;;;{sid})"));
     }
     s
 }

@@ -38,14 +38,12 @@ impl Client {
         let mut hello = Value::Null;
         let mut line = Vec::new();
         let first = tokio::time::timeout(Duration::from_secs(5), rd.read_until(b'\n', &mut line)).await;
-        if let Ok(Ok(n)) = first {
-            if n > 0 {
-                if let Some(e) = Envelope::parse(&line) {
-                    if e.typ == "hello" {
-                        hello = e.data.unwrap_or(Value::Null);
-                    }
-                }
-            }
+        if let Ok(Ok(n)) = first
+            && n > 0
+            && let Some(e) = Envelope::parse(&line)
+            && e.typ == "hello"
+        {
+            hello = e.data.unwrap_or(Value::Null);
         }
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let (etx, erx) = mpsc::unbounded_channel::<Envelope>();
@@ -62,10 +60,10 @@ impl Client {
                 let Some(e) = Envelope::parse(&buf) else { continue };
                 match e.typ.as_str() {
                     "reply" => {
-                        if let Some(id) = e.id.clone() {
-                            if let Some(s) = p2.lock().unwrap().remove(&id) {
-                                let _ = s.send(e);
-                            }
+                        if let Some(id) = e.id.clone()
+                            && let Some(s) = p2.lock().unwrap().remove(&id)
+                        {
+                            let _ = s.send(e);
                         }
                     }
                     "event" => {

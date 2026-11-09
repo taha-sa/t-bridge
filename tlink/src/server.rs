@@ -41,10 +41,10 @@ impl EventQueue {
         if coalesce {
             self.q.retain(|e| !(e.name == name && e.id == id));
         }
-        if let Some(i) = &id {
-            if is_terminal(name) {
-                self.q.retain(|e| !(e.id.as_ref() == Some(i) && e.name.ends_with(".progress")));
-            }
+        if let Some(i) = &id
+            && is_terminal(name)
+        {
+            self.q.retain(|e| !(e.id.as_ref() == Some(i) && e.name.ends_with(".progress")));
         }
         self.q.push_back(QEvent { name: name.into(), id, line });
         while self.q.len() > MAX_QUEUED_EVENTS {

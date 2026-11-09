@@ -135,10 +135,10 @@ fn init_camera(shared: &Arc<Shared>) {
     if lk(&shared.settings).camera_enabled && win::camera::is_installed() {
         let sh = shared.clone();
         std::thread::spawn(move || {
-            if let Some(h) = sh.camera.get() {
-                if let Err(e) = h.enable() {
-                    log::warn!("sanal kamera başlatılamadı: {e}");
-                }
+            if let Some(h) = sh.camera.get()
+                && let Err(e) = h.enable()
+            {
+                log::warn!("sanal kamera başlatılamadı: {e}");
             }
         });
     }

@@ -193,12 +193,12 @@ impl Encoder {
             }
 
             let mut seq_header = Vec::new();
-            if let Ok(cur) = mft.GetOutputCurrentType(0) {
-                if let Ok(sz) = cur.GetBlobSize(&MF_MT_MPEG_SEQUENCE_HEADER) {
-                    let mut buf = vec![0u8; sz as usize];
-                    if cur.GetBlob(&MF_MT_MPEG_SEQUENCE_HEADER, &mut buf, None).is_ok() {
-                        seq_header = buf;
-                    }
+            if let Ok(cur) = mft.GetOutputCurrentType(0)
+                && let Ok(sz) = cur.GetBlobSize(&MF_MT_MPEG_SEQUENCE_HEADER)
+            {
+                let mut buf = vec![0u8; sz as usize];
+                if cur.GetBlob(&MF_MT_MPEG_SEQUENCE_HEADER, &mut buf, None).is_ok() {
+                    seq_header = buf;
                 }
             }
 

@@ -127,12 +127,11 @@ impl Stream {
     /// Geçerli ortam türünden boyutu okur.
     fn current_size(&self) -> (u32, u32) {
         unsafe {
-            if let Ok(h) = self.desc.GetMediaTypeHandler() {
-                if let Ok(t) = h.GetCurrentMediaType() {
-                    if let Ok(v) = t.GetUINT64(&MF_MT_FRAME_SIZE) {
-                        return ((v >> 32) as u32, v as u32);
-                    }
-                }
+            if let Ok(h) = self.desc.GetMediaTypeHandler()
+                && let Ok(t) = h.GetCurrentMediaType()
+                && let Ok(v) = t.GetUINT64(&MF_MT_FRAME_SIZE)
+            {
+                return ((v >> 32) as u32, v as u32);
             }
         }
         MODES[0]
@@ -272,7 +271,7 @@ fn worker_loop(st: Arc<(Mutex<StreamState>, Condvar)>, shm: Option<Arc<Shm>>, qu
 
 impl IMFMediaEventGenerator_Impl for Stream_Impl {
     fn GetEvent(&self, flags: MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS) -> Result<IMFMediaEvent> {
-        unsafe { self.queue.GetEvent(flags.0 as u32) }
+        unsafe { self.queue.GetEvent(flags.0) }
     }
     fn BeginGetEvent(&self, cb: Ref<IMFAsyncCallback>, state: Ref<IUnknown>) -> Result<()> {
         unsafe { self.queue.BeginGetEvent(cb.as_ref(), state.as_ref()) }
@@ -400,7 +399,7 @@ impl Source {
 
 impl IMFMediaEventGenerator_Impl for Source_Impl {
     fn GetEvent(&self, flags: MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS) -> Result<IMFMediaEvent> {
-        unsafe { self.queue.GetEvent(flags.0 as u32) }
+        unsafe { self.queue.GetEvent(flags.0) }
     }
     fn BeginGetEvent(&self, cb: Ref<IMFAsyncCallback>, state: Ref<IUnknown>) -> Result<()> {
         unsafe { self.queue.BeginGetEvent(cb.as_ref(), state.as_ref()) }
@@ -655,6 +654,8 @@ impl IClassFactory_Impl for Factory_Impl {
     }
 }
 
+/// # Safety
+/// COM sözleşmesi: işaretçiler geçerli olmalı (`ppv` yazılabilir, `rclsid`/`riid` okunabilir ya da null).
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
     unsafe {

@@ -210,12 +210,11 @@ impl Hub {
         if !self.throttle.lock().unwrap().allow(&app, &name, item, Instant::now()) {
             return;
         }
-        if name == "app.update.available" {
-            if let Some(v) = data.get("version").and_then(Value::as_str) {
-                if let Some(en) = self.apps.lock().unwrap().get_mut(&app) {
-                    en.update = Some(v.to_string());
-                }
-            }
+        if name == "app.update.available"
+            && let Some(v) = data.get("version").and_then(Value::as_str)
+            && let Some(en) = self.apps.lock().unwrap().get_mut(&app)
+        {
+            en.update = Some(v.to_string());
         }
         if let Some(n) = shared(&self.app).node() {
             n.send_suite_event(app, name, data.to_string());

@@ -70,13 +70,13 @@ pub fn read_all(dir: &Path) -> Vec<Manifest> {
             continue;
         }
         let Ok(b) = std::fs::read(&p) else { continue };
-        if let Ok(mut m) = serde_json::from_slice::<Manifest>(&b) {
-            if valid_id(&m.id) {
-                if m.pipe_name.is_empty() {
-                    m.pipe_name = format!("{}{}", crate::PIPE_PREFIX, m.id);
-                }
-                v.push(m);
+        if let Ok(mut m) = serde_json::from_slice::<Manifest>(&b)
+            && valid_id(&m.id)
+        {
+            if m.pipe_name.is_empty() {
+                m.pipe_name = format!("{}{}", crate::PIPE_PREFIX, m.id);
             }
+            v.push(m);
         }
     }
     v.sort_by(|a, b| a.id.cmp(&b.id));

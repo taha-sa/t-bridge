@@ -134,10 +134,10 @@ pub fn present_file(path: &str) -> bool {
     }
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     if matches!(ext.as_str(), "pptx" | "ppt" | "ppsx" | "pps") {
-        if let Some(exe) = powerpoint_exe() {
-            if Command::new(exe).arg("/S").arg(path).spawn().is_ok() {
-                return true;
-            }
+        if let Some(exe) = powerpoint_exe()
+            && Command::new(exe).arg("/S").arg(path).spawn().is_ok()
+        {
+            return true;
         }
         return open_file_ok(path);
     }
