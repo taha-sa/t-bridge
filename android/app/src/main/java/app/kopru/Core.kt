@@ -140,7 +140,7 @@ object Core : Host {
             is Event.Phone -> main.post { handlePhone(event.cmd) }
             is Event.ScreenInfo -> Screen.onInfo(event.monitors, event.current.toInt(), event.active, event.error)
             is Event.ScreenNotice -> Screen.onSecure(event.secure)
-            is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.key, event.data)
+            is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.recvUs.toLong(), event.key, event.data)
             is Event.Screen -> Unit
             is Event.SuiteApps -> Suite.onApps(event.apps)
             is Event.SuiteEvent -> Suite.onEvent(event.app, event.name, event.json)

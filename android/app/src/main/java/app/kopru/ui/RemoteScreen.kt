@@ -49,7 +49,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.ui.platform.LocalContext as LocalCtx
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
@@ -61,14 +60,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.Screen
-import android.app.Activity
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import app.kopru.CameraService
-import android.content.pm.ActivityInfo
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
@@ -468,12 +465,8 @@ private fun ScreenToggle(scr: app.kopru.ScreenUi, connected: Boolean) {
 
 @Composable
 private fun FullscreenViewer(scr: app.kopru.ScreenUi, onExit: () -> Unit, onClose: () -> Unit) {
-    val ctx = LocalCtx.current
-    DisposableEffect(Unit) {
-        val a = ctx as? Activity
-        a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        onDispose { a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
-    }
+    // Yön kilidi YOK: dikeyde tüm PC ekranı genişliğe sığar (letterbox), yatayda tam ekran. Döndürme görüntü alanını PC'ye
+    // yeniden bildirir (oturum kesilmez; manifestte configChanges ile Activity yeniden yaratılmaz).
     Dialog(onDismissRequest = onExit, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val v = LocalView.current
         val w = (v.parent as? DialogWindowProvider)?.window

@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +66,22 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
+/** Kendi dokunuşunu TÜKETEN küçük yüzey (uzun bas / dokun): alttaki PC-denetim hareket algılayıcısına (tık/sürükle) sızmaz. */
+private fun Modifier.ownGestures(onLong: (() -> Unit)? = null, onTap: (() -> Unit)? = null): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown()
+        down.consume()
+        val up = withTimeoutOrNull(500) { waitForUpOrCancellation() }
+        if (up == null) {
+            onLong?.invoke()
+            waitForUpOrCancellation()?.consume()
+        } else {
+            up.consume()
+            onTap?.invoke()
+        }
+    }
+}
+
 private fun clickAt(nx: Float, ny: Float, monitor: Int, button: MouseButton) {
     val n = Core.node ?: return
     n.sendScreenPointer(nx, ny, monitor.toUInt())
@@ -92,11 +110,17 @@ fun ScreenViewer(
     var barVisible by remember { mutableStateOf(true) }
     var kb by remember { mutableStateOf(false) }
     var monMenu by remember { mutableStateOf(false) }
+    var diagOn by remember { mutableStateOf(false) }
+    val diag by Screen.diag.collectAsState()
+    // Sürükleme imleci en çok ekran yenileme hızında gönderilir (120 Hz'de ~8 ms); fazlası ağı boş yere doldurur.
+    val minGap = remember(view) { (1000f / (view.display?.refreshRate ?: 60f)).toLong().coerceIn(4L, 17L) }
 
     DisposableEffect(Unit) {
         view.keepScreenOn = true // izlerken ekran kapanmasın
         onDispose { view.keepScreenOn = false }
     }
+    // Yakınlaştırma düzeyi PC'ye bildirilir: yakınlaştırınca daha yüksek çözünürlük istenir (metin keskin kalır).
+    LaunchedEffect(scale) { Screen.setZoom(scale) }
     LaunchedEffect(bump, kb, monMenu) {
         barVisible = true
         delay(3000)
@@ -134,11 +158,11 @@ fun ScreenViewer(
     Box(
         modifier
             .background(Color.Black)
-            .onSizeChanged { box = it }
+            .onSizeChanged { box = it; Screen.setViewport(it.width, it.height) }
             .pointerInput(ar, monitor) {
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
-                    val first = awaitFirstDown(requireUnconsumed = false)
+                    val first = awaitFirstDown(requireUnconsumed = true)
                     bump++
                     val t0 = SystemClock.uptimeMillis()
                     var moved = 0f
@@ -147,6 +171,7 @@ fun ScreenViewer(
                     var scrollRem = 0f
                     var hRem = 0f
                     var lastSend = 0L
+                    var lastDrag: Offset? = null
                     first.consume()
                     try {
                         while (true) {
@@ -170,10 +195,12 @@ fun ScreenViewer(
                                 moved += d.getDistance()
                                 if (dragging) {
                                     val now = SystemClock.uptimeMillis()
-                                    if (now - lastSend >= 8) {
+                                    val n = toNorm(p.position)
+                                    lastDrag = n
+                                    if (now - lastSend >= minGap) {
                                         lastSend = now
-                                        val n = toNorm(p.position)
-                                        Core.node?.sendScreenPointer(n.x, n.y, monitor.toUInt())
+                                        // Datagram: sıra beklemez, eskiyen konumlar kaybolabilir (son konum aşağıda güvenilir gider).
+                                        Core.node?.sendScreenPointerFast(n.x, n.y, monitor.toUInt())
                                     }
                                 } else if (scale > 1.01f && moved > slop) {
                                     pan = clampPan(pan + d) // yakınken tek parmak: kaydır (pan)
@@ -207,7 +234,10 @@ fun ScreenViewer(
                         }
                     } finally {
                         // İptal/kopma/istisna dahil: sol tuş PC'de basılı kalmasın.
-                        if (dragging) Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, false))
+                        if (dragging) {
+                            lastDrag?.let { Core.node?.sendScreenPointer(it.x, it.y, monitor.toUInt()) } // kesin son konum
+                            Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, false))
+                        }
                     }
                     val dur = SystemClock.uptimeMillis() - t0
                     if (!dragging && moved < slop * 2 && dur < 300) {
@@ -299,16 +329,36 @@ fun ScreenViewer(
                             Text(p.label, color = if (ui.preset == p) c.goldHi else c.muted, style = MaterialTheme.typography.labelLarge)
                         }
                     }
+                    // Uzun bas: gizli teşhis katmanı (yakalama/kodlama/ağ/çözme/uçtan uca ölçümler).
                     Text(
                         if (ui.fps > 0) "${ui.fps} fps · ${ui.latencyMs} ms" else "…",
                         color = c.muted,
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 6.dp),
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .ownGestures(onLong = { diagOn = !diagOn; bump++ }),
                     )
                     TextButton({ kb = !kb }) { Text("⌨", modifier = Modifier.semantics { contentDescription = "Klavye" }, color = if (kb) c.goldHi else c.muted) }
                     TextButton({ scale = 1f; pan = Offset.Zero; onToggleFullscreen() }) { Text(if (fullscreen) "⤡" else "⛶", modifier = Modifier.semantics { contentDescription = if (fullscreen) "Tam ekrandan çık" else "Tam ekran" }, color = c.text) }
                     TextButton({ onClose() }) { Text("✕", modifier = Modifier.semantics { contentDescription = "Kapat" }, color = c.text) }
                 }
+            }
+        }
+
+        // Gizli teşhis katmanı: fps göstergesine uzun basınca açılır/kapanır (dokununca kapanır).
+        if (diagOn) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xCC000000))
+                    .ownGestures(onTap = { diagOn = false })
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Text("TEŞHİS", color = c.goldHi, style = MaterialTheme.typography.labelSmall)
+                if (diag.lines.isEmpty()) Text("ölçüm bekleniyor…", color = c.muted, style = MaterialTheme.typography.labelSmall)
+                diag.lines.forEach { Text(it, color = Color.White, style = MaterialTheme.typography.labelSmall) }
             }
         }
 
