@@ -125,18 +125,37 @@ pub fn registered_owner_sid() -> Option<String> {
 
 /// Kayıt var ve DLL yerinde VE sahip SID'i bu kullanıcı (başka kullanıcı etkinleştirdiyse yeniden kayıt gerekir).
 /// `is_installed_for_me` sonucu kısa süre (5 sn) önbelleğe alınır; kayıt/kaldırmada geçersiz kılınır.
-static INSTALL_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+static INSTALL_CACHE: Mutex<Option<(Instant, (bool, bool))>> = Mutex::new(None);
 
 pub fn is_installed_for_me() -> bool {
+    installed_state().0
+}
+
+/// "Kurulu DLL eski" durumu: kayıt bu kullanıcıya ait ama diskteki DLL gömülü karmayla uyuşmuyor (UAC ile yeniden kayıt gerekir).
+pub fn update_needed() -> bool {
+    installed_state().1
+}
+
+fn installed_state() -> (bool, bool) {
     let cached = *INSTALL_CACHE.lock().unwrap();
     if let Some((t, v)) = cached {
         if t.elapsed() < Duration::from_secs(5) {
             return v;
         }
     }
-    let v = is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid();
+    let mine = is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid();
+    let stale = mine && !installed_dll_matches(&install_dir().join(DLL_NAME), EXPECTED_DLL_SHA256);
+    let v = (mine && !stale, stale);
     *INSTALL_CACHE.lock().unwrap() = Some((Instant::now(), v));
     v
+}
+
+/// Diskteki DLL'in karması beklenenle aynı mı? `expected` boşsa (yer tutucu/debug) karşılaştırma yapılmaz.
+fn installed_dll_matches(path: &Path, expected: &str) -> bool {
+    if expected.trim().is_empty() {
+        return true;
+    }
+    std::fs::read(path).is_ok_and(|b| sha256_hex(&b).eq_ignore_ascii_case(expected.trim()))
 }
 
 /// Kayıt değiştiğinde (kayıt/kaldırma) `is_installed_for_me` önbelleğini geçersiz kılar.
@@ -410,6 +429,8 @@ pub struct CameraStatus {
     /// Windows 11 mi (değilse arayüz kilitli kartı gösterir).
     pub supported: bool,
     pub installed: bool,
+    /// Kurulu DLL gömülü sürümden farklı: "güncelleme gerekli" (etkinleştirme UAC ile yeniden kaydeder).
+    pub update_needed: bool,
     /// Sanal kamera şu an Windows'a kayıtlı/çalışıyor.
     pub running: bool,
     pub phone_supports: bool,
@@ -650,5 +671,22 @@ mod helper_tests {
         assert!(read_verified(&f, &good.to_uppercase()).is_ok());
         assert!(read_verified(&f, &sha256_hex(b"evil")).is_err());
         let _ = std::fs::remove_file(&f);
+    }
+}
+
+#[cfg(test)]
+mod dll_match_tests {
+    use super::*;
+
+    #[test]
+    fn installed_dll_hash_compare() {
+        let p = std::env::temp_dir().join(format!("tb_vcam_hash_{}.bin", std::process::id()));
+        std::fs::write(&p, b"abc").unwrap();
+        let h = sha256_hex(b"abc");
+        assert!(installed_dll_matches(&p, &h));
+        assert!(!installed_dll_matches(&p, &sha256_hex(b"abd")));
+        assert!(installed_dll_matches(&p, "")); // yer tutucu: karşılaştırma yok
+        let _ = std::fs::remove_file(&p);
+        assert!(!installed_dll_matches(&p, &h)); // yok -> eşleşmez
     }
 }

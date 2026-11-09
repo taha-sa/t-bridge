@@ -15,6 +15,7 @@
   interface CameraStatus {
     supported: boolean
     installed: boolean
+    updateNeeded: boolean
     running: boolean
     phoneSupports: boolean
     phone: PhoneCam
@@ -112,7 +113,9 @@
           <button class="ghost" disabled={busy} onclick={() => run('camera_uninstall')}>Kamerayı kaldır</button>
         {/if}
       </div>
-      {#if !st?.installed}
+      {#if st?.updateNeeded}
+        <p class="hint small"><Icon name="info" size={14} /> Kamera bileşeni güncellendi; “Kamerayı etkinleştir” yönetici izniyle yeniden kaydeder (kamerayı kullanan uygulamaları kapat).</p>
+      {:else if !st?.installed}
         <p class="hint small"><Icon name="info" size={14} /> Bir kez yönetici izni gerekir (kamera sürücüsüz bir Windows bileşeni olarak kaydedilir).</p>
       {/if}
       {#if error}<p class="err small" role="alert">{error}</p>{/if}
