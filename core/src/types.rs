@@ -227,6 +227,16 @@ pub enum ScreenCmd {
     Pointer { x: f32, y: f32, monitor: u32 },
 }
 
+/// T-Suite uygulama kaydı (genel: uygulamaya özgü alan yok).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct SuiteApp {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub running: bool,
+    pub update_available: Option<String>,
+}
+
 /// PC'den telefona kamera komutları.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
 pub enum CamCmd {
@@ -262,6 +272,14 @@ pub enum Event {
     ScreenInfo { monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String> },
     /// Telefonda: kodlanmış H.264 (Annex-B) video karesi.
     ScreenFrame { pts_us: u64, key: bool, data: Vec<u8> },
+    /// Telefonda: T-Suite uygulama listesi.
+    SuiteApps { apps: Vec<SuiteApp> },
+    /// Telefonda: bir T-Suite uygulamasının olayı.
+    SuiteEvent { app: String, name: String, json: String },
+    /// PC'de: telefon bir T-Suite uygulamasına komut gönderdi.
+    SuiteCmd { req: u64, app: String, name: String, json: String },
+    /// Telefonda: komut yanıtı.
+    SuiteReply { req: u64, ok: bool, json: String, error: Option<String> },
     /// Telefonda: PC kamera komutu gönderdi.
     Cam { cmd: CamCmd },
     /// PC'de: telefon kamera durumu.

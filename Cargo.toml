@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "desktop/src-tauri", "camera/ring", "camera/vcam"]
+members = ["core", "desktop/src-tauri", "camera/ring", "camera/vcam", "tlink"]
 
 [profile.release]
 opt-level = 3

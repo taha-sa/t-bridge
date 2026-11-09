@@ -832,6 +832,10 @@ impl Inner {
             Msg::CamStop => self.emit(Event::Cam { cmd: CamCmd::Stop }),
             Msg::CamKeyframe => self.emit(Event::Cam { cmd: CamCmd::Keyframe }),
             Msg::CamState { active, w, h, fps, facing, mirror, rotation } => self.emit(Event::CamState { active, w, h, fps, facing, mirror, rotation }),
+            Msg::SuiteApps { apps } => self.emit(Event::SuiteApps { apps }),
+            Msg::SuiteEvent { app, name, json } => self.emit(Event::SuiteEvent { app, name, json }),
+            Msg::SuiteCmd { req, app, name, json } => self.emit(Event::SuiteCmd { req, app, name, json }),
+            Msg::SuiteReply { req, ok, json, error } => self.emit(Event::SuiteReply { req, ok, json, error }),
             Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),

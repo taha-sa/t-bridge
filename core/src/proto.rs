@@ -14,10 +14,12 @@ pub const CAP_NOTIF_REPLY: &str = "notif-reply";
 pub const CAP_SCREEN: &str = "screen-share";
 /// Yetenek: telefon kamerası (Cam* mesajları + kamera video akışı). Masaüstü yalnızca Windows 11'de duyurur.
 pub const CAP_CAMERA: &str = "camera";
+/// Yetenek: T-Suite ekosistem köprüsü (SuiteApps/SuiteEvent/SuiteCmd/SuiteReply). Uygulamaya özgü varyant YOK: yeni uygulamalar otomatik görünür.
+pub const CAP_SUITE: &str = "suite";
 
 /// Bu sürümün duyurduğu yetenekler (Hello/Welcome sonuna eklenir; eski eş sondaki baytları yok sayar).
 pub fn local_caps() -> Vec<String> {
-    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string()];
+    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string(), CAP_SUITE.to_string()];
     if crate::camera::camera_cap() {
         v.push(CAP_CAMERA.to_string());
     }
@@ -127,6 +129,15 @@ pub enum Msg {
     CamKeyframe,
     /// Telefon -> PC: kamera durumu. facing: 0 arka, 1 ön.
     CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool, rotation: u16 },
+    // ---- yalnızca `suite` yeteneğini duyuran eşlere gönderilir ----
+    /// PC -> telefon: T-Suite uygulama listesi (tam görüntü).
+    SuiteApps { apps: Vec<SuiteApp> },
+    /// PC -> telefon: bir uygulamanın olayı (json = T-Link olay verisi).
+    SuiteEvent { app: String, name: String, json: String },
+    /// Telefon -> PC: bir uygulamaya komut (req = telefonun verdiği kimlik).
+    SuiteCmd { req: u64, app: String, name: String, json: String },
+    /// PC -> telefon: komut yanıtı.
+    SuiteReply { req: u64, ok: bool, json: String, error: Option<String> },
     /// Çözülemeyen/bilinmeyen çerçeve (daha yeni eşten). Asla gönderilmez; yalnızca okuyucuda üretilir.
     Unknown,
 }
@@ -265,5 +276,20 @@ mod tests {
         // Eski bir okuyucunun Msg'si NotifReply'ı tanımaz; ama yeni okuyucu bilinmeyen dizinde Unknown üretir.
         let b = postcard::to_stdvec(&Msg::NotifReply { key: "k".into(), text: "t".into() }).unwrap();
         assert!(matches!(decode_msg(&b), Msg::NotifReply { .. }));
+    }
+
+    #[test]
+    fn suite_messages_roundtrip() {
+        let apps = vec![SuiteApp { id: "t-ramcash".into(), name: "T-RamCash".into(), version: "1.1.0".into(), running: true, update_available: Some("1.2.0".into()) }];
+        for m in [
+            Msg::SuiteApps { apps },
+            Msg::SuiteEvent { app: "t-downloader".into(), name: "download.progress".into(), json: "{\"pct\":42}".into() },
+            Msg::SuiteCmd { req: 7, app: "t-downloader".into(), name: "download.add".into(), json: "{\"url\":\"https://x\"}".into() },
+            Msg::SuiteReply { req: 7, ok: false, json: String::new(), error: Some("kapalı".into()) },
+        ] {
+            let b = postcard::to_stdvec(&m).unwrap();
+            assert_eq!(decode_msg(&b), m);
+        }
+        assert!(local_caps().iter().any(|c| c == CAP_SUITE));
     }
 }

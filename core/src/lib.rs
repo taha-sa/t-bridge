@@ -204,6 +204,31 @@ impl Node {
         self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifReplyResult { key, ok, error })
     }
 
+    /// Eş `suite` yeteneğini duyurdu mu.
+    pub fn peer_supports_suite(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_SUITE))
+    }
+
+    /// PC -> telefon: uygulama listesi.
+    pub fn send_suite_apps(&self, apps: Vec<SuiteApp>) -> bool {
+        self.peer_supports_suite() && self.inner.send_msg(Msg::SuiteApps { apps })
+    }
+
+    /// PC -> telefon: uygulama olayı.
+    pub fn send_suite_event(&self, app: String, name: String, json: String) -> bool {
+        self.peer_supports_suite() && self.inner.send_msg(Msg::SuiteEvent { app, name, json })
+    }
+
+    /// Telefon -> PC: uygulamaya komut.
+    pub fn send_suite_cmd(&self, req: u64, app: String, name: String, json: String) -> bool {
+        self.peer_supports_suite() && self.inner.send_msg(Msg::SuiteCmd { req, app, name, json })
+    }
+
+    /// PC -> telefon: komut yanıtı.
+    pub fn send_suite_reply(&self, req: u64, ok: bool, json: String, error: Option<String>) -> bool {
+        self.peer_supports_suite() && self.inner.send_msg(Msg::SuiteReply { req, ok, json, error })
+    }
+
     /// Eş `camera` yeteneğini duyurdu mu (masaüstü: yalnızca Windows 11).
     pub fn peer_supports_camera(&self) -> bool {
         self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_CAMERA))
