@@ -170,6 +170,21 @@ fn pairing_clipboard_and_commands() {
 }
 
 #[test]
+fn notification_reply_roundtrip_with_capability_gate() {
+    let p = paired();
+    let phone = p.phone.as_ref().unwrap();
+    // Kapasite el sıkışması: iki taraf da yeni sürüm -> yeni mesajlar akar.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(phone.peer_supports_notif_reply());
+    assert!(phone.send_notification_ext("k9".into(), true, vec!["Tamam".into()]));
+    p.pch.wait("ext", 5, |e| matches!(e, Event::NotificationExt { key, can_reply: true, choices } if key == "k9" && choices.len() == 1).then_some(()));
+    assert!(p.pc.send_notification_reply("k9".into(), "Geliyorum".into()));
+    p.phh.wait("yanıt", 5, |e| matches!(e, Event::NotificationReply { key, text } if key == "k9" && text == "Geliyorum").then_some(()));
+    assert!(phone.send_notification_reply_result("k9".into(), false, Some("Bildirim artık geçerli değil".into())));
+    p.pch.wait("sonuç", 5, |e| matches!(e, Event::NotificationReplyResult { ok: false, error: Some(_), .. }).then_some(()));
+}
+
+#[test]
 fn wrong_code_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let pch = Arc::new(TestHost::default());

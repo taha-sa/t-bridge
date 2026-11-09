@@ -215,6 +215,12 @@ pub enum Event {
     TransferRemoved { id: u64, direction: Direction },
     Notification { data: NotificationData },
     NotificationRemoved { key: String },
+    /// Telefon: bildirim yanıtlanabilir mi (+ hazır yanıtlar).
+    NotificationExt { key: String, can_reply: bool, choices: Vec<String> },
+    /// Telefonda: PC bir bildirime yanıt yazdı.
+    NotificationReply { key: String, text: String },
+    /// PC'de: yanıtın telefondaki sonucu.
+    NotificationReplyResult { key: String, ok: bool, error: Option<String> },
     AppIcon { package: String, png: Vec<u8> },
     Battery { level: u8, charging: bool },
     NowPlaying { info: Option<NowPlaying> },

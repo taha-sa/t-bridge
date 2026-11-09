@@ -61,9 +61,15 @@ pub(crate) struct Session {
     pub peer: PeerInfo,
     pub conn: Connection,
     tx: mpsc::UnboundedSender<Msg>,
+    /// Eşin duyurduğu yetenekler (eski eş: boş).
+    pub caps: Vec<String>,
 }
 
 impl Session {
+    pub fn has_cap(&self, cap: &str) -> bool {
+        self.caps.iter().any(|c| c == cap)
+    }
+
     fn send(&self, m: Msg) {
         let _ = self.tx.send(m);
     }
@@ -374,7 +380,7 @@ impl Inner {
         let fp = tls::peer_fingerprint(&conn).ok_or_else(|| anyhow!("istemci sertifikası yok"))?;
         let (mut send, mut recv) = timeout(Duration::from_secs(10), conn.accept_bi()).await.context("hello zaman aşımı")??;
         let hello = timeout(Duration::from_secs(10), proto::read_msg(&mut recv)).await??;
-        let Some(Msg::Hello { version, id, name, platform, pair_code }) = hello else {
+        let Some(Msg::Hello { version, id, name, platform, pair_code, caps: peer_caps }) = hello else {
             bail!("beklenmeyen ilk mesaj");
         };
         let reject = |reason: &str| -> Result<Vec<u8>> { proto::encode(&Msg::Reject { reason: reason.into() }) };
@@ -411,12 +417,13 @@ impl Inner {
             id: self.ident.id.clone(),
             name: self.cfg.device_name.clone(),
             platform: self.cfg.platform,
+            caps: proto::local_caps(),
         })?)
         .await?;
         if paired_now {
             self.emit(Event::Paired { peer: peer.clone() });
         }
-        self.start_session(peer, conn, send, recv);
+        self.start_session(peer, conn, send, recv, peer_caps);
         Ok(())
     }
 
@@ -545,10 +552,10 @@ impl Inner {
             if let Some((srv, code)) = pending {
                 self.set_state(ConnState::Connecting);
                 match self.connect(&ep, &srv.addrs, &srv.fingerprint, Some(code)).await {
-                    Ok((peer, conn, send, recv)) => {
+                    Ok((peer, conn, send, recv, caps)) => {
                         self.upsert_peer(peer.clone());
                         self.emit(Event::Paired { peer: peer.clone() });
-                        self.run_client_session(peer, conn, send, recv).await;
+                        self.run_client_session(peer, conn, send, recv, caps).await;
                         backoff = SILENT_FIRST;
                         continue;
                     }
@@ -579,9 +586,9 @@ impl Inner {
                     continue;
                 }
                 match self.connect(&ep, &addrs, &p.fingerprint, None).await {
-                    Ok((peer, conn, send, recv)) => {
+                    Ok((peer, conn, send, recv, caps)) => {
                         self.upsert_peer(peer.clone());
-                        self.run_client_session(peer, conn, send, recv).await;
+                        self.run_client_session(peer, conn, send, recv, caps).await;
                         connected = true;
                         break;
                     }
@@ -606,9 +613,9 @@ impl Inner {
         }
     }
 
-    async fn run_client_session(self: &Arc<Self>, peer: PeerInfo, conn: Connection, send: SendStream, recv: RecvStream) {
+    async fn run_client_session(self: &Arc<Self>, peer: PeerInfo, conn: Connection, send: SendStream, recv: RecvStream, caps: Vec<String>) {
         self.stop_scan();
-        let s = self.start_session(peer, conn, send, recv);
+        let s = self.start_session(peer, conn, send, recv, caps);
         s.conn.closed().await;
         // Kısa bekleme: temizlik görevinin durumu güncellemesi için.
         sleep(Duration::from_millis(100)).await;
@@ -621,7 +628,7 @@ impl Inner {
         addrs: &[String],
         server_fp: &str,
         pair_code: Option<String>,
-    ) -> Result<(PeerInfo, Connection, SendStream, RecvStream)> {
+    ) -> Result<(PeerInfo, Connection, SendStream, RecvStream, Vec<String>)> {
         let cc = tls::client_config(&self.ident, server_fp)?;
         let hello = proto::encode(&Msg::Hello {
             version: PROTO_VERSION,
@@ -629,6 +636,7 @@ impl Inner {
             name: self.cfg.device_name.clone(),
             platform: self.cfg.platform,
             pair_code,
+            caps: proto::local_caps(),
         })?;
         let mut set = JoinSet::new();
         let mut seen: Vec<SocketAddr> = Vec::new();
@@ -648,7 +656,7 @@ impl Inner {
         let mut last_err = anyhow!("adres yok");
         while let Some(joined) = set.join_next().await {
             match joined {
-                Ok(Ok((a, Ok((conn, send, recv, id, name, platform))))) => {
+                Ok(Ok((a, Ok((conn, send, recv, id, name, platform, caps))))) => {
                     set.abort_all();
                     let mut addrs = vec![a];
                     if let Some(old) = lk(&self.peers).iter().find(|p| p.fingerprint == server_fp) {
@@ -659,7 +667,7 @@ impl Inner {
                         }
                     }
                     let peer = PeerInfo { id, name, platform, fingerprint: server_fp.to_string(), addrs };
-                    return Ok((peer, conn, send, recv));
+                    return Ok((peer, conn, send, recv, caps));
                 }
                 Ok(Ok((_, Err(reason)))) => {
                     set.abort_all();
@@ -674,9 +682,9 @@ impl Inner {
 
     // ---------- Oturum ----------
 
-    fn start_session(self: &Arc<Self>, peer: PeerInfo, conn: Connection, mut send: SendStream, mut recv: RecvStream) -> Arc<Session> {
+    fn start_session(self: &Arc<Self>, peer: PeerInfo, conn: Connection, mut send: SendStream, mut recv: RecvStream, caps: Vec<String>) -> Arc<Session> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
-        let s = Arc::new(Session { peer, conn: conn.clone(), tx });
+        let s = Arc::new(Session { peer, conn: conn.clone(), tx, caps });
         if let Some(old) = lk(&self.session).replace(s.clone()) {
             old.conn.close(0u32.into(), b"replaced");
         }
@@ -793,6 +801,10 @@ impl Inner {
             Msg::Battery { level, charging } => self.emit(Event::Battery { level, charging }),
             Msg::Notif(data) => self.emit(Event::Notification { data }),
             Msg::NotifRemoved { key } => self.emit(Event::NotificationRemoved { key }),
+            Msg::NotifExt { key, can_reply, choices } => self.emit(Event::NotificationExt { key, can_reply, choices }),
+            Msg::NotifReply { key, text } => self.emit(Event::NotificationReply { key, text }),
+            Msg::NotifReplyResult { key, ok, error } => self.emit(Event::NotificationReplyResult { key, ok, error }),
+            Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
             Msg::Pc(cmd) => self.emit(Event::Pc { cmd }),
@@ -1526,13 +1538,13 @@ async fn dial(
     cc: quinn::ClientConfig,
     addr: SocketAddr,
     hello: Vec<u8>,
-) -> Result<std::result::Result<(Connection, SendStream, RecvStream, String, String, Platform), String>> {
+) -> Result<std::result::Result<(Connection, SendStream, RecvStream, String, String, Platform, Vec<String>), String>> {
     let attempt = async {
         let conn = ep.connect_with(cc, addr, "kopru")?.await?;
         let (mut send, mut recv) = conn.open_bi().await?;
         send.write_all(&hello).await?;
         match proto::read_msg(&mut recv).await? {
-            Some(Msg::Welcome { id, name, platform }) => Ok::<_, anyhow::Error>(Ok((conn, send, recv, id, name, platform))),
+            Some(Msg::Welcome { id, name, platform, caps }) => Ok::<_, anyhow::Error>(Ok((conn, send, recv, id, name, platform, caps))),
             Some(Msg::Reject { reason }) => Ok(Err(reason)),
             other => bail!("beklenmeyen yanıt: {other:?}"),
         }

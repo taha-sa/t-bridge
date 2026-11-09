@@ -176,6 +176,26 @@ impl Node {
         self.inner.send_msg(Msg::Notif(data))
     }
 
+    /// Eşin `notif-reply` yeteneği var mı (eski sürüm eş: false).
+    pub fn peer_supports_notif_reply(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_NOTIF_REPLY))
+    }
+
+    /// Telefon -> PC: bildirimin yanıtlanabilirliği. Eş yeteneği duyurmadıysa gönderilmez (false).
+    pub fn send_notification_ext(&self, key: String, can_reply: bool, choices: Vec<String>) -> bool {
+        self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifExt { key, can_reply, choices })
+    }
+
+    /// PC -> telefon: yanıt. Eş yeteneği duyurmadıysa gönderilmez (false).
+    pub fn send_notification_reply(&self, key: String, text: String) -> bool {
+        self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifReply { key, text })
+    }
+
+    /// Telefon -> PC: yanıt sonucu.
+    pub fn send_notification_reply_result(&self, key: String, ok: bool, error: Option<String>) -> bool {
+        self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifReplyResult { key, ok, error })
+    }
+
     pub fn remove_notification(&self, key: String) -> bool {
         self.inner.send_msg(Msg::NotifRemoved { key })
     }
