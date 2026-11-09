@@ -16,6 +16,31 @@ pub struct ScreenState {
     pub asking: bool,
     pub sharing: bool,
     pub monitor: u32,
+    /// Başlatma oturum sayacı (bayat durum bildirimlerini ayıklar).
+    pub session: u64,
+    /// Hızlı hata bildiren son oturum (pipeline kaydedilmeden önce gelmiş olabilir).
+    pub failed: u64,
+    /// Onay penceresi dönemi: Stop/kopma artırır; bayat onay yok sayılır.
+    pub ask_epoch: u64,
+}
+
+impl ScreenState {
+    pub fn begin_session(&mut self) -> u64 {
+        self.session += 1;
+        self.session
+    }
+    /// Başlatma hatası: true ise çağıran `stop` yapmalı (pipeline zaten kayıtlı).
+    pub fn report_failure(&mut self, id: u64) -> bool {
+        if self.session != id {
+            return false;
+        }
+        self.failed = id;
+        self.pipeline.is_some()
+    }
+    /// Pipeline kaydedilebilir mi (hata gelmedi ve oturum bayatlamadı)?
+    pub fn can_commit(&self, id: u64) -> bool {
+        self.session == id && self.failed != id
+    }
 }
 
 fn shared(app: &AppHandle) -> Arc<Shared> {
@@ -44,6 +69,7 @@ pub fn on_connected(app: &AppHandle) {
 }
 
 pub fn on_disconnected(app: &AppHandle) {
+    lk(&shared(app).screen).ask_epoch += 1;
     stop(app, "bağlantı koptu");
 }
 
@@ -68,15 +94,17 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
                 start_pipeline(app, p);
                 return;
             }
-            {
+            let epoch = {
                 let mut st = lk(&sh.screen);
                 if st.asking {
                     return;
                 }
                 st.asking = true;
-            }
+                st.ask_epoch
+            };
             // İlk kez: PC kullanıcısına sor.
             let (app2, peer_id) = (app.clone(), peer.id.clone());
+            let peer_id_chk = peer.id.clone();
             app.dialog()
                 .message(format!("{} ekranı görmek istiyor.\n\nİzin verirsen telefon bu bilgisayarın ekranını görür ve fareyle klavyeyi kullanabilir.", peer.name))
                 .title("T-Bridge · Ekran paylaşımı")
@@ -97,14 +125,22 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
                         drop(s);
                         sh.save_settings();
                     }
-                    if ok {
+                    // Onay beklenirken Stop/kopma oldu ya da başka cihaz bağlandı: bayat, başlatma.
+                    let stale = lk(&sh.screen).ask_epoch != epoch
+                        || sh.node().and_then(|n| n.current_peer()).map(|c| c.id) != Some(peer_id_chk);
+                    if ok && stale {
+                        log::info!("ekran paylaşımı onayı bayat, yok sayıldı");
+                    } else if ok {
                         start_pipeline(&app2, p);
                     } else if let Some(n) = sh.node() {
                         send_info(&sh, n, false, Some("Bilgisayar kullanıcısı reddetti".into()));
                     }
                 });
         }
-        ScreenCmd::Stop => stop(app, "telefon durdurdu"),
+        ScreenCmd::Stop => {
+            lk(&sh.screen).ask_epoch += 1;
+            stop(app, "telefon durdurdu")
+        }
         ScreenCmd::Keyframe => {
             if let Some(p) = lk(&sh.screen).pipeline.as_ref() {
                 p.request_key();
@@ -140,7 +176,11 @@ fn start_pipeline(app: &AppHandle, p: Params) {
         o.stop();
     }
     node.end_screen_stream();
-    lk(&sh.screen).monitor = p.monitor;
+    let sid = {
+        let mut st = lk(&sh.screen);
+        st.monitor = p.monitor;
+        st.begin_session()
+    };
 
     let (n1, n2, n3) = (node.clone(), node.clone(), node.clone());
     let app3 = app.clone();
@@ -160,17 +200,31 @@ fn start_pipeline(app: &AppHandle, p: Params) {
                 Err(e) => {
                     log::warn!("ekran paylaşımı başlatılamadı: {e}");
                     send_info(&sh, &n3, false, Some(format!("Ekran yakalanamadı: {e}")));
-                    let app4 = app3.clone();
-                    std::thread::spawn(move || stop(&app4, "hata"));
+                    // Pipeline henüz kaydedilmediyse start_pipeline `failed` işaretini görüp kaydetmez.
+                    if lk(&sh.screen).report_failure(sid) {
+                        let app4 = app3.clone();
+                        std::thread::spawn(move || stop(&app4, "hata"));
+                    }
                 }
             }
         }),
     };
     let pipeline = Pipeline::start(p, sink);
-    {
+    let rejected = {
         let mut st = lk(&sh.screen);
-        st.pipeline = Some(pipeline);
-        st.sharing = true;
+        if st.can_commit(sid) {
+            st.pipeline = Some(pipeline);
+            st.sharing = true;
+            None
+        } else {
+            Some(pipeline)
+        }
+    };
+    if let Some(mut dead) = rejected {
+        // Hızlı hata veya yarışta bayatlama: durumu temiz bırak.
+        dead.stop();
+        node.end_screen_stream();
+        return;
     }
     set_indicator(app, true);
 }
@@ -236,4 +290,27 @@ fn set_indicator(app: &AppHandle, on: bool) {
             let _ = w.close();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScreenState;
+
+    #[test]
+    fn fast_failure_before_commit_is_not_committed() {
+        let mut st = ScreenState::default();
+        let id = st.begin_session();
+        assert!(!st.report_failure(id)); // pipeline yok -> stop thread gerekmez
+        assert!(!st.can_commit(id)); // kaydedilmez, sharing=true olmaz
+    }
+
+    #[test]
+    fn stale_session_failure_ignored() {
+        let mut st = ScreenState::default();
+        let old = st.begin_session();
+        let new = st.begin_session();
+        assert!(!st.report_failure(old));
+        assert!(st.can_commit(new));
+        assert!(!st.can_commit(old));
+    }
 }
