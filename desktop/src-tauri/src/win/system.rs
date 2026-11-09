@@ -128,8 +128,12 @@ fn pdf_fullscreen_key(ext: &str) -> Option<&'static str> {
 /// Sunum aç: PowerPoint kuruluysa "/S" ile doğrudan slayt gösterisi; değilse varsayılan uygulama. PDF'te varsayılan işleyici açılır,
 /// birkaç sn sonra bilinen işleyiciye göre tam ekran kısayolu gönderilir (en iyi çaba; Windows odağı başka pencereye verirse kaçabilir).
 pub fn present_file(path: &str) {
+    // Savunma: izin listesi dışındaki uzantı asla ShellExecute'a gitmez.
+    if !crate::suite::is_presentable_name(path) {
+        return;
+    }
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if matches!(ext.as_str(), "pptx" | "ppt" | "pptm" | "ppsx" | "pps") {
+    if matches!(ext.as_str(), "pptx" | "ppt" | "ppsx" | "pps") {
         if let Some(exe) = powerpoint_exe() {
             if Command::new(exe).arg("/S").arg(path).spawn().is_ok() {
                 return;

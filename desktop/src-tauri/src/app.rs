@@ -307,7 +307,7 @@ impl Shared {
                 if info.direction == Direction::Incoming
                     && info.state == TransferState::Done
                     && {
-                        crate::suite::on_incoming_done(&info.name, info.detail.as_deref());
+                        crate::suite::on_incoming_done(&info.name, info.detail.as_deref(), &crate::download_dir(&self.app, &lk(&self.settings)));
                         true
                     }
                     && lk(&self.settings).transfer_toast

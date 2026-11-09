@@ -247,6 +247,9 @@ impl Hub {
             "file.present" => {
                 // Telefon, sunum dosyasını göndermeden önce adı bildirir; dosya bitince PC tam ekran açar (on_incoming_done).
                 let name = data.as_ref().and_then(|d| d.get("name")).and_then(Value::as_str).ok_or("name gerekli")?;
+                if !is_presentable_name(name) {
+                    return Err("not_allowed".into());
+                }
                 PENDING_PRESENT.lock().unwrap().add(name, Instant::now());
                 Ok(json!({}))
             }
@@ -428,16 +431,82 @@ impl PendingNames {
 
 static PENDING_PRESENT: Mutex<PendingNames> = Mutex::new(PendingNames { items: Vec::new() });
 
+/// Telefondan açılabilecek (sunum/belge) uzantılar. Yürütülebilir/betik/kısayol türleri asla burada olmaz.
+pub const PRESENT_EXTS: &[&str] = &["pdf", "ppt", "pptx", "pps", "ppsx", "odp"];
+
+/// Ad (dizin kısmı yok sayılır) izin listesindeki bir uzantıyla bitiyor mu?
+pub fn is_presentable_name(name: &str) -> bool {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    // Alternatif veri akışı ("a.pdf:evil.exe") ve boş ad reddedilir.
+    if base.is_empty() || base.contains(':') {
+        return false;
+    }
+    match std::path::Path::new(base).extension().and_then(|e| e.to_str()) {
+        Some(e) => PRESENT_EXTS.contains(&e.to_lowercase().as_str()),
+        None => false,
+    }
+}
+
+/// Açılacak yolu doğrular: uzantı izin listesinde, dosya gerçek (symlink/reparse değil) ve kanonik yolu `recv_dir` içinde olmalı.
+/// Başarıda kanonik yolu döndürür.
+pub fn validate_present_path(path: &str, recv_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if !is_presentable_name(path) {
+        return Err("uzantı izinli değil".into());
+    }
+    let p = std::path::Path::new(path);
+    let meta = std::fs::symlink_metadata(p).map_err(|e| e.to_string())?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("dosya normal değil".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("reparse noktası reddedildi".into());
+        }
+    }
+    let canon = std::fs::canonicalize(p).map_err(|e| e.to_string())?;
+    let dir = std::fs::canonicalize(recv_dir).map_err(|e| e.to_string())?;
+    if !canon.starts_with(&dir) || canon == dir {
+        return Err("dosya alınan dosyalar klasörü dışında".into());
+    }
+    Ok(canon)
+}
+
 /// Telefondan bir dosya tamamlandı: sunum için beklenen dosyaysa PC'de tam ekran aç.
-pub fn on_incoming_done(name: &str, path: Option<&str>) {
+pub fn on_incoming_done(name: &str, path: Option<&str>, recv_dir: &std::path::Path) {
     let Some(path) = path else { return };
     if !PENDING_PRESENT.lock().unwrap().take(name, Instant::now()) {
         return;
     }
-    let path = path.to_string();
+    let Ok(safe) = validate_present_path(path, recv_dir) else { return };
+    let path = safe.to_string_lossy().into_owned();
     std::thread::spawn(move || {
         crate::win::system::present_file(&path);
     });
+}
+
+/// Telefon kaynaklı komut izin listesi. `file.send` (ve listede olmayan her şey) telefondan çağrılamaz.
+pub fn phone_cmd_allowed(app_id: &str, name: &str) -> bool {
+    if matches!(name, "file.present" | "suite.update" | "suite.check") {
+        return app_id == "t-bridge";
+    }
+    matches!(
+        name,
+        "download.add"
+            | "download.pause"
+            | "download.resume"
+            | "download.list"
+            | "ram.clean"
+            | "ram.status"
+            | "disk.status"
+            | "scan.start"
+            | "app.show"
+            | "app.launch"
+            | "app.update.check"
+            | "app.update.install"
+    )
 }
 
 /// Telefondan SuiteCmd geldi.
@@ -446,7 +515,7 @@ pub fn on_phone_cmd(app: &AppHandle, req: u64, app_id: String, name: String, jso
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let data: Option<Value> = serde_json::from_str(&json_str).ok().filter(|v: &Value| !v.is_null());
-        let r = h.app_cmd(&app_id, &name, data).await;
+        let r = if phone_cmd_allowed(&app_id, &name) { h.app_cmd(&app_id, &name, data).await } else { Err("not_allowed".to_string()) };
         if let Some(n) = shared(&app).node() {
             match r {
                 Ok(v) => n.send_suite_reply(req, true, v.to_string(), None),
@@ -459,6 +528,49 @@ pub fn on_phone_cmd(app: &AppHandle, req: u64, app_id: String, name: String, jso
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn present_allowlist_extensions() {
+        for ok in ["a.pdf", "X.PPTX", "d/e.ppt", "c\\s.ppsx", "m.pps", "o.odp"] {
+            assert!(is_presentable_name(ok), "{ok}");
+        }
+        for bad in ["a.exe", "a.bat", "a.lnk", "a.js", "a.msi", "a", "a.pdf.exe", "a.pdf:evil.exe", "a.pptm", ""] {
+            assert!(!is_presentable_name(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn present_path_must_be_inside_recv_dir() {
+        let base = std::env::temp_dir().join(format!("kopru_pres_{}", std::process::id()));
+        let recv = base.join("recv");
+        std::fs::create_dir_all(&recv).unwrap();
+        let ok = recv.join("s.pdf");
+        std::fs::write(&ok, b"x").unwrap();
+        let outside = base.join("o.pdf");
+        std::fs::write(&outside, b"x").unwrap();
+        let exe = recv.join("x.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        assert!(validate_present_path(ok.to_str().unwrap(), &recv).is_ok());
+        assert!(validate_present_path(outside.to_str().unwrap(), &recv).is_err());
+        assert!(validate_present_path(exe.to_str().unwrap(), &recv).is_err());
+        // ".." ile kaçış
+        let esc = recv.join("..").join("o.pdf");
+        assert!(validate_present_path(esc.to_str().unwrap(), &recv).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn phone_allowlist() {
+        assert!(phone_cmd_allowed("t-downloader", "download.add"));
+        assert!(phone_cmd_allowed("t-ramcash", "ram.clean"));
+        assert!(phone_cmd_allowed("t-bridge", "file.present"));
+        assert!(phone_cmd_allowed("t-bridge", "suite.update"));
+        assert!(!phone_cmd_allowed("t-bridge", "file.send"));
+        assert!(!phone_cmd_allowed("t-downloader", "file.send"));
+        assert!(!phone_cmd_allowed("t-ramcash", "file.present"));
+        assert!(!phone_cmd_allowed("t-bridge", "phone.status"));
+        assert!(!phone_cmd_allowed("t-x", "anything"));
+    }
 
     #[test]
     fn pending_present_matches_once_by_basename() {
