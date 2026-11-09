@@ -135,8 +135,10 @@ object Core : Host {
             }
             is Event.Phone -> main.post { handlePhone(event.cmd) }
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.
-            is Event.Notification, is Event.NotificationRemoved, is Event.AppIcon, is Event.Battery,
-            is Event.NowPlaying, is Event.PointerMove, is Event.Pc -> Unit
+            // PC bir bildirime yanıt yazdı: kaynak uygulamanın RemoteInput'una ilet (ana iş parçacığı dışında).
+            is Event.NotificationReply -> Thread { NotifListener.reply(ctx, event.key, event.text) }.start()
+            is Event.Notification, is Event.NotificationRemoved, is Event.NotificationExt, is Event.NotificationReplyResult,
+            is Event.AppIcon, is Event.Battery, is Event.NowPlaying, is Event.PointerMove, is Event.Pc -> Unit
         }
     }
 

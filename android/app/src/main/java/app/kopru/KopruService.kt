@@ -62,9 +62,14 @@ class KopruService : Service() {
             ctx.startForegroundService(i)
         }
 
+        /** mDNS tarama penceresi için MulticastLock tut/bırak (Core.rescan / Scanning(false) olayı). */
+        fun holdMulticast(on: Boolean) {
+            instance?.updateMulticast(on)
+        }
+
         fun onConnState(state: ConnState) {
             instance?.apply {
-                updateMulticast(state != ConnState.CONNECTED)
+                if (state == ConnState.CONNECTED) updateMulticast(false)   // bağlıyken mDNS kilidi gerekmez
                 updateNotification()
                 if (state == ConnState.CONNECTED) {
                     lastBattery = null

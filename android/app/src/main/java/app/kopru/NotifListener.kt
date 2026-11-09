@@ -1,7 +1,12 @@
 package app.kopru
 
 import android.app.Notification
+import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.Bundle
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.service.notification.NotificationListenerService
@@ -19,6 +24,59 @@ class NotifListener : NotificationListenerService() {
         private val lastSent = HashMap<String, Int>()
 
         val connected get() = instance != null
+
+        /** PC'den yanıtlanabilen bildirimin gerekli parçaları. */
+        private class ReplyHandle(val pi: PendingIntent, val inputs: Array<RemoteInput>, val resultKey: String)
+
+        /** key → yanıt eylemi. Üst sınır ~100 (en eski düşer); bildirim kaldırılınca silinir. */
+        private val replies = object : LinkedHashMap<String, ReplyHandle>(128, 0.75f, false) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReplyHandle>?) = size > 100
+        }
+
+        private const val NOT_VALID = "Bildirim artık geçerli değil"
+
+        /** SEMANTIC_ACTION_REPLY tercih edilir; yoksa serbest metin girişi olan ilk RemoteInput'lu eylem. */
+        private fun findReply(n: Notification): Pair<Notification.Action, RemoteInput>? {
+            val actions = n.actions ?: return null
+            fun freeForm(a: Notification.Action) = a.remoteInputs?.firstOrNull { it.allowFreeFormInput }
+            if (Build.VERSION.SDK_INT >= 28) {
+                for (a in actions) {
+                    if (a.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY && a.actionIntent != null) {
+                        val ri = freeForm(a) ?: a.remoteInputs?.firstOrNull()
+                        if (ri != null) return a to ri
+                    }
+                }
+            }
+            for (a in actions) {
+                if (a.actionIntent == null) continue
+                val ri = freeForm(a) ?: continue
+                return a to ri
+            }
+            return null
+        }
+
+        /** PC'den gelen yanıtı kaynak uygulamanın RemoteInput'una doldurup PendingIntent'i gönderir. */
+        fun reply(ctx: Context, key: String, text: String) {
+            val node = Core.node ?: return
+            fun result(ok: Boolean, err: String?) {
+                node.sendNotificationReplyResult(key, ok, err)
+            }
+            val h = synchronized(replies) { replies[key] }
+            if (h == null) { result(false, NOT_VALID); return }
+            try {
+                val intent = Intent().addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
+                val bundle = Bundle().apply { putCharSequence(h.resultKey, text) }
+                RemoteInput.addResultsToIntent(h.inputs, intent, bundle)
+                if (Build.VERSION.SDK_INT >= 28) RemoteInput.setResultsSource(intent, RemoteInput.SOURCE_FREE_FORM_INPUT)
+                h.pi.send(ctx, 0, intent)
+                result(true, null)
+            } catch (e: PendingIntent.CanceledException) {
+                synchronized(replies) { replies.remove(key) }
+                result(false, NOT_VALID)
+            } catch (e: Exception) {
+                result(false, e.message ?: "Yanıt gönderilemedi")
+            }
+        }
 
         fun dismiss(key: String) {
             instance?.runCatching { cancelNotification(key) }
@@ -54,6 +112,7 @@ class NotifListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         synchronized(lastSent) { lastSent.remove(sbn.key) }
+        synchronized(replies) { replies.remove(sbn.key) }
         Core.node?.removeNotification(sbn.key)
     }
 
@@ -68,7 +127,16 @@ class NotifListener : NotificationListenerService() {
         val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = (ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
         if (title.isBlank() && text.isBlank()) return
-        val sig = (title + "\u0000" + text).hashCode()
+        // Yanıt eylemi her güncellemede tazelenir (PendingIntent yenilenmiş olabilir).
+        val reply = findReply(n)
+        synchronized(replies) {
+            if (reply != null) {
+                replies[sbn.key] = ReplyHandle(reply.first.actionIntent, arrayOf(reply.second), reply.second.resultKey)
+            } else {
+                replies.remove(sbn.key)
+            }
+        }
+        val sig = (title + "\u0000" + text + "\u0000" + (reply != null)).hashCode()
         synchronized(lastSent) {
             if (lastSent[sbn.key] == sig) return
             lastSent[sbn.key] = sig
@@ -87,6 +155,11 @@ class NotifListener : NotificationListenerService() {
                 time = sbn.postTime,
             ),
         )
+        // Yeni sürüm PC'ye yanıtlanabilirliği bildir (eski PC bu yeteneği duyurmaz: çekirdek göndermez).
+        if (reply != null) {
+            val choices = reply.second.choices?.map { it.toString() }?.filter { it.isNotBlank() }?.take(3).orEmpty()
+            node.sendNotificationExt(sbn.key, true, choices)
+        }
     }
 
     private fun iconPng(pkg: String): ByteArray? = runCatching {
