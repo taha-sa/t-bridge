@@ -102,7 +102,44 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Faz 4c: Windows 11 kapısı + kamera merkezi. `camera` yeteneği YALNIZCA kapı açıksa duyurulur.
+struct DesktopPhoneLink(Arc<Shared>);
+impl win::camera::PhoneLink for DesktopPhoneLink {
+    fn request_keyframe(&self) {
+        if let Some(n) = self.0.node() {
+            n.send_cam_keyframe();
+        }
+    }
+    fn request_format(&self, w: u32, h: u32) {
+        if let Some(n) = self.0.node() {
+            let kbps = if h >= 1000 { 6000 } else { 3000 };
+            n.send_cam_start(w, h, 30, kbps);
+        }
+    }
+}
+
+fn init_camera(shared: &Arc<Shared>) {
+    let allowed = win::camera::camera_allowed_now();
+    kopru_core::camera::set_camera_cap(allowed);
+    if !allowed {
+        return;
+    }
+    let hub = win::camera::Hub::start(Arc::new(DesktopPhoneLink(shared.clone())));
+    let _ = shared.camera.set(hub);
+    if lk(&shared.settings).camera_enabled && win::camera::is_installed() {
+        let sh = shared.clone();
+        std::thread::spawn(move || {
+            if let Some(h) = sh.camera.get() {
+                if let Err(e) = h.enable() {
+                    log::warn!("sanal kamera başlatılamadı: {e}");
+                }
+            }
+        });
+    }
+}
+
 fn start_node(shared: &Arc<Shared>, data_dir: PathBuf) {
+    init_camera(shared);
     let dl = download_dir(&shared.app, &lk(&shared.settings));
     let _ = std::fs::create_dir_all(&dl);
     let cfg = NodeConfig {
@@ -136,6 +173,10 @@ fn start_node(shared: &Arc<Shared>, data_dir: PathBuf) {
 }
 
 pub fn run() {
+    // Yükseltilmiş yardımcı modları (UAC ile yeniden başlatılan kamera kayıt/silme adımı): arayüz açmadan çık.
+    if let Some(code) = win::camera::maybe_run_helper() {
+        std::process::exit(code);
+    }
     let hidden = std::env::args().any(|a| a == "--hidden");
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
@@ -156,6 +197,10 @@ pub fn run() {
             commands::open_downloads,
             commands::dismiss_notification,
             commands::stop_screen_share,
+            commands::camera_status,
+            commands::camera_enable,
+            commands::camera_disable,
+            commands::camera_uninstall,
             commands::reply_notification,
             commands::clear_notifications,
             commands::mute_app,
@@ -194,6 +239,7 @@ pub fn run() {
                 updater: updater::Updater::new(),
                 node: OnceLock::new(),
                 screen: Default::default(),
+                camera: OnceLock::new(),
             });
             if first_run || migrated {
                 shared.save_settings();
@@ -225,7 +271,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Tauri başlatılamadı");
 
-    app.run(|_app, event| {
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            if let Some(h) = app.state::<Arc<Shared>>().camera.get() {
+                h.disable(); // sanal kamera T-Bridge kapanınca kalkar
+            }
+        }
         // Son pencere kapanınca uygulama tepside kalır; yalnızca "Çıkış" kapatır.
         if let RunEvent::ExitRequested { code: None, api, .. } = event {
             api.prevent_exit();

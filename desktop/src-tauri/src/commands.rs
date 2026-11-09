@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use kopru_core::*;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
@@ -189,6 +189,85 @@ pub fn stop_screen_share(s: S<'_>) {
     crate::screen_share::stop(&s.app, "PC kullanıcısı durdurdu");
 }
 
+/// Telefon kamerası durumu (arayüz 2 sn'de bir yoklar).
+#[tauri::command]
+pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {
+    let supported = win::camera::camera_allowed_now();
+    let hub = s.camera.get();
+    let phone = hub.and_then(|h| h.phone.lock().ok().map(|p| *p)).unwrap_or_default();
+    win::camera::CameraStatus {
+        supported,
+        installed: supported && win::camera::is_installed(),
+        running: hub.is_some_and(|h| h.running.load(std::sync::atomic::Ordering::SeqCst)),
+        phone_supports: s.node().is_some_and(|n| n.peer_supports_camera()),
+        phone,
+        in_use: hub.is_some_and(|h| h.in_use.load(std::sync::atomic::Ordering::SeqCst)),
+        decoded_frames: hub.map_or(0, |h| h.decoded.load(std::sync::atomic::Ordering::Relaxed)),
+    }
+}
+
+/// Kamerayı etkinleştir: gerekirse bir kerelik UAC ile DLL'i kaydeder, sonra sanal kamerayı başlatır.
+#[tauri::command]
+pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
+    if !win::camera::camera_allowed_now() {
+        return Err("Bu özellik yalnızca Windows 11 için tasarlanmıştır.".into());
+    }
+    let sh = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        if !win::camera::is_installed() {
+            let dir = sh.app.path().resource_dir().ok();
+            let dll = win::camera::locate_dll(dir).ok_or("tbridge_vcam.dll bulunamadı (uygulama klasöründe olmalı)")?;
+            let code = win::camera::run_elevated(&format!("--camera-register \"{}\"", dll.display()))?;
+            if code != 0 || !win::camera::is_installed() {
+                return Err("Kamera kaydı tamamlanamadı (yönetici izni verilmedi veya DLL kopyalanamadı).".into());
+            }
+        }
+        sh.camera.get().ok_or("kamera merkezi yok")?.enable()?;
+        lk(&sh.settings).camera_enabled = true;
+        sh.save_settings();
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Sanal kamerayı durdur (kayıt kalır; bir sonraki "Etkinleştir" izin istemez).
+#[tauri::command]
+pub async fn camera_disable(s: S<'_>) -> Result<(), String> {
+    let sh = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(h) = sh.camera.get() {
+            h.disable();
+        }
+        lk(&sh.settings).camera_enabled = false;
+        sh.save_settings();
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Kamerayı kaldır: sanal kamerayı durdurur, DLL kaydını ve dosyasını siler (UAC ister).
+#[tauri::command]
+pub async fn camera_uninstall(s: S<'_>) -> Result<(), String> {
+    let sh = s.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        if let Some(h) = sh.camera.get() {
+            h.disable();
+        }
+        lk(&sh.settings).camera_enabled = false;
+        sh.save_settings();
+        if win::camera::is_installed() {
+            let code = win::camera::run_elevated("--camera-unregister")?;
+            if code != 0 {
+                return Err("Kamera kaydı kaldırılamadı.".into());
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn clear_notifications(s: S<'_>) -> Result<(), String> {
     let keys: Vec<String> = lk(&s.notifications).drain(..).map(|n| n.key).collect();
@@ -227,6 +306,7 @@ pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
         settings.settings_version = old.settings_version;
         // "Her zaman izin ver" listesi yalnızca onay penceresiyle değişir (arayüzdeki eski kopya ezmesin).
         settings.screen_allowed = old.screen_allowed.clone();
+        settings.camera_enabled = old.camera_enabled; // yalnızca kamera komutlarıyla değişir
         old.download_dir != settings.download_dir
     };
     if !settings.notif_mirror {

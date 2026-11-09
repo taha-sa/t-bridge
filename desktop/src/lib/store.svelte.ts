@@ -29,6 +29,7 @@ const empty: Snapshot = {
     autoUpdate: true,
     screenShare: true,
     screenAllowed: [],
+    cameraEnabled: false,
   },
   downloadDir: '',
   error: null,

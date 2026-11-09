@@ -62,6 +62,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.Screen
 import android.app.Activity
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import app.kopru.CameraService
 import android.content.pm.ActivityInfo
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -156,6 +162,8 @@ fun RemoteScreen(ui: UiState) {
                 colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
             )
         }
+
+        CameraSection(on)
 
         Section("Klavye") {
             LiveKeyboard()
@@ -476,5 +484,78 @@ private fun FullscreenViewer(scr: app.kopru.ScreenUi, onExit: () -> Unit, onClos
             }
         }
         ScreenViewer(scr, true, onToggleFullscreen = onExit, onClose = onClose, modifier = Modifier.fillMaxSize())
+    }
+}
+
+/** "Telefonu web kamerası yap": yalnızca PC `camera` yeteneğini duyuruyorsa (Windows 11) kullanılabilir. */
+@Composable
+private fun CameraSection(connected: Boolean) {
+    val c = tb
+    val ctx = LocalContext.current
+    val cam by CameraService.ui.collectAsStateWithLifecycle()
+    var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        granted = ok
+        if (ok) CameraService.start(ctx)
+    }
+    val supported = connected && CameraService.supported()
+
+    Section("Kamera") {
+        if (!supported) {
+            // Kilitli durum: Windows 10 veya eski PC sürümü
+            Text(
+                if (connected) "Bu özellik yalnızca Windows 11 için tasarlanmıştır." else "Bağlanınca telefonu bilgisayarda web kamerası olarak kullanabilirsin.",
+                color = c.faint,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            return@Section
+        }
+        Text(
+            "Telefonunu bilgisayarın web kamerası yap. Görüntü yalnızca bilgisayarına, şifreli bağlantıyla gider. Kamera izni gerekir; yayın sürerken bildirim görünür.",
+            color = c.muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (cam.error != null) Text(cam.error!!, color = Color(0xFFF87171), style = MaterialTheme.typography.bodySmall)
+        TbButton(
+            if (cam.streaming) "Yayını durdur" else "Yayını başlat",
+            {
+                if (cam.streaming) CameraService.stop(ctx)
+                else if (granted) CameraService.start(ctx)
+                else ask.launch(Manifest.permission.CAMERA)
+            },
+            Modifier.fillMaxWidth(),
+        )
+        if (cam.streaming) Text("Yayında · ${cam.w}×${cam.h}", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Chip(if (cam.front) "Ön kamera ✓" else "Ön kamera") { CameraService.setFront(true) }
+            Chip(if (!cam.front) "Arka kamera ✓" else "Arka kamera") { CameraService.setFront(false) }
+            Chip(if (cam.res == 720) "720p ✓" else "720p") { CameraService.setRes(720) }
+            Chip(if (cam.res == 1080) "1080p ✓" else "1080p") { CameraService.setRes(1080) }
+            Chip(if (cam.mirror) "Ayna ✓" else "Ayna") { CameraService.setMirror(!cam.mirror) }
+            Chip(if (cam.torch) "Fener ✓" else "Fener") { CameraService.setTorch(!cam.torch) }
+        }
+        if (cam.exposureRange.last > cam.exposureRange.first) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Pozlama", Modifier.width(76.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
+                Slider(
+                    cam.exposure.toFloat(),
+                    { CameraService.setExposure(it.roundToInt()) },
+                    valueRange = cam.exposureRange.first.toFloat()..cam.exposureRange.last.toFloat(),
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Yakınlık", Modifier.width(76.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Slider(
+                cam.zoom,
+                { CameraService.setZoom(it) },
+                valueRange = 0f..1f,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
+            )
+        }
+        Text("Görüntü, telefon yatay tutulduğunda dik görünür.", color = c.faint, style = MaterialTheme.typography.bodySmall)
     }
 }

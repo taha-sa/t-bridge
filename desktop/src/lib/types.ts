@@ -60,6 +60,7 @@ export interface Settings {
   autoUpdate: boolean
   screenShare: boolean
   screenAllowed: string[]
+  cameraEnabled: boolean
 }
 
 export type Theme = 'dark' | 'system' | 'light'

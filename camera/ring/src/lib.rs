@@ -22,6 +22,12 @@ pub const TOTAL_SIZE: usize = HEADER_SIZE + SLOTS * SLOT_SIZE;
 /// Bu süredir (ms) taze kare yoksa okuyucu yer tutucu kare üretir.
 pub const STALE_MS: u64 = 1000;
 
+/// Bölümü Frame Server kaynağı (LocalService, oturum 0) yaratır; uygulama (kullanıcı oturumu) açıp yazar.
+/// (Global\ ad alanında bölüm YARATMA ayrıcalığı hizmet hesaplarındadır, standart kullanıcıda yoktur; açmak için gerekmez.)
+pub const SECTION_NAME: &str = r"Global\TBridgeCameraRing";
+/// DACL: SYSTEM + LocalService tam, etkileşimli kullanıcı okuma/yazma; diğerleri yok.
+pub const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGW;;;IU)";
+
 const OFF_MAGIC: usize = 0;
 const OFF_VERSION: usize = 4;
 const OFF_LATEST: usize = 8;
@@ -155,6 +161,21 @@ impl Ring {
                 return None; // kopyalarken ezildi: yırtık okuma, at
             }
             Some(FrameInfo { seq, w, h, pts_us, write_ms: self.producer_ms() })
+        }
+    }
+}
+
+/// Yatay ayna (NV12): her satırı ve UV çiftlerini ters çevirir.
+pub fn mirror_nv12(buf: &mut [u8], w: usize, h: usize) {
+    for y in 0..h {
+        buf[y * w..y * w + w].reverse();
+    }
+    for y in 0..h / 2 {
+        let row = &mut buf[w * h + y * w..w * h + y * w + w];
+        for x in 0..w / 4 {
+            let (a, b) = (x * 2, w - 2 - x * 2);
+            row.swap(a, b);
+            row.swap(a + 1, b + 1);
         }
     }
 }
@@ -301,4 +322,17 @@ mod tests {
         t.join().unwrap();
         assert!(got > 0);
     }
+
+    #[test]
+    fn mirror_is_involution_and_flips_rows() {
+        let orig: Vec<u8> = (0..(8 * 4 * 3 / 2)).map(|i| i as u8).collect();
+        let mut m = orig.clone();
+        mirror_nv12(&mut m, 8, 4);
+        assert_eq!(m[0], orig[7]);
+        // UV çifti (U,V) yer değiştirir ama U/V sırası korunur
+        assert_eq!((m[8 * 4], m[8 * 4 + 1]), (orig[8 * 4 + 6], orig[8 * 4 + 7]));
+        mirror_nv12(&mut m, 8, 4);
+        assert_eq!(m, orig);
+    }
+
 }

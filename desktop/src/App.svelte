@@ -12,9 +12,10 @@
   import Files from './lib/Files.svelte'
   import Notifs from './lib/Notifs.svelte'
   import Remote from './lib/Remote.svelte'
+  import Camera from './lib/Camera.svelte'
   import SettingsPage from './lib/SettingsPage.svelte'
 
-  type Tab = 'home' | 'files' | 'notifs' | 'remote' | 'settings'
+  type Tab = 'home' | 'files' | 'notifs' | 'remote' | 'camera' | 'settings'
   let tab = $state<Tab>('home')
   let dragging = $state(false)
   let mainEl = $state<HTMLElement>()
@@ -32,6 +33,7 @@
     { id: 'files', label: 'Dosyalar', icon: 'files' },
     { id: 'notifs', label: 'Bildirimler', icon: 'bell' },
     { id: 'remote', label: 'Kumanda', icon: 'remote' },
+    { id: 'camera', label: 'Kamera', icon: 'video' },
     { id: 'settings', label: 'Ayarlar', icon: 'gear' },
   ]
   const titles: Record<Tab, string> = {
@@ -39,6 +41,7 @@
     files: 'Dosyalar',
     notifs: 'Bildirimler',
     remote: 'Kumanda',
+    camera: 'Kamera',
     settings: 'Ayarlar',
   }
 
@@ -123,6 +126,8 @@
               <Notifs />
             {:else if tab === 'remote'}
               <Remote />
+            {:else if tab === 'camera'}
+              <Camera />
             {:else}
               <SettingsPage />
             {/if}

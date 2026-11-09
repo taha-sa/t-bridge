@@ -29,6 +29,7 @@ import uniffi.kopru_core.ServerInfo
 import uniffi.kopru_core.TransferInfo
 import uniffi.kopru_core.TransferState
 import uniffi.kopru_core.initLogging
+import uniffi.kopru_core.setCameraCapability
 
 /** Arayüzün izlediği durum. */
 data class UiState(
@@ -73,6 +74,7 @@ object Core : Host {
         node?.let { return it }
         return try {
             initLogging()
+            setCameraCapability(true) // telefon kamera yeteneğini her zaman duyurur; PC yalnızca Windows 11'de
             val n = Node(
                 NodeConfig(
                     dataDir = ctx.filesDir.resolve("core").absolutePath,
@@ -113,7 +115,7 @@ object Core : Host {
     override fun onEvent(event: Event) {
         when (event) {
             is Event.State -> {
-                if (event.state == ConnState.CONNECTED) sentIcons.clear() else Screen.onDisconnected()
+                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
                 _ui.update { it.copy(conn = event.state, peer = event.peer, peers = node?.peers() ?: it.peers) }
                 main.post { KopruService.onConnState(event.state) }
             }
@@ -137,6 +139,8 @@ object Core : Host {
             is Event.ScreenInfo -> Screen.onInfo(event.monitors, event.current.toInt(), event.active, event.error)
             is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.key, event.data)
             is Event.Screen -> Unit
+            is Event.Cam -> main.post { CameraService.onCmd(ctx, event.cmd) }
+            is Event.CamState, is Event.CamFrame -> Unit
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.
             // PC bir bildirime yanıt yazdı: kaynak uygulamanın RemoteInput'una ilet (ana iş parçacığı dışında).
             is Event.NotificationReply -> Thread { NotifListener.reply(ctx, event.key, event.text) }.start()

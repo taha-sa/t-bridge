@@ -1,0 +1,452 @@
+//! Telefon kamerası (Windows 11): sanal kamera yaşam döngüsü, DLL kaydı (tek seferlik yönetici izni), kare hattı.
+//!
+//! Hat: telefon --QUIC (H.264)--> `Hub::push_frame` --> çözücü thread (MF H.264 -> NV12) --> paylaşımlı bellek halkası
+//!      --> tbridge_vcam.dll (Frame Server içinde, IMFMediaSourceEx) --> Zoom/Teams/Kamera uygulaması.
+//! Halka bölümünü DLL yaratır; kimse kamerayı açmamışsa bölüm yoktur ve kareler çözülmeden atılır (CPU harcanmaz).
+pub mod decode;
+
+use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc::{self, Receiver, Sender, SyncSender},
+};
+use std::time::Duration;
+
+use serde::Serialize;
+use windows::{
+    Wdk::System::SystemServices::RtlGetVersion,
+    Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Media::MediaFoundation::*,
+        System::{
+            Com::{COINIT_MULTITHREADED, CoInitializeEx},
+            Memory::{FILE_MAP_ALL_ACCESS, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile},
+            Registry::*,
+            SystemInformation::{GetTickCount64, OSVERSIONINFOW},
+            Threading::{GetExitCodeProcess, WaitForSingleObject},
+        },
+        UI::{
+            Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
+            WindowsAndMessaging::SW_HIDE,
+        },
+    },
+    core::{PCWSTR, w},
+};
+
+use kopru_camring::Ring;
+
+/// Sanal kamera medya kaynağının CLSID'si (camera/vcam ile aynı).
+pub const CLSID_STR: &str = "{7B3F1C52-4D2E-4C71-9A0B-5E2D8F6A1C34}";
+pub const DLL_NAME: &str = "tbridge_vcam.dll";
+pub const FRIENDLY_NAME: &str = "T-Bridge Kamera";
+
+// ---------------------------------------------------------------- Windows sürüm kapısı
+
+/// RtlGetVersion ile (GetVersionEx uyumluluk katmanında yalan söyler) derleme numarası.
+pub fn windows_build() -> Option<u32> {
+    let mut v = OSVERSIONINFOW { dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32, ..Default::default() };
+    let st = unsafe { RtlGetVersion(&mut v) };
+    if st.0 == 0 { Some(v.dwBuildNumber) } else { None }
+}
+
+/// Kamera özelliği bu makinede kullanılabilir mi (Windows 11, build >= 22000).
+pub fn camera_allowed_now() -> bool {
+    kopru_core::camera::camera_allowed(cfg!(windows), windows_build())
+}
+
+// ---------------------------------------------------------------- kayıt (HKLM, yükseltilmiş yardımcı)
+
+pub fn install_dir() -> PathBuf {
+    PathBuf::from(std::env::var_os("ProgramFiles").unwrap_or_else(|| "C:\\Program Files".into())).join("T-Bridge").join("camera")
+}
+
+fn clsid_key() -> String {
+    format!("SOFTWARE\\Classes\\CLSID\\{CLSID_STR}")
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn reg_set_sz(sub: &str, name: Option<&str>, value: &str) -> Result<(), String> {
+    unsafe {
+        let mut h = HKEY::default();
+        let sub = wide(sub);
+        RegCreateKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(sub.as_ptr()), None, PCWSTR::null(), REG_OPTION_NON_VOLATILE, KEY_WRITE, None, &mut h, None)
+            .ok()
+            .map_err(|e| format!("kayıt defteri anahtarı: {e}"))?;
+        let data: Vec<u8> = wide(value).iter().flat_map(|c| c.to_le_bytes()).collect();
+        let nm = name.map(wide);
+        let r = RegSetValueExW(h, nm.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr())), None, REG_SZ, Some(&data));
+        let _ = RegCloseKey(h);
+        r.ok().map_err(|e| format!("kayıt defteri değeri: {e}"))
+    }
+}
+
+/// Yükseltilmiş süreçte çalışır: DLL'i %ProgramFiles%\T-Bridge\camera\ altına kopyalar ve COM kaydını HKLM'ye yazar.
+pub fn register_elevated(src_dll: &Path) -> Result<(), String> {
+    let dir = install_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("klasör: {e}"))?;
+    let dst = dir.join(DLL_NAME);
+    std::fs::copy(src_dll, &dst).map_err(|e| format!("DLL kopyalanamadı (kaynak {}): {e}", src_dll.display()))?;
+    let key = clsid_key();
+    reg_set_sz(&key, None, FRIENDLY_NAME)?;
+    reg_set_sz(&format!("{key}\\InprocServer32"), None, &dst.to_string_lossy())?;
+    reg_set_sz(&format!("{key}\\InprocServer32"), Some("ThreadingModel"), "Both")?;
+    Ok(())
+}
+
+pub fn unregister_elevated() -> Result<(), String> {
+    unsafe {
+        let key = wide(&clsid_key());
+        let r = RegDeleteTreeW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()));
+        if r.0 != 0 && r.0 != 2 {
+            return Err(format!("kayıt silinemedi: {}", r.0));
+        }
+    }
+    let dir = install_dir();
+    let _ = std::fs::remove_file(dir.join(DLL_NAME)); // Frame Server DLL'i tutuyorsa silinemeyebilir: sonraki açılışta temizlenir
+    let _ = std::fs::remove_dir(&dir);
+    Ok(())
+}
+
+/// COM kaydı var mı ve DLL yerinde mi.
+pub fn is_installed() -> bool {
+    unsafe {
+        let key = wide(&format!("{}\\InprocServer32", clsid_key()));
+        let mut h = HKEY::default();
+        if RegOpenKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()), None, KEY_READ, &mut h).0 != 0 {
+            return false;
+        }
+        let _ = RegCloseKey(h);
+    }
+    install_dir().join(DLL_NAME).exists()
+}
+
+/// Bu exe'yi UAC ile yükseltilmiş başlatıp çıkışını bekler. Dönüş: çıkış kodu (0 = başarılı).
+pub fn run_elevated(args: &str) -> Result<u32, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let (file, params) = (wide(&exe.to_string_lossy()), wide(args));
+    unsafe {
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: w!("runas"),
+            lpFile: PCWSTR(file.as_ptr()),
+            lpParameters: PCWSTR(params.as_ptr()),
+            nShow: SW_HIDE.0,
+            ..Default::default()
+        };
+        ShellExecuteExW(&mut info).map_err(|e| format!("yönetici izni alınamadı veya reddedildi: {e}"))?;
+        let h = info.hProcess;
+        if h.is_invalid() {
+            return Err("yükseltilmiş süreç başlatılamadı".into());
+        }
+        WaitForSingleObject(h, 60_000);
+        let mut code = 1u32;
+        let _ = GetExitCodeProcess(h, &mut code);
+        let _ = CloseHandle(h);
+        Ok(code)
+    }
+}
+
+/// DLL'in aranacağı yerler: exe yanı, kaynak klasörü, geliştirme derleme çıktısı.
+pub fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
+    let mut c: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(d) = exe.parent() {
+            c.push(d.join(DLL_NAME));
+            c.push(d.join("camera").join(DLL_NAME));
+            // geliştirme: <repo>/target/{release,debug}/tbridge_vcam.dll (exe aynı klasörde)
+        }
+    }
+    if let Some(d) = extra_dir {
+        c.push(d.join(DLL_NAME));
+        c.push(d.join("camera").join(DLL_NAME));
+    }
+    c.into_iter().find(|p| p.exists())
+}
+
+/// Komut satırı yükseltilmiş yardımcı modu. `Some(çıkış kodu)` dönerse süreç bununla çıkmalıdır.
+pub fn maybe_run_helper() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("--camera-register") => {
+            let src = args.get(2).map(PathBuf::from)?;
+            Some(match register_elevated(&src) {
+                Ok(()) => 0,
+                Err(e) => {
+                    let _ = std::fs::write(std::env::temp_dir().join("tbridge-camera-register.log"), e);
+                    1
+                }
+            })
+        }
+        Some("--camera-unregister") => Some(match unregister_elevated() {
+            Ok(()) => 0,
+            Err(_) => 1,
+        }),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------- sanal kamera (MFCreateVirtualCamera)
+
+enum VcamCmd {
+    Enable(Sender<Result<(), String>>),
+    Disable(Sender<()>),
+}
+
+fn vcam_thread(rx: Receiver<VcamCmd>, running: Arc<AtomicBool>) {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _ = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    }
+    let mut cam: Option<IMFVirtualCamera> = None;
+    while let Ok(cmd) = rx.recv() {
+        match cmd {
+            VcamCmd::Enable(reply) => {
+                if cam.is_some() {
+                    let _ = reply.send(Ok(()));
+                    continue;
+                }
+                let r = (|| -> Result<IMFVirtualCamera, String> {
+                    unsafe {
+                        let name = wide(FRIENDLY_NAME);
+                        let id = wide(CLSID_STR);
+                        // Oturum ömürlü + yalnızca geçerli kullanıcı: T-Bridge kapanınca kamera da kalkar.
+                        let c = MFCreateVirtualCamera(
+                            MFVirtualCameraType_SoftwareCameraSource,
+                            MFVirtualCameraLifetime_Session,
+                            MFVirtualCameraAccess_CurrentUser,
+                            PCWSTR(name.as_ptr()),
+                            PCWSTR(id.as_ptr()),
+                            None,
+                        )
+                        .map_err(|e| format!("MFCreateVirtualCamera: {e}"))?;
+                        c.Start(None).map_err(|e| format!("sanal kamera başlatılamadı: {e}"))?;
+                        Ok(c)
+                    }
+                })();
+                match r {
+                    Ok(c) => {
+                        cam = Some(c);
+                        running.store(true, Ordering::SeqCst);
+                        let _ = reply.send(Ok(()));
+                    }
+                    Err(e) => {
+                        let _ = reply.send(Err(e));
+                    }
+                }
+            }
+            VcamCmd::Disable(reply) => {
+                if let Some(c) = cam.take() {
+                    unsafe {
+                        let _ = c.Stop();
+                        let _ = c.Remove();
+                        let _ = c.Shutdown();
+                    }
+                }
+                running.store(false, Ordering::SeqCst);
+                let _ = reply.send(());
+            }
+        }
+    }
+    if let Some(c) = cam.take() {
+        unsafe {
+            let _ = c.Remove();
+            let _ = c.Shutdown();
+        }
+    }
+}
+
+// ---------------------------------------------------------------- merkez
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhoneCam {
+    pub active: bool,
+    pub w: u32,
+    pub h: u32,
+    pub fps: u32,
+    pub facing: u8,
+    pub mirror: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStatus {
+    /// Windows 11 mi (değilse arayüz kilitli kartı gösterir).
+    pub supported: bool,
+    pub installed: bool,
+    /// Sanal kamera şu an Windows'a kayıtlı/çalışıyor.
+    pub running: bool,
+    pub phone_supports: bool,
+    pub phone: PhoneCam,
+    /// Bir uygulama kamerayı açmış (paylaşımlı bellek bağlı).
+    pub in_use: bool,
+    pub decoded_frames: u64,
+}
+
+pub type FrameMsg = (u64, bool, Vec<u8>);
+
+/// Kare hattı geri çağrıları: anahtar kare / biçim isteği.
+pub trait PhoneLink: Send + Sync + 'static {
+    fn request_keyframe(&self);
+    fn request_format(&self, w: u32, h: u32);
+}
+
+pub struct Hub {
+    vcam_tx: Sender<VcamCmd>,
+    frame_tx: SyncSender<FrameMsg>,
+    pub running: Arc<AtomicBool>,
+    pub in_use: Arc<AtomicBool>,
+    pub decoded: Arc<AtomicU64>,
+    pub phone: Arc<Mutex<PhoneCam>>,
+}
+
+impl Hub {
+    pub fn start(link: Arc<dyn PhoneLink>) -> Hub {
+        let running = Arc::new(AtomicBool::new(false));
+        let (vtx, vrx) = mpsc::channel();
+        let r2 = running.clone();
+        let _ = std::thread::Builder::new().name("vcam".into()).spawn(move || vcam_thread(vrx, r2));
+
+        let (ftx, frx) = mpsc::sync_channel::<FrameMsg>(8);
+        let in_use = Arc::new(AtomicBool::new(false));
+        let decoded = Arc::new(AtomicU64::new(0));
+        let phone = Arc::new(Mutex::new(PhoneCam::default()));
+        let (iu, dc, ph) = (in_use.clone(), decoded.clone(), phone.clone());
+        let _ = std::thread::Builder::new().name("cam-decode".into()).spawn(move || decode_thread(frx, link, iu, dc, ph));
+        Hub { vcam_tx: vtx, frame_tx: ftx, running, in_use, decoded, phone }
+    }
+
+    pub fn enable(&self) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.vcam_tx.send(VcamCmd::Enable(tx)).map_err(|e| e.to_string())?;
+        rx.recv_timeout(Duration::from_secs(20)).map_err(|_| "sanal kamera zaman aşımı".to_string())?
+    }
+
+    pub fn disable(&self) {
+        let (tx, rx) = mpsc::channel();
+        if self.vcam_tx.send(VcamCmd::Disable(tx)).is_ok() {
+            let _ = rx.recv_timeout(Duration::from_secs(10));
+        }
+    }
+
+    /// Telefondan gelen kodlanmış kare (QUIC okuyucu thread'i): kuyruk doluysa kare atılır.
+    pub fn push_frame(&self, f: FrameMsg) {
+        let _ = self.frame_tx.try_send(f);
+    }
+}
+
+struct RingMap {
+    view: *mut u8,
+    h: HANDLE,
+    ring: Ring,
+}
+
+impl RingMap {
+    fn open() -> Option<Self> {
+        unsafe {
+            let name = wide(kopru_camring::SECTION_NAME);
+            let h = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(name.as_ptr())).ok()?;
+            let view = MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+            if view.Value.is_null() {
+                let _ = CloseHandle(h);
+                return None;
+            }
+            let ring = Ring::from_raw(view.Value as *mut u8);
+            if !ring.is_valid() {
+                let _ = UnmapViewOfFile(view);
+                let _ = CloseHandle(h);
+                return None;
+            }
+            Some(Self { view: view.Value as *mut u8, h, ring })
+        }
+    }
+}
+
+impl Drop for RingMap {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = UnmapViewOfFile(windows::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS { Value: self.view as *mut _ });
+            let _ = CloseHandle(self.h);
+        }
+    }
+}
+
+fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<AtomicBool>, decoded: Arc<AtomicU64>, phone: Arc<Mutex<PhoneCam>>) {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _ = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    }
+    let mut ring: Option<RingMap> = None;
+    let mut dec: Option<decode::Decoder> = None;
+    let mut need_key = true;
+    let mut last_want = (0u32, 0u32);
+    let mut last_check = std::time::Instant::now() - Duration::from_secs(1);
+    loop {
+        let msg = rx.recv_timeout(Duration::from_millis(250));
+        // Halka bağlantısını ~500 ms'de bir yokla: yoksa (kimse kamerayı açmadı) çözmeden at.
+        if last_check.elapsed() > Duration::from_millis(500) {
+            last_check = std::time::Instant::now();
+            let tick = unsafe { GetTickCount64() };
+            if let Some(r) = &ring {
+                // Tüketici 3 sn'dir dokunmadıysa kamera kapatıldı: bağlantıyı bırak.
+                if tick.saturating_sub(r.ring.consumer_ms()) > 3000 && r.ring.consumer_ms() != 0 {
+                    ring = None;
+                }
+            }
+            if ring.is_none() {
+                ring = RingMap::open();
+                if ring.is_some() {
+                    need_key = true;
+                    link.request_keyframe();
+                }
+            }
+            in_use.store(ring.is_some(), Ordering::SeqCst);
+            if let Some(r) = &ring {
+                let want = r.ring.want();
+                if want != last_want && want.0 > 0 {
+                    last_want = want;
+                    link.request_format(want.0, want.1);
+                }
+            }
+        }
+        let Ok((pts, key, data)) = msg else { continue };
+        let Some(r) = &ring else {
+            need_key = true;
+            continue;
+        };
+        if need_key && !key {
+            continue;
+        }
+        if key {
+            need_key = false;
+        }
+        if dec.is_none() {
+            dec = decode::Decoder::new().ok();
+        }
+        let Some(d) = dec.as_mut() else { continue };
+        match d.decode(&data, pts as i64 * 10) {
+            Ok(frames) => {
+                let mirror = phone.lock().map(|p| p.mirror).unwrap_or(false);
+                for mut f in frames {
+                    if mirror {
+                        kopru_camring::mirror_nv12(&mut f.nv12, f.w as usize, f.h as usize);
+                    }
+                    let now = unsafe { GetTickCount64() };
+                    if r.ring.write(f.w, f.h, pts, now, &f.nv12) {
+                        decoded.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
+            Err(_) => {
+                dec = None; // bozuk akış: çözücüyü sıfırla, yeni anahtar kare iste
+                need_key = true;
+                link.request_keyframe();
+            }
+        }
+    }
+}

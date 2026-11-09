@@ -43,6 +43,8 @@ pub struct Settings {
     pub screen_share: bool,
     /// "Her zaman izin ver" denen telefon kimlikleri (ilk seferde onay sorulur).
     pub screen_allowed: Vec<String>,
+    /// Telefon kamerası etkin (sanal kamera uygulama açılışında başlatılır). Yalnızca Windows 11.
+    pub camera_enabled: bool,
     /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
     #[serde(default = "legacy_version")]
     pub settings_version: u32,
@@ -85,6 +87,7 @@ impl Default for Settings {
             auto_update: true,
             screen_share: true,
             screen_allowed: Vec::new(),
+            camera_enabled: false,
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -113,6 +116,8 @@ pub struct Shared {
     pub node: OnceLock<Arc<Node>>,
     /// Uzaktan ekran görüntüleme oturumu.
     pub screen: Mutex<crate::screen_share::ScreenState>,
+    /// Telefon kamerası merkezi (yalnızca Windows 11'de oluşturulur).
+    pub camera: OnceLock<crate::win::camera::Hub>,
 }
 
 impl Shared {
@@ -195,6 +200,19 @@ impl Shared {
             Event::Pc { cmd } => {
                 win::input::exec(cmd);
                 return;
+            }
+            Event::CamFrame { pts_us, key, data } => {
+                if let Some(h) = self.camera.get() {
+                    h.push_frame((*pts_us, *key, data.clone()));
+                }
+                return; // video kareleri arayüze gönderilmez
+            }
+            Event::CamState { active, w, h, fps, facing, mirror } => {
+                if let Some(hub) = self.camera.get() {
+                    if let Ok(mut p) = hub.phone.lock() {
+                        *p = crate::win::camera::PhoneCam { active: *active, w: *w, h: *h, fps: *fps, facing: *facing, mirror: *mirror };
+                    }
+                }
             }
             Event::Screen { cmd } => {
                 crate::screen_share::on_cmd(&self.app, cmd.clone());
