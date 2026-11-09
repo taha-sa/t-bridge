@@ -14,7 +14,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -66,6 +72,12 @@ fun EcosystemScreen(ui: UiState) {
     LaunchedEffect(on, running("t-desktree")) {
         while (on && running("t-desktree")) { Suite.refreshDisks(); delay(60_000) }
     }
+    // Otomatik başlatma ~75 sn içinde tutmadıysa (uygulama hâlâ kapalı) elle "Aç" yedeği gösterilir.
+    var grace by remember { mutableStateOf(false) }
+    LaunchedEffect(on) {
+        grace = false
+        if (on) { delay(75_000); grace = true }
+    }
     LaunchedEffect(s.message) {
         if (s.message != null) { delay(3500); Suite.clearMessage() }
     }
@@ -76,6 +88,17 @@ fun EcosystemScreen(ui: UiState) {
             Text("Bildirimler", color = c.muted, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))
             Switch(s.notify, { Suite.setNotify(it) }, colors = SwitchDefaults.colors(checkedTrackColor = c.gold, checkedThumbColor = c.onGold))
         }
+
+        val active = s.apps.count { it.running && it.id != "t-bridge" }
+        StatusRow(
+            ok = on,
+            text = when {
+                on && active > 0 -> "Bilgisayara bağlı · $active uygulama etkin"
+                on -> "Bilgisayara bağlı · uygulamalar başlatılıyor"
+                ui.conn == ConnState.CONNECTED -> "Bilgisayara bağlı · T-Bridge sürümü eski"
+                else -> "Bilgisayara bağlı değil"
+            },
+        )
 
         s.message?.let { m ->
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.goldSoft).padding(14.dp)) {
@@ -94,9 +117,9 @@ fun EcosystemScreen(ui: UiState) {
             return@Column
         }
 
-        DownloadsCard(s.downloads.values.toList(), s.completed, running("t-downloader"))
-        RamCard(s.ram, running("t-ramcash"))
-        DiskCard(s.disks, running("t-desktree"))
+        DownloadsCard(s.downloads.values.toList(), s.completed, appState(s, "t-downloader", grace))
+        RamCard(s.ram, appState(s, "t-ramcash", grace))
+        DiskCard(s.disks, appState(s, "t-desktree", grace))
         AppsCard(s, viewer)
         s.apps.filter { it.id !in KNOWN }.forEach { a ->
             TbCard {
@@ -113,21 +136,48 @@ fun EcosystemScreen(ui: UiState) {
 @Composable
 private fun Spacer8() = Box(Modifier.height(8.dp))
 
-@Composable
-private fun OffState(name: String, id: String) {
-    val c = tb
-    Text("$name kapalı", color = c.muted, style = MaterialTheme.typography.bodyMedium)
-    Spacer8()
-    TbButton("Bilgisayarda aç", { Suite.launch(id) }, Modifier.fillMaxWidth())
+/** Uygulamanın PC'deki durumu: kurulu değil / başlatılıyor / başlatılamadı (yedek "Aç") / çalışıyor. */
+private enum class AppState { RUNNING, STARTING, FAILED, MISSING }
+
+private fun appState(s: app.kopru.SuiteUi, id: String, grace: Boolean): AppState {
+    val a = s.apps.firstOrNull { it.id == id } ?: return AppState.MISSING
+    return if (a.running) AppState.RUNNING else if (grace) AppState.FAILED else AppState.STARTING
 }
 
 @Composable
-private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, up: Boolean) {
+private fun StatusRow(ok: Boolean, text: String) {
+    val c = tb
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.s2).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(if (ok) c.goldHi else c.faint))
+        Text(text, Modifier.padding(start = 12.dp), color = if (ok) c.text else c.muted, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Kapalı kart durumu: net metin; elle "Aç" yalnızca otomatik başlatma tutmadıysa. */
+@Composable
+private fun OffState(name: String, id: String, st: AppState) {
+    val c = tb
+    when (st) {
+        AppState.MISSING -> Text("$name bu bilgisayarda kurulu değil", color = c.faint, style = MaterialTheme.typography.bodyMedium)
+        AppState.STARTING -> Text("$name arka planda başlatılıyor…", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+        else -> {
+            Text("$name otomatik başlatılamadı", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+            Spacer8()
+            TbButton("Bilgisayarda aç", { Suite.launch(id) }, Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState) {
     val c = tb
     TbCard {
         SectionTitle("İndirmeler")
         Spacer8()
-        if (!up && active.isEmpty() && done.isEmpty()) { OffState("T-Downloader", "t-downloader"); return@TbCard }
+        if (st != AppState.RUNNING && active.isEmpty() && done.isEmpty()) { OffState("T-Downloader", "t-downloader", st); return@TbCard }
         if (active.isEmpty()) Text("Etkin indirme yok", color = c.faint, style = MaterialTheme.typography.bodySmall)
         active.forEach { d ->
             Column(Modifier.padding(vertical = 6.dp)) {
@@ -158,12 +208,29 @@ private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, up: Boolean)
 }
 
 @Composable
-private fun RamCard(ram: app.kopru.RamInfo?, up: Boolean) {
+@OptIn(ExperimentalMaterial3Api::class)
+private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
     val c = tb
+    var help by remember { mutableStateOf(false) }
+    if (help) {
+        ModalBottomSheet(onDismissRequest = { help = false }, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
+            Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("Bellek temizleme", color = c.text, style = MaterialTheme.typography.titleMedium)
+                Text("Akıllı: Arka plandaki uygulamaların gereksiz belleğini boşaltır, açık işinize dokunmaz (önerilen).", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+                Text("Tam: Önbellek dahil her şeyi boşaltır; yönetici izni gerekir, kısa süre yavaşlık olabilir.", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
     TbCard {
-        SectionTitle("Bellek")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { SectionTitle("RAM") }
+            Box(
+                Modifier.size(28.dp).clip(RoundedCornerShape(14.dp)).background(c.s4).clickable { help = true },
+                contentAlignment = Alignment.Center,
+            ) { Text("?", color = c.goldHi, style = MaterialTheme.typography.labelLarge) }
+        }
         Spacer8()
-        if (!up && ram == null) { OffState("T-RamCash", "t-ramcash"); return@TbCard }
+        if (st != AppState.RUNNING && ram == null) { OffState("T-RamCash", "t-ramcash", st); return@TbCard }
         Row(verticalAlignment = Alignment.CenterVertically) {
             val pct = (ram?.usedPct ?: 0) / 100f
             Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
@@ -187,12 +254,12 @@ private fun RamCard(ram: app.kopru.RamInfo?, up: Boolean) {
 }
 
 @Composable
-private fun DiskCard(disks: List<app.kopru.DiskRow>, up: Boolean) {
+private fun DiskCard(disks: List<app.kopru.DiskRow>, st: AppState) {
     val c = tb
     TbCard {
         SectionTitle("Disk")
         Spacer8()
-        if (!up && disks.isEmpty()) { OffState("T-DeskTree", "t-desktree"); return@TbCard }
+        if (st != AppState.RUNNING && disks.isEmpty()) { OffState("T-DeskTree", "t-desktree", st); return@TbCard }
         if (disks.isEmpty()) Text("Okunuyor…", color = c.faint, style = MaterialTheme.typography.bodySmall)
         disks.forEach { d ->
             Column(Modifier.padding(vertical = 5.dp)) {
@@ -214,7 +281,7 @@ private fun AppsCard(s: app.kopru.SuiteUi, viewer: app.kopru.ViewerState) {
     TbCard {
         SectionTitle("Uygulamalar")
         Spacer8()
-        if (s.apps.isEmpty()) Text("Bilgisayarda çalışan T-Suite uygulaması yok", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        if (s.apps.isEmpty()) Text("Bu bilgisayarda kurulu T-Suite uygulaması bulunamadı", color = c.faint, style = MaterialTheme.typography.bodySmall)
         s.apps.forEach { a ->
             Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(if (a.running) c.goldHi else c.faint))
