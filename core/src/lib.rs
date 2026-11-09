@@ -36,6 +36,12 @@ pub fn init_logging() {
     );
 }
 
+/// Bu cihaz `camera` yeteneğini duyursun mu (Android: true; masaüstü yalnızca Windows 11'de). Node oluşturulmadan ÖNCE çağrılır.
+#[uniffi::export]
+pub fn set_camera_capability(on: bool) {
+    camera::set_camera_cap(on);
+}
+
 #[derive(uniffi::Object)]
 pub struct Node {
     inner: Arc<Inner>,
