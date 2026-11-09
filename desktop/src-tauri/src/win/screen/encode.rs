@@ -25,6 +25,26 @@ pub struct EncodedFrame {
 const EV_NEED_INPUT: u32 = 601; // METransformNeedInput
 const EV_HAVE_OUTPUT: u32 = 602; // METransformHaveOutput
 
+/// Renk meta verisi: BT.709 matrisi + sınırlı (16-235) aralık. Kaynak dönüştürücü (capture.rs `Converter`) ile aynı olmalı;
+/// yoksa karşı taraf (Android MediaCodec) varsayılanla (BT.601 / tam aralık) yorumlayıp soluk veya aşırı doygun renk üretir.
+fn set_color(t: &IMFMediaType) {
+    unsafe {
+        let _ = t.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709.0 as u32);
+        let _ = t.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235.0 as u32);
+        let _ = t.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709.0 as u32);
+        let _ = t.SetUINT32(&MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709.0 as u32);
+    }
+}
+
+fn clear_color(t: &IMFMediaType) {
+    unsafe {
+        let _ = t.DeleteItem(&MF_MT_YUV_MATRIX);
+        let _ = t.DeleteItem(&MF_MT_VIDEO_NOMINAL_RANGE);
+        let _ = t.DeleteItem(&MF_MT_VIDEO_PRIMARIES);
+        let _ = t.DeleteItem(&MF_MT_TRANSFER_FUNCTION);
+    }
+}
+
 fn var_u32(v: u32) -> VARIANT {
     VARIANT {
         Anonymous: VARIANT_0 {
@@ -88,6 +108,33 @@ pub struct Encoder {
     staging: Option<ID3D11Texture2D>,
     provides_samples: bool,
     out_size: u32,
+    /// Ardışık `MF_E_TRANSFORM_STREAM_CHANGE` sayısı ve çıkış türünün bu dizide yeniden müzakere edilip edilmediği.
+    change_run: u32,
+    renegotiated: bool,
+}
+
+/// Ardışık STREAM_CHANGE sınırı: aşılırsa çıkış türü yeniden müzakere edilir.
+const MAX_STREAM_CHANGES: u32 = 8;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ChangeAction {
+    /// Normal: çıktıyı tekrar oku.
+    Retry,
+    /// Çok fazla ardışık değişim: çıkış türünü yeniden seç.
+    Renegotiate,
+    /// Yeniden müzakereye rağmen sürüyor: sonsuz döngü yerine hata.
+    Fail,
+}
+
+/// `run` = bu değişim dâhil ardışık STREAM_CHANGE sayısı.
+fn stream_change_action(run: u32, renegotiated: bool) -> ChangeAction {
+    if run <= MAX_STREAM_CHANGES {
+        ChangeAction::Retry
+    } else if !renegotiated {
+        ChangeAction::Renegotiate
+    } else {
+        ChangeAction::Fail
+    }
 }
 
 fn enum_mfts(hw: bool) -> Vec<IMFActivate> {
@@ -173,7 +220,12 @@ impl Encoder {
             out.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1))?;
             out.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
             out.SetUINT32(&MF_MT_MPEG2_PROFILE, 77)?; // Main
-            mft.SetOutputType(0, &out, 0)?;
+            set_color(&out);
+            if mft.SetOutputType(0, &out, 0).is_err() {
+                log::warn!("kodlayıcı çıkış türü renk niteliklerini kabul etmedi; varsayılan renk kullanılıyor");
+                clear_color(&out);
+                mft.SetOutputType(0, &out, 0)?;
+            }
 
             let mut set_in = false;
             for i in 0..32 {
@@ -183,7 +235,11 @@ impl Encoder {
                     t.SetUINT64(&MF_MT_FRAME_RATE, pack(fps, 1))?;
                     t.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1))?;
                     t.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-                    mft.SetInputType(0, &t, 0)?;
+                    set_color(&t);
+                    if mft.SetInputType(0, &t, 0).is_err() {
+                        clear_color(&t);
+                        mft.SetInputType(0, &t, 0)?;
+                    }
                     set_in = true;
                     break;
                 }
@@ -224,6 +280,8 @@ impl Encoder {
                 staging: None,
                 provides_samples,
                 out_size: info.cbSize.max(w * h * 2),
+                change_run: 0,
+                renegotiated: false,
             })
         }
     }
@@ -369,10 +427,28 @@ impl Encoder {
                     if !data.is_empty() {
                         out.push(EncodedFrame { data, key: idr, pts_100ns: pts });
                     }
+                    self.change_run = 0;
+                    self.renegotiated = false;
                     Ok(true)
                 }
-                Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => Ok(false),
-                Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => Ok(true),
+                Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => {
+                    self.change_run = 0;
+                    Ok(false)
+                }
+                Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
+                    self.change_run += 1;
+                    match stream_change_action(self.change_run, self.renegotiated) {
+                        ChangeAction::Retry => Ok(true),
+                        ChangeAction::Renegotiate => {
+                            log::warn!("kodlayıcı: ardışık STREAM_CHANGE > {MAX_STREAM_CHANGES}, çıkış türü yeniden müzakere ediliyor");
+                            self.renegotiated = true;
+                            let t = self.mft.GetOutputAvailableType(0, 0)?;
+                            self.mft.SetOutputType(0, &t, 0)?;
+                            Ok(true)
+                        }
+                        ChangeAction::Fail => Err(windows::core::Error::new(e.code(), "kodlayıcı çıkış türü değişimi sürüyor")),
+                    }
+                }
                 Err(e) => Err(e),
             }
         }
@@ -392,6 +468,15 @@ impl Drop for Encoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_change_decision() {
+        assert_eq!(stream_change_action(1, false), ChangeAction::Retry);
+        assert_eq!(stream_change_action(8, false), ChangeAction::Retry);
+        assert_eq!(stream_change_action(9, false), ChangeAction::Renegotiate);
+        assert_eq!(stream_change_action(10, true), ChangeAction::Fail);
+        assert_eq!(stream_change_action(3, true), ChangeAction::Retry);
+    }
 
     #[test]
     fn annexb_analysis() {
