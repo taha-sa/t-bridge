@@ -35,6 +35,44 @@ pub struct Sink {
     pub on_status: Box<dyn Fn(Result<String, String>) + Send>,
 }
 
+/// Boru hatları arası dışlama: durdurulan eski hat (WGC oturumu / D3D aygıtı / MF kodlayıcı / QUIC video akışı) hâlâ sönerken
+/// yeni hat kaynaklara dokunmasın. Bekleme çağıranın değil, yeni hattın kendi iş parçacığında yapılır (UI/async bloke olmaz).
+pub(crate) struct Gate {
+    active: Mutex<usize>,
+    cv: std::sync::Condvar,
+}
+
+pub(crate) struct Permit(Arc<Gate>);
+
+impl Gate {
+    pub(crate) fn new() -> Arc<Gate> {
+        Arc::new(Gate { active: Mutex::new(0), cv: std::sync::Condvar::new() })
+    }
+
+    /// Önceki hatlar bitene dek en çok `max` bekler; süre dolarsa uyarıyla devam eder. (İzin, bekleme başarılı mı)
+    pub(crate) fn acquire(self: &Arc<Self>, max: Duration) -> (Permit, bool) {
+        let g = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut g, res) = self.cv.wait_timeout_while(g, max, |n| *n > 0).unwrap_or_else(|e| e.into_inner());
+        *g += 1;
+        (Permit(self.clone()), !res.timed_out())
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        let mut g = self.0.active.lock().unwrap_or_else(|e| e.into_inner());
+        *g = g.saturating_sub(1);
+        self.0.cv.notify_all();
+    }
+}
+
+fn gate() -> &'static Arc<Gate> {
+    static G: std::sync::OnceLock<Arc<Gate>> = std::sync::OnceLock::new();
+    G.get_or_init(Gate::new)
+}
+
+const GATE_WAIT: Duration = Duration::from_secs(2);
+
 pub struct Pipeline {
     stop: Arc<AtomicBool>,
     key: Arc<AtomicBool>,
@@ -50,9 +88,19 @@ impl Pipeline {
         let gen_ = Arc::new(AtomicU64::new(0));
         let cfg = Arc::new(Mutex::new(params));
         let (s2, k2, g2, c2) = (stop.clone(), key.clone(), gen_.clone(), cfg.clone());
+        let stop_flag = stop.clone();
         let join = std::thread::Builder::new()
             .name("screen-share".into())
-            .spawn(move || thread_main(s2, k2, g2, c2, sink))
+            .spawn(move || {
+                let (_permit, ok) = gate().acquire(GATE_WAIT);
+                if !ok {
+                    log::warn!("ekran paylaşımı: önceki ardışık düzen {GATE_WAIT:?} içinde bitmedi, yine de başlatılıyor");
+                }
+                if stop_flag.load(Ordering::SeqCst) {
+                    return; // beklerken durduruldu
+                }
+                thread_main(s2, k2, g2, c2, sink)
+            })
             .ok();
         Pipeline { stop, key, gen_, cfg, join }
     }
@@ -257,5 +305,36 @@ mod tests {
     #[test]
     fn monitors_enumerate_without_panic() {
         let _ = capture::monitors();
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn second_waits_for_first_release() {
+        let g = Gate::new();
+        let (p1, ok1) = g.acquire(Duration::from_millis(50));
+        assert!(ok1);
+        let g2 = g.clone();
+        let h = std::thread::spawn(move || {
+            let t = Instant::now();
+            let (_p, ok) = g2.acquire(Duration::from_secs(2));
+            (ok, t.elapsed())
+        });
+        std::thread::sleep(Duration::from_millis(150));
+        drop(p1);
+        let (ok, el) = h.join().unwrap();
+        assert!(ok);
+        assert!(el >= Duration::from_millis(100), "{el:?}");
+    }
+
+    #[test]
+    fn times_out_and_proceeds() {
+        let g = Gate::new();
+        let (_p1, _) = g.acquire(Duration::from_millis(10));
+        let (_p2, ok) = g.acquire(Duration::from_millis(80));
+        assert!(!ok);
     }
 }
