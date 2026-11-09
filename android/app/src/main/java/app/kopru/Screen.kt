@@ -65,6 +65,7 @@ object Screen {
             _ui.update { it.copy(error = "Bilgisayardaki T-Bridge ekran paylaşımını desteklemiyor") }
             return
         }
+        baseOffset = Long.MAX_VALUE
         _ui.update { it.copy(viewing = true, error = null, current = monitor, preset = preset, fps = 0, latencyMs = 0) }
         needKey = true
         n.sendScreenStart(monitor.toUInt(), preset.w.toUInt(), preset.h.toUInt(), preset.fps.toUInt(), preset.kbps.toUInt())

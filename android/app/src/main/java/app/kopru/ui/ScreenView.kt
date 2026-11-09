@@ -43,6 +43,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -273,9 +275,9 @@ fun ScreenViewer(
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(horizontal = 6.dp),
                     )
-                    TextButton({ kb = !kb }) { Text("⌨", color = if (kb) c.goldHi else c.muted) }
-                    TextButton({ scale = 1f; pan = Offset.Zero; onToggleFullscreen() }) { Text(if (fullscreen) "⤡" else "⛶", color = c.text) }
-                    TextButton({ onClose() }) { Text("✕", color = c.text) }
+                    TextButton({ kb = !kb }) { Text("⌨", modifier = Modifier.semantics { contentDescription = "Klavye" }, color = if (kb) c.goldHi else c.muted) }
+                    TextButton({ scale = 1f; pan = Offset.Zero; onToggleFullscreen() }) { Text(if (fullscreen) "⤡" else "⛶", modifier = Modifier.semantics { contentDescription = if (fullscreen) "Tam ekrandan çık" else "Tam ekran" }, color = c.text) }
+                    TextButton({ onClose() }) { Text("✕", modifier = Modifier.semantics { contentDescription = "Kapat" }, color = c.text) }
                 }
             }
         }
