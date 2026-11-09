@@ -183,6 +183,12 @@ pub fn reply_notification(s: S<'_>, key: String, text: String) -> Result<(), Str
     }
 }
 
+/// Açılır hapın "Durdur" düğmesi / Ayarlar: paylaşımı hemen kes.
+#[tauri::command]
+pub fn stop_screen_share(s: S<'_>) {
+    crate::screen_share::stop(&s.app, "PC kullanıcısı durdurdu");
+}
+
 #[tauri::command]
 pub fn clear_notifications(s: S<'_>) -> Result<(), String> {
     let keys: Vec<String> = lk(&s.notifications).drain(..).map(|n| n.key).collect();
@@ -219,6 +225,8 @@ pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
         let old = lk(&s.settings);
         // Sürüm alanı yalnızca arka uçta yönetilir (arayüz eski değer yollasa da göç tekrarlanmasın).
         settings.settings_version = old.settings_version;
+        // "Her zaman izin ver" listesi yalnızca onay penceresiyle değişir (arayüzdeki eski kopya ezmesin).
+        settings.screen_allowed = old.screen_allowed.clone();
         old.download_dir != settings.download_dir
     };
     if !settings.notif_mirror {

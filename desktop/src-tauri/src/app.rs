@@ -39,6 +39,10 @@ pub struct Settings {
     /// "dark" | "system" | "light"
     pub theme: String,
     pub auto_update: bool,
+    /// Telefonun bu bilgisayarın ekranını görmesine izin ver (kapalıysa özellik tamamen devre dışı).
+    pub screen_share: bool,
+    /// "Her zaman izin ver" denen telefon kimlikleri (ilk seferde onay sorulur).
+    pub screen_allowed: Vec<String>,
     /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
     #[serde(default = "legacy_version")]
     pub settings_version: u32,
@@ -79,6 +83,8 @@ impl Default for Settings {
             muted_apps: Vec::new(),
             theme: "dark".into(),
             auto_update: true,
+            screen_share: true,
+            screen_allowed: Vec::new(),
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -105,6 +111,8 @@ pub struct Shared {
     pub firewall_ok: std::sync::atomic::AtomicBool,
     pub updater: crate::updater::Updater,
     pub node: OnceLock<Arc<Node>>,
+    /// Uzaktan ekran görüntüleme oturumu.
+    pub screen: Mutex<crate::screen_share::ScreenState>,
 }
 
 impl Shared {
@@ -150,6 +158,33 @@ impl Shared {
         let _ = tray.set_tooltip(Some(tip));
     }
 
+    /// Ekran paylaşılırken tepsi simgesine altın nokta ekler; bitince özgün simgeye döner.
+    pub fn set_tray_tint(&self, on: bool) {
+        let Some(tray) = self.app.tray_by_id("tray") else { return };
+        let Some(icon) = self.app.default_window_icon() else { return };
+        let (w, h) = (icon.width(), icon.height());
+        let mut rgba = icon.rgba().to_vec();
+        if on {
+            let r = (w.min(h) as f32 * 0.22).max(3.0);
+            let (cx, cy) = (w as f32 - r - 1.0, h as f32 - r - 1.0);
+            for y in 0..h {
+                for x in 0..w {
+                    let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                    let d = (dx * dx + dy * dy).sqrt();
+                    if d <= r + 1.0 {
+                        let i = ((y * w + x) * 4) as usize;
+                        let (c, a): ([u8; 3], u8) = if d <= r - 1.0 { ([0xE3, 0xA9, 0x2B], 255) } else if d <= r { ([0x0A, 0x0A, 0x0B], 255) } else { ([0x0A, 0x0A, 0x0B], 160) };
+                        rgba[i] = c[0];
+                        rgba[i + 1] = c[1];
+                        rgba[i + 2] = c[2];
+                        rgba[i + 3] = a;
+                    }
+                }
+            }
+        }
+        let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, w, h)));
+    }
+
     /// Çekirdekten gelen olay. Kumanda olayları doğrudan işlenir (arayüze gitmez).
     pub fn handle(&self, ev: Event) {
         match &ev {
@@ -161,12 +196,21 @@ impl Shared {
                 win::input::exec(cmd);
                 return;
             }
+            Event::Screen { cmd } => {
+                crate::screen_share::on_cmd(&self.app, cmd.clone());
+                return;
+            }
             Event::ClipboardReceived { text } => {
                 if lk(&self.settings).clipboard_sync {
                     win::clipboard::set_text(text);
                 }
             }
             Event::State { state, .. } => {
+                if *state == ConnState::Connected {
+                    crate::screen_share::on_connected(&self.app);
+                } else {
+                    crate::screen_share::on_disconnected(&self.app);
+                }
                 if *state == ConnState::Connected {
                     // Telefon güncel listeyi baştan gönderecek: bağlantı yokken kalkanlar burada kalmasın.
                     lk(&self.notifications).clear();

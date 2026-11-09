@@ -102,6 +102,7 @@
 
   <section class="card group">
     <h3>Pano ve bildirimler</h3>
+    {@render item('Uzaktan ekran görüntüleme', 'Telefon bu bilgisayarın ekranını görüp fare ve klavyeyi kullanabilir. Her yeni telefon için ilk seferde onay sorulur; paylaşırken üstte bir gösterge görünür.', 'screenShare')}
     {@render item('Pano eşitleme', 'Kopyaladığın metin telefonda da kopyalanmış olur.', 'clipboardSync')}
     {@render item('Telefon bildirimlerini göster', 'Kapatırsan telefon bildirimleri hiç alınmaz; ses ve uyarı da durur.', 'notifMirror')}
     {#if s.settings.notifMirror}

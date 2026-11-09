@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod screen_share;
 mod updater;
 mod win;
 
@@ -154,6 +155,7 @@ pub fn run() {
             commands::reveal,
             commands::open_downloads,
             commands::dismiss_notification,
+            commands::stop_screen_share,
             commands::reply_notification,
             commands::clear_notifications,
             commands::mute_app,
@@ -191,6 +193,7 @@ pub fn run() {
                 firewall_ok: std::sync::atomic::AtomicBool::new(true),
                 updater: updater::Updater::new(),
                 node: OnceLock::new(),
+                screen: Default::default(),
             });
             if first_run || migrated {
                 shared.save_settings();

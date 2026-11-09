@@ -58,6 +58,18 @@ fn combo(mods: &[VIRTUAL_KEY], vk: VIRTUAL_KEY) {
     send(&v);
 }
 
+/// Mutlak imleç konumu: `x`,`y` 0..1, `monitor` indeksli monitörün sınırlarına göre.
+pub fn move_abs(monitor: u32, x: f32, y: f32) {
+    use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+    let mons = crate::win::screen::capture::monitors();
+    let Some(m) = mons.iter().find(|m| m.index == monitor).or_else(|| mons.iter().find(|m| m.primary)) else { return };
+    let px = m.left + (x.clamp(0.0, 1.0) * (m.width.saturating_sub(1)) as f32).round() as i32;
+    let py = m.top + (y.clamp(0.0, 1.0) * (m.height.saturating_sub(1)) as f32).round() as i32;
+    unsafe {
+        let _ = SetCursorPos(px, py);
+    }
+}
+
 pub fn move_rel(dx: i32, dy: i32) {
     send(&[mouse(dx, dy, 0, MOUSEEVENTF_MOVE)]);
 }

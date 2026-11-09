@@ -58,6 +58,8 @@ export interface Settings {
   mutedApps: string[]
   theme: Theme
   autoUpdate: boolean
+  screenShare: boolean
+  screenAllowed: string[]
 }
 
 export type Theme = 'dark' | 'system' | 'light'

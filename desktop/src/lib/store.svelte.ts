@@ -27,6 +27,8 @@ const empty: Snapshot = {
     mutedApps: [],
     theme: 'dark',
     autoUpdate: true,
+    screenShare: true,
+    screenAllowed: [],
   },
   downloadDir: '',
   error: null,
