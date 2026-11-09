@@ -8,7 +8,7 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, LPARAM, RECT},
         Graphics::{
-            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0},
             Direct3D11::*,
             Dxgi::{Common::*, *},
             Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW},
@@ -195,15 +195,30 @@ impl Drop for Wgc {
 
 // ---------------------------------------------------------------- DXGI Desktop Duplication (yedek)
 
+/// Çıktı, GPU cihazından farklı bir bağdaştırıcıdaysa (hibrit dizüstü / ikinci GPU) çoğaltma kendi cihazında çalışır;
+/// kare CPU üzerinden ana cihazın dokusuna aktarılır (yedek yol: yavaş ama çalışır).
+struct Cross {
+    _dev: ID3D11Device,
+    ctx: ID3D11DeviceContext,
+    staging: ID3D11Texture2D,
+}
+
 pub struct Dup {
     dup: IDXGIOutputDuplication,
     w: u32,
     h: u32,
+    cross: Option<Cross>,
+}
+
+/// `adapters[i]` = i. bağdaştırıcının çıktılarının monitör tanıtıcıları. İlk eşleşen (bağdaştırıcı, çıktı) çifti.
+pub(crate) fn find_output(adapters: &[Vec<isize>], hmon: isize) -> Option<(usize, usize)> {
+    adapters.iter().enumerate().find_map(|(a, outs)| outs.iter().position(|h| *h == hmon).map(|o| (a, o)))
 }
 
 impl Dup {
     pub fn new(gpu: &Gpu, hmon: HMONITOR) -> Result<Self> {
         unsafe {
+            // 1) Ana cihazın kendi bağdaştırıcısı (sıfır kopya).
             let dxgi: IDXGIDevice = gpu.device.cast()?;
             let adapter: IDXGIAdapter = dxgi.GetAdapter()?;
             let mut i = 0;
@@ -213,12 +228,67 @@ impl Dup {
                     let out1: IDXGIOutput1 = out.cast()?;
                     let dup = out1.DuplicateOutput(&gpu.device)?;
                     let r = desc.DesktopCoordinates;
-                    return Ok(Self { dup, w: (r.right - r.left) as u32, h: (r.bottom - r.top) as u32 });
+                    return Ok(Self { dup, w: (r.right - r.left) as u32, h: (r.bottom - r.top) as u32, cross: None });
                 }
                 i += 1;
             }
+            // 2) Başka bağdaştırıcılar.
+            let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
+            let mut adapters: Vec<IDXGIAdapter> = Vec::new();
+            let mut handles: Vec<Vec<isize>> = Vec::new();
+            let mut ai = 0;
+            while let Ok(a1) = factory.EnumAdapters1(ai) {
+                ai += 1;
+                let a: IDXGIAdapter = a1.cast()?;
+                let mut hs = Vec::new();
+                let mut oi = 0;
+                while let Ok(out) = a.EnumOutputs(oi) {
+                    hs.push(out.GetDesc().map(|d| d.Monitor.0 as isize).unwrap_or(0));
+                    oi += 1;
+                }
+                adapters.push(a);
+                handles.push(hs);
+            }
+            let (ai, oi) = find_output(&handles, hmon.0 as isize)
+                .ok_or_else(|| windows::core::Error::new(windows::core::HRESULT(-1), "monitör çıktısı bulunamadı"))?;
+            let a = &adapters[ai];
+            let out = a.EnumOutputs(oi as u32)?;
+            let desc = out.GetDesc()?;
+            let mut dev = None;
+            let mut dctx = None;
+            D3D11CreateDevice(
+                a,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                Some(&[D3D_FEATURE_LEVEL_11_0]),
+                D3D11_SDK_VERSION,
+                Some(&mut dev),
+                None,
+                Some(&mut dctx),
+            )?;
+            let dev = dev.ok_or_else(windows::core::Error::empty)?;
+            let dctx = dctx.ok_or_else(windows::core::Error::empty)?;
+            let out1: IDXGIOutput1 = out.cast()?;
+            let dup = out1.DuplicateOutput(&dev)?;
+            let r = desc.DesktopCoordinates;
+            let (w, h) = ((r.right - r.left) as u32, (r.bottom - r.top) as u32);
+            let sd = D3D11_TEXTURE2D_DESC {
+                Width: w,
+                Height: h,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                Usage: D3D11_USAGE_STAGING,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                ..Default::default()
+            };
+            let mut st = None;
+            dev.CreateTexture2D(&sd, None, Some(&mut st))?;
+            let staging = st.ok_or_else(windows::core::Error::empty)?;
+            Ok(Self { dup, w, h, cross: Some(Cross { _dev: dev, ctx: dctx, staging }) })
         }
-        Err(windows::core::Error::new(windows::core::HRESULT(-1), "monitör çıktısı bulunamadı"))
     }
 }
 
@@ -236,7 +306,16 @@ impl Source for Dup {
             Ok(()) => {
                 let ok = (|| -> Result<()> {
                     let tex: ID3D11Texture2D = res.ok_or_else(windows::core::Error::empty)?.cast()?;
-                    unsafe { ctx.CopyResource(dst, &tex) };
+                    match &self.cross {
+                        None => unsafe { ctx.CopyResource(dst, &tex) },
+                        Some(c) => unsafe {
+                            c.ctx.CopyResource(&c.staging, &tex);
+                            let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+                            c.ctx.Map(&c.staging, 0, D3D11_MAP_READ, 0, Some(&mut m))?;
+                            ctx.UpdateSubresource(dst, 0, None, m.pData, m.RowPitch, 0);
+                            c.ctx.Unmap(&c.staging, 0);
+                        },
+                    }
                     Ok(())
                 })();
                 let _ = unsafe { self.dup.ReleaseFrame() };
@@ -251,6 +330,19 @@ impl Source for Dup {
 // ---------------------------------------------------------------- BGRA -> NV12 (GPU, ölçekleme dahil)
 
 pub const RING: usize = 4;
+
+/// D3D11_VIDEO_PROCESSOR_COLOR_SPACE bit alanı: Usage:1 | RGB_Range:1 | YCbCr_Matrix:1 | xvYCC:1 | Nominal_Range:2.
+fn color_space_bits(yuv_out: bool) -> u32 {
+    if yuv_out {
+        (1 << 2) | (1 << 4) // YCbCr_Matrix = BT.709, Nominal_Range = 16_235
+    } else {
+        0 // RGB_Range = 0: 0-255
+    }
+}
+
+fn color_space(yuv_out: bool) -> D3D11_VIDEO_PROCESSOR_COLOR_SPACE {
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: color_space_bits(yuv_out) }
+}
 
 /// vdev/en/vp: GPU nesneleri Converter ömrü boyunca canlı tutulur.
 #[allow(dead_code)]
@@ -322,6 +414,10 @@ impl Converter {
             vctx.VideoProcessorSetStreamSourceRect(&vp, 0, true, Some(&src_rect));
             vctx.VideoProcessorSetStreamDestRect(&vp, 0, true, Some(&dst_rect));
             vctx.VideoProcessorSetOutputTargetRect(&vp, true, Some(&dst_rect));
+            // Renk: giriş BGRA tam aralık RGB; çıkış NV12 BT.709, sınırlı aralık (16-235). Kodlayıcı türüyle (encode.rs) aynı.
+            // Sürücü bu çağrıları desteklemezse (void döner) varsayılan davranış sürer; hata oluşmaz.
+            vctx.VideoProcessorSetStreamColorSpace(&vp, 0, &color_space(false));
+            vctx.VideoProcessorSetOutputColorSpace(&vp, &color_space(true));
             Ok(Self { vctx, vdev, vp, en, input_view, nv12, out_views })
         }
     }
@@ -336,5 +432,27 @@ impl Converter {
         let r = unsafe { self.vctx.VideoProcessorBlt(&self.vp, &self.out_views[idx], 0, std::slice::from_ref(&stream)) };
         unsafe { std::mem::ManuallyDrop::drop(&mut stream.pInputSurface) }; // klonlanan referansı bırak (sızıntı yok)
         r
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_output_scans_all_adapters() {
+        let a = vec![vec![10, 11], vec![], vec![20, 21, 22]];
+        assert_eq!(find_output(&a, 10), Some((0, 0)));
+        assert_eq!(find_output(&a, 21), Some((2, 1)));
+        assert_eq!(find_output(&a, 99), None);
+        assert_eq!(find_output(&[], 1), None);
+    }
+
+    #[test]
+    fn color_space_is_bt709_limited_for_yuv_only() {
+        assert_eq!(color_space_bits(false), 0);
+        let b = color_space_bits(true);
+        assert_eq!(b & (1 << 2), 1 << 2); // BT.709
+        assert_eq!((b >> 4) & 3, 1); // 16-235
     }
 }
