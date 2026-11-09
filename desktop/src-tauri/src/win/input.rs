@@ -67,10 +67,44 @@ pub fn presentation_fullscreen(kind: &str) {
     }
 }
 
+/// Monitör listesi önbelleği: `move_abs` her olayda `EnumDisplayMonitors` çağırmasın. Ekran düzeni değişimi (WM_DISPLAYCHANGE
+/// için ayrı pencere döngüsü yok) kısa TTL ile ve ekran paylaşımı başlarken `invalidate_monitors` ile geçersiz kılınır.
+static MON_CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<MonRect>)>> = std::sync::Mutex::new(None);
+/// Önbellekte yalnız imleç hesabı için gereken alanlar (HMONITOR Send değil).
+#[derive(Clone, Copy)]
+struct MonRect {
+    index: u32,
+    primary: bool,
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+}
+const MON_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+pub fn invalidate_monitors() {
+    *MON_CACHE.lock().unwrap() = None;
+}
+
+fn cached_monitors() -> Vec<MonRect> {
+    let mut g = MON_CACHE.lock().unwrap();
+    if let Some((t, v)) = g.as_ref() {
+        if t.elapsed() < MON_TTL {
+            return v.clone();
+        }
+    }
+    let v: Vec<MonRect> = crate::win::screen::capture::monitors()
+        .iter()
+        .map(|m| MonRect { index: m.index, primary: m.primary, left: m.left, top: m.top, width: m.width, height: m.height })
+        .collect();
+    *g = Some((std::time::Instant::now(), v.clone()));
+    v
+}
+
 /// Mutlak imleç konumu: `x`,`y` 0..1, `monitor` indeksli monitörün sınırlarına göre.
 pub fn move_abs(monitor: u32, x: f32, y: f32) {
     use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
-    let mons = crate::win::screen::capture::monitors();
+    let mons = cached_monitors();
     let Some(m) = mons.iter().find(|m| m.index == monitor).or_else(|| mons.iter().find(|m| m.primary)) else { return };
     let px = m.left + (x.clamp(0.0, 1.0) * (m.width.saturating_sub(1)) as f32).round() as i32;
     let py = m.top + (y.clamp(0.0, 1.0) * (m.height.saturating_sub(1)) as f32).round() as i32;

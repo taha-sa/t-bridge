@@ -154,6 +154,12 @@ impl Hub {
         out
     }
 
+    /// `refresh` senkron dosya G/Ç yapar: async bağlamda çalışma zamanı iş parçacığını bloklamasın.
+    async fn refresh_async(self: &Arc<Self>) {
+        let h = self.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || h.refresh()).await;
+    }
+
     /// Kayıt klasörünü tarar, istemcileri açar/kapatır; liste değiştiyse telefona yollar.
     fn refresh(self: &Arc<Self>) {
         let all = registry::read_all(&self.dir);
@@ -246,17 +252,17 @@ impl Hub {
             };
         }
         if name == "app.launch" {
-            self.refresh();
+            self.refresh_async().await;
             return self.launch(id, &[]).map(|_| json!({ "launched": true }));
         }
         let connected = |h: &Hub| h.apps.lock().unwrap().get(id).and_then(|e| e.client.as_ref().map(|c| c.is_connected())).unwrap_or(false);
         if !connected(self) {
-            self.refresh();
+            self.refresh_async().await;
             let args = self.apps.lock().unwrap().get(id).map(|e| launch_args(&e.m)).unwrap_or_default();
             self.launch(id, &args)?;
             let deadline = Instant::now() + Duration::from_secs(12);
             loop {
-                self.refresh();
+                self.refresh_async().await;
                 if connected(self) {
                     break;
                 }
@@ -358,7 +364,7 @@ impl Hub {
                 }
             }
         }
-        self.refresh();
+        self.refresh_async().await;
     }
 }
 
@@ -415,7 +421,7 @@ pub fn start(app: &AppHandle) {
             }
         });
         loop {
-            h2.refresh();
+            h2.refresh_async().await;
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
@@ -433,7 +439,7 @@ pub fn on_phone_state(connected: bool) {
     h.server.publish(if connected { "phone.connected" } else { "phone.disconnected" }, Some(json!({})));
     if connected {
         *h.last_sent.lock().unwrap() = Vec::new(); // yeni oturum: listeyi baştan gönder
-        h.refresh();
+        { let h = h.clone(); tauri::async_runtime::spawn_blocking(move || h.refresh()); }
     }
 }
 

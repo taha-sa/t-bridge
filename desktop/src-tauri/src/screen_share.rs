@@ -48,6 +48,7 @@ fn shared(app: &AppHandle) -> Arc<Shared> {
 }
 
 fn monitor_infos() -> Vec<MonitorInfo> {
+    crate::win::input::invalidate_monitors();
     screen::monitors()
         .into_iter()
         .map(|m| MonitorInfo { index: m.index, name: m.name, width: m.width, height: m.height, primary: m.primary })
