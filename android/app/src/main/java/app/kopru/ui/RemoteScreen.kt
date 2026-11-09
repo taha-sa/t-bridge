@@ -43,6 +43,26 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.platform.LocalContext as LocalCtx
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.kopru.Screen
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
@@ -97,7 +117,25 @@ fun RemoteScreen(ui: UiState) {
             Pill(if (on) "canlı" else "bağlı değil", if (on) "violet" else "muted")
         }
 
-        Touchpad(sens)
+        val scr by Screen.ui.collectAsStateWithLifecycle()
+        var full by rememberSaveable { mutableStateOf(false) }
+        ScreenLifecycle()
+        ScreenToggle(scr, on)
+        if (scr.viewing) {
+            val ar = if (scr.videoW > 0 && scr.videoH > 0) scr.videoW.toFloat() / scr.videoH else 16f / 9f
+            if (!full) {
+                ScreenViewer(
+                    scr, false,
+                    onToggleFullscreen = { full = true },
+                    onClose = { Screen.stopViewing() },
+                    modifier = Modifier.fillMaxWidth().aspectRatio(ar).clip(RoundedCornerShape(16.dp)),
+                )
+            } else {
+                FullscreenViewer(scr, onExit = { full = false }, onClose = { full = false; Screen.stopViewing() })
+            }
+        } else {
+            Touchpad(sens)
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TbButton("Sol tık", { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f))
             TbButton("Orta", { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f))
@@ -122,23 +160,7 @@ fun RemoteScreen(ui: UiState) {
         Section("Klavye") {
             LiveKeyboard()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Chip("Esc") { key(SpecialKey.ESCAPE) }
-                Chip("Tab") { key(SpecialKey.TAB) }
-                Chip("⌫") { key(SpecialKey.BACKSPACE) }
-                Chip("Del") { key(SpecialKey.DELETE) }
-                Chip("Enter") { key(SpecialKey.ENTER) }
-                Chip("←") { key(SpecialKey.LEFT) }
-                Chip("↑") { key(SpecialKey.UP) }
-                Chip("↓") { key(SpecialKey.DOWN) }
-                Chip("→") { key(SpecialKey.RIGHT) }
-                Chip("Home") { key(SpecialKey.HOME) }
-                Chip("End") { key(SpecialKey.END) }
-                Chip("PgUp") { key(SpecialKey.PAGE_UP) }
-                Chip("PgDn") { key(SpecialKey.PAGE_DOWN) }
-                Chip("Win") { key(SpecialKey.WIN) }
-                Chip("Alt+Tab") { key(SpecialKey.ALT_TAB) }
-                Chip("Kopyala") { key(SpecialKey.COPY_SHORTCUT) }
-                Chip("Yapıştır") { key(SpecialKey.PASTE_SHORTCUT) }
+                KeyChips()
             }
         }
 
@@ -199,6 +221,27 @@ fun RemoteScreen(ui: UiState) {
 }
 
 @Composable
+internal fun KeyChips() {
+    Chip("Esc") { key(SpecialKey.ESCAPE) }
+    Chip("Tab") { key(SpecialKey.TAB) }
+    Chip("⌫") { key(SpecialKey.BACKSPACE) }
+    Chip("Del") { key(SpecialKey.DELETE) }
+    Chip("Enter") { key(SpecialKey.ENTER) }
+    Chip("←") { key(SpecialKey.LEFT) }
+    Chip("↑") { key(SpecialKey.UP) }
+    Chip("↓") { key(SpecialKey.DOWN) }
+    Chip("→") { key(SpecialKey.RIGHT) }
+    Chip("Home") { key(SpecialKey.HOME) }
+    Chip("End") { key(SpecialKey.END) }
+    Chip("PgUp") { key(SpecialKey.PAGE_UP) }
+    Chip("PgDn") { key(SpecialKey.PAGE_DOWN) }
+    Chip("Win") { key(SpecialKey.WIN) }
+    Chip("Alt+Tab") { key(SpecialKey.ALT_TAB) }
+    Chip("Kopyala") { key(SpecialKey.COPY_SHORTCUT) }
+    Chip("Yapıştır") { key(SpecialKey.PASTE_SHORTCUT) }
+}
+
+@Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
     TbCard {
         SectionTitle(title)
@@ -208,7 +251,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Chip(label: String, onClick: () -> Unit) {
+internal fun Chip(label: String, onClick: () -> Unit) {
     val c = tb
     val shape = RoundedCornerShape(10.dp)
     Text(
@@ -226,7 +269,7 @@ private fun Chip(label: String, onClick: () -> Unit) {
 
 /** Yazılan metin anında PC'ye gider: eklenen karakterler metin olarak, silinenler Backspace olarak. */
 @Composable
-private fun LiveKeyboard() {
+internal fun LiveKeyboard() {
     var text by remember { mutableStateOf("") }
     OutlinedTextField(
         value = text,
@@ -365,5 +408,73 @@ private fun Touchpad(sens: Float) {
             }
         }
         Text("TOUCHPAD", color = c.faint, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** Uygulama arka plana gidince çözmeyi durdur (pil), dönünce sürdür; sekmeden çıkınca paylaşımı kapat. */
+@Composable
+private fun ScreenLifecycle() {
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_STOP) Screen.pause()
+            if (e == Lifecycle.Event.ON_START) Screen.resume()
+        }
+        owner.lifecycle.addObserver(obs)
+        onDispose {
+            owner.lifecycle.removeObserver(obs)
+            Screen.stopViewing()
+        }
+    }
+}
+
+@Composable
+private fun ScreenToggle(scr: app.kopru.ScreenUi, connected: Boolean) {
+    val c = tb
+    val supported = connected && Screen.supported()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Ekranı göster", color = c.text, style = MaterialTheme.typography.titleSmall)
+            Text(
+                when {
+                    !connected -> "Bağlanınca bilgisayar ekranını burada görürsün"
+                    !supported -> "Bilgisayardaki T-Bridge sürümü ekran paylaşımını desteklemiyor"
+                    scr.error != null -> scr.error
+                    else -> "Bilgisayar ekranı canlı; dokunarak kontrol et"
+                },
+                color = if (scr.error != null) Color(0xFFF87171) else c.faint,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Switch(
+            checked = scr.viewing,
+            onCheckedChange = { if (it) Screen.startViewing() else Screen.stopViewing() },
+            enabled = supported,
+            colors = SwitchDefaults.colors(checkedTrackColor = c.gold, checkedThumbColor = c.onGold),
+        )
+    }
+}
+
+@Composable
+private fun FullscreenViewer(scr: app.kopru.ScreenUi, onExit: () -> Unit, onClose: () -> Unit) {
+    val ctx = LocalCtx.current
+    DisposableEffect(Unit) {
+        val a = ctx as? Activity
+        a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose { a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+    Dialog(onDismissRequest = onExit, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val v = LocalView.current
+        val w = (v.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            w?.let {
+                WindowCompat.setDecorFitsSystemWindows(it, false)
+                WindowInsetsControllerCompat(it, it.decorView).apply {
+                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    hide(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+        }
+        ScreenViewer(scr, true, onToggleFullscreen = onExit, onClose = onClose, modifier = Modifier.fillMaxSize())
     }
 }

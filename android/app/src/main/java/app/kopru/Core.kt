@@ -113,7 +113,7 @@ object Core : Host {
     override fun onEvent(event: Event) {
         when (event) {
             is Event.State -> {
-                if (event.state == ConnState.CONNECTED) sentIcons.clear()
+                if (event.state == ConnState.CONNECTED) sentIcons.clear() else Screen.onDisconnected()
                 _ui.update { it.copy(conn = event.state, peer = event.peer, peers = node?.peers() ?: it.peers) }
                 main.post { KopruService.onConnState(event.state) }
             }
@@ -134,6 +134,9 @@ object Core : Host {
                 s.copy(transfers = s.transfers.filterValues { !(it.id == event.id && it.direction == event.direction) })
             }
             is Event.Phone -> main.post { handlePhone(event.cmd) }
+            is Event.ScreenInfo -> Screen.onInfo(event.monitors, event.current.toInt(), event.active, event.error)
+            is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.key, event.data)
+            is Event.Screen -> Unit
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.
             // PC bir bildirime yanıt yazdı: kaynak uygulamanın RemoteInput'una ilet (ana iş parçacığı dışında).
             is Event.NotificationReply -> Thread { NotifListener.reply(ctx, event.key, event.text) }.start()
