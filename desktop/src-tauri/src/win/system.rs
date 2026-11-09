@@ -89,11 +89,10 @@ pub fn reveal(path: &str) {
 }
 
 /// Dosyayı varsayılan uygulamayla aç.
-pub fn open_file(path: &str) {
+/// ShellExecute başarılı mı (dönüş değeri > 32).
+pub fn open_file_ok(path: &str) -> bool {
     use windows::{Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL}, core::HSTRING};
-    unsafe {
-        ShellExecuteW(None, w!("open"), &HSTRING::from(path), None, None, SW_SHOWNORMAL);
-    }
+    unsafe { ShellExecuteW(None, w!("open"), &HSTRING::from(path), None, None, SW_SHOWNORMAL).0 as isize > 32 }
 }
 
 fn reg_query(args: &[&str]) -> Option<String> {
@@ -127,26 +126,27 @@ fn pdf_fullscreen_key(ext: &str) -> Option<&'static str> {
 
 /// Sunum aç: PowerPoint kuruluysa "/S" ile doğrudan slayt gösterisi; değilse varsayılan uygulama. PDF'te varsayılan işleyici açılır,
 /// birkaç sn sonra bilinen işleyiciye göre tam ekran kısayolu gönderilir (en iyi çaba; Windows odağı başka pencereye verirse kaçabilir).
-pub fn present_file(path: &str) {
+/// Sunum dosyasını açar; açma başlatılabildiyse true.
+pub fn present_file(path: &str) -> bool {
     // Savunma: izin listesi dışındaki uzantı asla ShellExecute'a gitmez.
     if !crate::suite::is_presentable_name(path) {
-        return;
+        return false;
     }
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     if matches!(ext.as_str(), "pptx" | "ppt" | "ppsx" | "pps") {
         if let Some(exe) = powerpoint_exe() {
             if Command::new(exe).arg("/S").arg(path).spawn().is_ok() {
-                return;
+                return true;
             }
         }
-        open_file(path);
-        return;
+        return open_file_ok(path);
     }
-    open_file(path);
-    if ext == "pdf" {
+    let ok = open_file_ok(path);
+    if ok && ext == "pdf" {
         std::thread::sleep(std::time::Duration::from_millis(2500));
         if let Some(k) = pdf_fullscreen_key("pdf") {
             crate::win::input::presentation_fullscreen(k);
         }
     }
+    ok
 }
