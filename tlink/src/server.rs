@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::ServerOptions;
 use tokio::sync::mpsc;
 
@@ -144,7 +144,12 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        match rd.read_until(b'\n', &mut buf).await {
+        // Satır uzunluğu okurken sınırlanır (sınırsız bellek büyümesi yok); aşan istemci kapatılır.
+        let n = {
+            let mut lim = (&mut rd).take(MAX_LINE as u64 + 1);
+            lim.read_until(b'\n', &mut buf).await
+        };
+        match n {
             Ok(0) | Err(_) => break,
             Ok(_) if buf.len() > MAX_LINE => break,
             Ok(_) => {}
@@ -154,16 +159,17 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
             continue;
         }
         match e.typ.as_str() {
-            "subscribe" => {
-                let p: Vec<String> = e
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.get("prefixes"))
-                    .and_then(Value::as_array)
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                    .unwrap_or_default();
-                *me.prefixes.lock().unwrap() = p;
-            }
+            "subscribe" => match parse_prefixes(e.data.as_ref()) {
+                Some(p) => *me.prefixes.lock().unwrap() = p,
+                None => {
+                    // Yalnız bu istemciye hata cevabı; mevcut abonelik ve bağlantı değişmez.
+                    let mut r = Envelope::new("reply");
+                    r.id = e.id.clone();
+                    r.name = Some("subscribe".into());
+                    r.data = Some(json!({ "ok": false, "error": "bad_subscribe" }));
+                    let _ = tx.send(r.to_line()).await;
+                }
+            },
             "cmd" => {
                 let handler = e.name.as_ref().and_then(|n| inner.handlers.lock().unwrap().get(n).cloned());
                 let tx = tx.clone();
@@ -187,4 +193,32 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
     }
     inner.sessions.lock().unwrap().retain(|s| !Arc::ptr_eq(s, &me));
     writer.abort();
+}
+
+const MAX_PREFIXES: usize = 64;
+const MAX_PREFIX_LEN: usize = 256;
+
+/// subscribe verisini doğrular: `{"prefixes":[...]}` olmalı. Dizi dışı → None (hata cevabı). Dizide string olmayan/aşırı uzun
+/// öğeler atılır, en fazla MAX_PREFIXES öğe tutulur ("" = hepsi geçerli).
+fn parse_prefixes(data: Option<&Value>) -> Option<Vec<String>> {
+    let arr = data?.get("prefixes")?.as_array()?;
+    Some(arr.iter().filter_map(Value::as_str).filter(|p| p.len() <= MAX_PREFIX_LEN).take(MAX_PREFIXES).map(String::from).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixes_validated() {
+        assert_eq!(parse_prefixes(Some(&json!({"prefixes": [null, "a.", 5, ""]}))), Some(vec!["a.".into(), "".into()]));
+        assert_eq!(parse_prefixes(Some(&json!({"prefixes": [null]}))), Some(vec![]));
+        assert_eq!(parse_prefixes(Some(&json!({"prefixes": "x"}))), None);
+        assert_eq!(parse_prefixes(Some(&json!([1, 2]))), None);
+        assert_eq!(parse_prefixes(None), None);
+        let long = "x".repeat(5000);
+        assert_eq!(parse_prefixes(Some(&json!({"prefixes": [long, "ok"]}))), Some(vec!["ok".into()]));
+        let many: Vec<String> = (0..500).map(|i| format!("p{i}")).collect();
+        assert_eq!(parse_prefixes(Some(&json!({"prefixes": many}))).unwrap().len(), 64);
+    }
 }
