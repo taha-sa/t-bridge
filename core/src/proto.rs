@@ -138,8 +138,6 @@ pub enum Msg {
     SuiteCmd { req: u64, app: String, name: String, json: String },
     /// PC -> telefon: komut yanıtı.
     SuiteReply { req: u64, ok: bool, json: String, error: Option<String> },
-    /// Çözülemeyen/bilinmeyen çerçeve (daha yeni eşten). Asla gönderilmez; yalnızca okuyucuda üretilir.
-    Unknown,
 }
 
 /// Sürüm 1 el sıkışması (caps alanından önceki biçim): eski eşten gelen Hello/Welcome çözümlemesi için.
@@ -150,18 +148,18 @@ enum LegacyHandshake {
     Welcome { id: String, name: String, platform: Platform },
 }
 
-/// Çerçeve gövdesini çözer. Asla hata vermez: eski biçimli el sıkışması caps=[] ile, tanınmayan çerçeve `Msg::Unknown` olarak
-/// döner (uzunluk önekli olduğundan atlamak güvenlidir; bağlantı kapanmaz).
-pub fn decode_msg(buf: &[u8]) -> Msg {
+/// Çerçeve gövdesini çözer. Asla hata vermez: eski biçimli el sıkışması caps=[] ile çözülür, tanınmayan çerçeve `None` döner
+/// (uzunluk önekli olduğundan atlamak güvenlidir; bağlantı kapanmaz). Tel enum'unda "bilinmeyen" varyantı yoktur.
+pub fn decode_msg(buf: &[u8]) -> Option<Msg> {
     if let Ok(m) = postcard::from_bytes::<Msg>(buf) {
-        return m;
+        return Some(m);
     }
     match postcard::from_bytes::<LegacyHandshake>(buf) {
         Ok(LegacyHandshake::Hello { version, id, name, platform, pair_code }) => {
-            Msg::Hello { version, id, name, platform, pair_code, caps: Vec::new() }
+            Some(Msg::Hello { version, id, name, platform, pair_code, caps: Vec::new() })
         }
-        Ok(LegacyHandshake::Welcome { id, name, platform }) => Msg::Welcome { id, name, platform, caps: Vec::new() },
-        Err(_) => Msg::Unknown,
+        Ok(LegacyHandshake::Welcome { id, name, platform }) => Some(Msg::Welcome { id, name, platform, caps: Vec::new() }),
+        Err(_) => None,
     }
 }
 
@@ -182,24 +180,26 @@ pub fn encode(msg: &Msg) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Sıradaki tanınan mesajı okur; tanınmayan çerçeveler (daha yeni eşten) uyarıyla atlanır.
 pub async fn read_msg(recv: &mut quinn::RecvStream) -> Result<Option<Msg>> {
-    let mut len = [0u8; 4];
-    match recv.read_exact(&mut len).await {
-        Ok(()) => {}
-        Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(None),
-        Err(e) => return Err(e).context("çerçeve uzunluğu"),
+    loop {
+        let mut len = [0u8; 4];
+        match recv.read_exact(&mut len).await {
+            Ok(()) => {}
+            Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(None),
+            Err(e) => return Err(e).context("çerçeve uzunluğu"),
+        }
+        let len = u32::from_le_bytes(len) as usize;
+        if len > MAX_FRAME {
+            bail!("çerçeve çok büyük: {len}");
+        }
+        let mut buf = vec![0u8; len];
+        recv.read_exact(&mut buf).await.context("çerçeve gövdesi")?;
+        match decode_msg(&buf) {
+            Some(m) => return Ok(Some(m)),
+            None => log::warn!("tanınmayan kontrol mesajı atlandı ({} bayt)", buf.len()),
+        }
     }
-    let len = u32::from_le_bytes(len) as usize;
-    if len > MAX_FRAME {
-        bail!("çerçeve çok büyük: {len}");
-    }
-    let mut buf = vec![0u8; len];
-    recv.read_exact(&mut buf).await.context("çerçeve gövdesi")?;
-    let m = decode_msg(&buf);
-    if m == Msg::Unknown {
-        log::warn!("tanınmayan kontrol mesajı atlandı ({} bayt)", buf.len());
-    }
-    Ok(Some(m))
 }
 
 pub fn encode_datagram(d: &Datagram) -> Vec<u8> {
@@ -235,7 +235,7 @@ mod tests {
             Msg::Hello { version: PROTO_VERSION, id: "a".into(), name: "b".into(), platform: Platform::Android, pair_code: None, caps: local_caps() },
         ] {
             let b = postcard::to_stdvec(&m).unwrap();
-            assert_eq!(decode_msg(&b), m);
+            assert_eq!(decode_msg(&b), Some(m));
         }
     }
 
@@ -243,8 +243,8 @@ mod tests {
     fn unknown_variant_is_tolerated_not_fatal() {
         // Gelecekteki bir varyant dizini (çok büyük) -> Unknown, panik/hata yok.
         let b = [0x7Fu8, 1, 2, 3];
-        assert_eq!(decode_msg(&b), Msg::Unknown);
-        assert_eq!(decode_msg(&[]), Msg::Unknown);
+        assert_eq!(decode_msg(&b), None);
+        assert_eq!(decode_msg(&[]), None);
     }
 
     #[test]
@@ -255,12 +255,12 @@ mod tests {
             Welcome { id: String, name: String, platform: Platform },
         }
         let h = postcard::to_stdvec(&Old::Hello { version: 1, id: "i".into(), name: "n".into(), platform: Platform::Desktop, pair_code: Some("123".into()) }).unwrap();
-        match decode_msg(&h) {
+        match decode_msg(&h).unwrap() {
             Msg::Hello { version, caps, pair_code, .. } => { assert_eq!(version, 1); assert!(caps.is_empty()); assert_eq!(pair_code.as_deref(), Some("123")); }
             o => panic!("{o:?}"),
         }
         let w = postcard::to_stdvec(&Old::Welcome { id: "i".into(), name: "n".into(), platform: Platform::Android }).unwrap();
-        assert!(matches!(decode_msg(&w), Msg::Welcome { caps, .. } if caps.is_empty()));
+        assert!(matches!(decode_msg(&w).unwrap(), Msg::Welcome { caps, .. } if caps.is_empty()));
     }
 
     #[test]
@@ -275,7 +275,7 @@ mod tests {
     fn newer_message_is_unknown_for_old_decoder_shape() {
         // Eski bir okuyucunun Msg'si NotifReply'ı tanımaz; ama yeni okuyucu bilinmeyen dizinde Unknown üretir.
         let b = postcard::to_stdvec(&Msg::NotifReply { key: "k".into(), text: "t".into() }).unwrap();
-        assert!(matches!(decode_msg(&b), Msg::NotifReply { .. }));
+        assert!(matches!(decode_msg(&b).unwrap(), Msg::NotifReply { .. }));
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
             Msg::SuiteReply { req: 7, ok: false, json: String::new(), error: Some("kapalı".into()) },
         ] {
             let b = postcard::to_stdvec(&m).unwrap();
-            assert_eq!(decode_msg(&b), m);
+            assert_eq!(decode_msg(&b), Some(m));
         }
         assert!(local_caps().iter().any(|c| c == CAP_SUITE));
     }

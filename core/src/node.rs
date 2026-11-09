@@ -910,7 +910,6 @@ impl Inner {
             Msg::SuiteEvent { app, name, json } => self.emit(Event::SuiteEvent { app, name, json }),
             Msg::SuiteCmd { req, app, name, json } => self.emit(Event::SuiteCmd { req, app, name, json }),
             Msg::SuiteReply { req, ok, json, error } => self.emit(Event::SuiteReply { req, ok, json, error }),
-            Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
             Msg::Pc(cmd) => self.emit(Event::Pc { cmd }),
