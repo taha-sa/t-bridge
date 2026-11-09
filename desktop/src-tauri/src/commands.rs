@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use kopru_core::*;
 use serde::Serialize;
-use tauri::{Manager, State};
+use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
@@ -244,10 +244,8 @@ pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
     let sh = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         if !win::camera::is_installed_for_me() {
-            let dir = sh.app.path().resource_dir().ok();
-            let dll = win::camera::locate_dll(dir).ok_or("tbridge_vcam.dll bulunamadı (uygulama klasöründe olmalı)")?;
             let sid = win::camera::current_user_sid().ok_or("kullanıcı SID'i okunamadı")?;
-            let code = win::camera::run_elevated(&format!("--camera-register \"{}\" \"{}\"", dll.display(), sid))?;
+            let code = win::camera::run_elevated(&format!("--camera-register \"{sid}\""))?;
             if code != 0 || !win::camera::is_installed_for_me() {
                 return Err("Kamera kaydı tamamlanamadı (yönetici izni verilmedi veya DLL kopyalanamadı).".into());
             }

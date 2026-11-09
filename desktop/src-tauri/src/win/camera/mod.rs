@@ -128,15 +128,55 @@ pub fn is_installed_for_me() -> bool {
     is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid()
 }
 
-/// Yükseltilmiş süreçte çalışır: DLL'i %ProgramFiles%\T-Bridge\camera\ altına kopyalar ve COM kaydını HKLM'ye yazar.
-pub fn register_elevated(src_dll: &Path, owner_sid: &str) -> Result<(), String> {
+/// Derleme zamanında gömülen, paketlenen tbridge_vcam.dll'in SHA-256'sı (build.rs). Boş = yer tutucu DLL (yalnız debug).
+const EXPECTED_DLL_SHA256: &str = include_str!(concat!(env!("OUT_DIR"), "/vcam_sha256.txt"));
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// DLL'i bir kez okur ve karmasını doğrular; yazılacak baytlar doğrulananlarla aynıdır (kontrol-sonra-kullan yarışı yok).
+/// `expected` boşsa yalnız debug derlemede kabul edilir.
+fn read_verified(src: &Path, expected: &str) -> Result<Vec<u8>, String> {
+    let bytes = std::fs::read(src).map_err(|e| format!("DLL okunamadı ({}): {e}", src.display()))?;
+    if expected.trim().is_empty() {
+        if cfg!(debug_assertions) {
+            return Ok(bytes);
+        }
+        return Err("gömülü DLL karması yok".into());
+    }
+    if !sha256_hex(&bytes).eq_ignore_ascii_case(expected.trim()) {
+        return Err("DLL karması beklenenle uyuşmuyor".into());
+    }
+    Ok(bytes)
+}
+
+/// Paketli DLL'in sabit kaynağı: yalnızca bu exe'nin kendi klasörü (argv'den yol alınmaz).
+fn bundled_dll() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let d = exe.parent().ok_or("exe klasörü yok")?;
+    [d.join("camera").join(DLL_NAME), d.join(DLL_NAME)]
+        .into_iter()
+        .find(|p| p.is_file())
+        .or_else(|| if cfg!(debug_assertions) { locate_dll(None) } else { None }) // geliştirme: target/ altında arar
+        .ok_or_else(|| "paketli DLL bulunamadı".to_string())
+}
+
+/// Yükseltilmiş süreçte çalışır: paketli DLL'i (karması doğrulanmış) %ProgramFiles%\T-Bridge\camera\ altına yazar ve yalnız o yolu HKLM'ye kaydeder.
+pub fn register_elevated(owner_sid: &str) -> Result<(), String> {
+    register_elevated_from(&bundled_dll()?, EXPECTED_DLL_SHA256, owner_sid)
+}
+
+fn register_elevated_from(src_dll: &Path, expected_sha: &str, owner_sid: &str) -> Result<(), String> {
     if !kopru_camring::is_valid_sid(owner_sid) {
         return Err("geçersiz kullanıcı SID'i".into());
     }
+    let bytes = read_verified(src_dll, expected_sha)?;
     let dir = install_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("klasör: {e}"))?;
     let dst = dir.join(DLL_NAME);
-    std::fs::copy(src_dll, &dst).map_err(|e| format!("DLL kopyalanamadı (kaynak {}): {e}", src_dll.display()))?;
+    std::fs::write(&dst, &bytes).map_err(|e| format!("DLL yazılamadı: {e}"))?;
     let key = clsid_key();
     reg_set_sz(&key, None, FRIENDLY_NAME)?;
     reg_set_sz(&format!("{key}\\InprocServer32"), None, &dst.to_string_lossy())?;
@@ -144,6 +184,14 @@ pub fn register_elevated(src_dll: &Path, owner_sid: &str) -> Result<(), String> 
     // Halka DACL'i yalnızca bu kullanıcıya açılır (DLL bu değeri okur).
     reg_set_sz(&key, Some("OwnerSid"), owner_sid)?;
     Ok(())
+}
+
+/// `--camera-register <sid>`: tam olarak bir argüman; fazlası/azı reddedilir. SID sıkı doğrulanır.
+fn parse_register_args(args: &[String]) -> Result<String, String> {
+    match args {
+        [flag, sid] if flag == "--camera-register" && kopru_camring::is_valid_sid(sid) => Ok(sid.clone()),
+        _ => Err("geçersiz argümanlar".into()),
+    }
 }
 
 pub fn unregister_elevated() -> Result<(), String> {
@@ -201,7 +249,8 @@ pub fn run_elevated(args: &str) -> Result<u32, String> {
 }
 
 /// DLL'in aranacağı yerler: exe yanı, kaynak klasörü, geliştirme derleme çıktısı.
-pub fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
     // 4 KB'tan küçük dosya build.rs'in bıraktığı yer tutucudur (geliştirme): gerçek DLL sayılmaz.
     let real = |p: &PathBuf| p.metadata().map(|m| m.len() > 4096).unwrap_or(false);
     let mut c: Vec<PathBuf> = Vec::new();
@@ -231,18 +280,14 @@ pub fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
 pub fn maybe_run_helper() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("--camera-register") => {
-            let src = args.get(2).map(PathBuf::from)?;
-            let sid = args.get(3).cloned().unwrap_or_default();
-            Some(match register_elevated(&src, &sid) {
-                Ok(()) => 0,
-                Err(e) => {
-                    let _ = std::fs::write(std::env::temp_dir().join("tbridge-camera-register.log"), e);
-                    1
-                }
-            })
-        }
-        Some("--camera-unregister") => Some(match unregister_elevated() {
+        Some("--camera-register") => Some(match parse_register_args(&args[1..]).and_then(|sid| register_elevated(&sid)) {
+            Ok(()) => 0,
+            Err(e) => {
+                let _ = std::fs::write(std::env::temp_dir().join("tbridge-camera-register.log"), e);
+                1
+            }
+        }),
+        Some("--camera-unregister") if args.len() == 2 => Some(match unregister_elevated() {
             Ok(()) => 0,
             Err(_) => 1,
         }),
@@ -518,5 +563,32 @@ fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<A
                 link.request_keyframe();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn register_args_strict() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(parse_register_args(&a(&["--camera-register", "S-1-5-21-1-2-3-1001"])).is_ok());
+        assert!(parse_register_args(&a(&["--camera-register", "C:/evil.dll", "S-1-5-21-1-2-3-1001"])).is_err());
+        assert!(parse_register_args(&a(&["--camera-register", "C:/evil.dll"])).is_err());
+        assert!(parse_register_args(&a(&["--camera-register"])).is_err());
+        assert!(parse_register_args(&a(&["--camera-register", "S-1-5-21-1-2-3-1001", "x"])).is_err());
+        assert!(parse_register_args(&a(&["--camera-register", "S-1-5-21; calc"])).is_err());
+    }
+
+    #[test]
+    fn dll_hash_verified() {
+        let f = std::env::temp_dir().join(format!("kopru_vcam_{}.dll", std::process::id()));
+        std::fs::write(&f, b"hello").unwrap();
+        let good = sha256_hex(b"hello");
+        assert_eq!(read_verified(&f, &good).unwrap(), b"hello");
+        assert!(read_verified(&f, &good.to_uppercase()).is_ok());
+        assert!(read_verified(&f, &sha256_hex(b"evil")).is_err());
+        let _ = std::fs::remove_file(&f);
     }
 }
