@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{Envelope, MAX_LINE};
@@ -52,7 +52,12 @@ impl Client {
             let mut buf = Vec::new();
             loop {
                 buf.clear();
-                match rd.read_until(b'\n', &mut buf).await {
+                // Satır uzunluğu okurken sınırlanır (sınırsız bellek büyümesi yok); aşan sunucu kapatılır.
+                let n = {
+                    let mut lim = (&mut rd).take(MAX_LINE as u64 + 1);
+                    lim.read_until(b'\n', &mut buf).await
+                };
+                match n {
                     Ok(0) | Err(_) => break,
                     Ok(_) if buf.len() > MAX_LINE => break,
                     Ok(_) => {}
@@ -176,5 +181,23 @@ impl ReconnectingClient {
 impl Drop for ReconnectingClient {
     fn drop(&mut self) {
         self.task.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `\n` içermeyen sonsuz akış: satır okuma MAX_LINE+1 baytta durmalı (bellek sınırı).
+    #[tokio::test]
+    async fn endless_line_read_is_bounded() {
+        let mut rd = BufReader::new(tokio::io::repeat(b'x'));
+        let mut buf = Vec::new();
+        let n = {
+            let mut lim = (&mut rd).take(MAX_LINE as u64 + 1);
+            lim.read_until(b'\n', &mut buf).await.unwrap()
+        };
+        assert_eq!(n, MAX_LINE + 1);
+        assert!(buf.len() > MAX_LINE);
     }
 }

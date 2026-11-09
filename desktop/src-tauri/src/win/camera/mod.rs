@@ -264,6 +264,14 @@ pub fn is_installed() -> bool {
     install_dir().join(DLL_NAME).exists()
 }
 
+/// Kullanıcı UAC penceresini iptal etti (ERROR_CANCELLED).
+pub const UAC_CANCELLED: &str = "UAC_CANCELLED";
+
+/// Win32 1223 (ERROR_CANCELLED) veya eşdeğer HRESULT (0x800704C7) mı?
+pub fn is_uac_cancel(code: u32) -> bool {
+    code == 1223 || code == 0x800704C7
+}
+
 /// Bu exe'yi UAC ile yükseltilmiş başlatıp çıkışını bekler. Dönüş: çıkış kodu (0 = başarılı).
 pub fn run_elevated(args: &str) -> Result<u32, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -278,7 +286,13 @@ pub fn run_elevated(args: &str) -> Result<u32, String> {
             nShow: SW_HIDE.0,
             ..Default::default()
         };
-        ShellExecuteExW(&mut info).map_err(|e| format!("yönetici izni alınamadı veya reddedildi: {e}"))?;
+        if let Err(e) = ShellExecuteExW(&mut info) {
+            return Err(if is_uac_cancel(e.code().0 as u32) {
+                UAC_CANCELLED.into()
+            } else {
+                format!("yönetici izni alınamadı veya reddedildi: {e}")
+            });
+        }
         let h = info.hProcess;
         if h.is_invalid() {
             return Err("yükseltilmiş süreç başlatılamadı".into());
@@ -688,5 +702,18 @@ mod dll_match_tests {
         assert!(installed_dll_matches(&p, "")); // yer tutucu: karşılaştırma yok
         let _ = std::fs::remove_file(&p);
         assert!(!installed_dll_matches(&p, &h)); // yok -> eşleşmez
+    }
+}
+
+#[cfg(test)]
+mod uac_cancel_tests {
+    use super::*;
+
+    #[test]
+    fn uac_cancel_codes_are_recognized() {
+        assert!(is_uac_cancel(1223));
+        assert!(is_uac_cancel(0x800704C7));
+        assert!(!is_uac_cancel(5));
+        assert!(!is_uac_cancel(0));
     }
 }

@@ -267,7 +267,13 @@ pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         if !win::camera::is_installed_for_me() {
             let sid = win::camera::current_user_sid().ok_or("kullanıcı SID'i okunamadı")?;
-            let code = win::camera::run_elevated(&format!("--camera-register \"{sid}\""))?;
+            let code = match win::camera::run_elevated(&format!("--camera-register \"{sid}\"")) {
+                Ok(c) => c,
+                Err(e) if e == win::camera::UAC_CANCELLED => {
+                    return Err("Yönetici izni verilmedi, kamera kurulumu iptal edildi. Tekrar denemek için Etkinleştir'e basıp açılan izin penceresini onaylayın.".into());
+                }
+                Err(e) => return Err(e),
+            };
             if code != 0 || !win::camera::is_installed_for_me() {
                 return Err("Kamera kaydı tamamlanamadı (yönetici izni verilmedi veya DLL kopyalanamadı).".into());
             }
