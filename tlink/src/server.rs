@@ -1,23 +1,71 @@
 //! T-Link sunucusu (Windows named pipe `\\.\pipe\TSuite.<id>`): çok istemcili, abonelik önekleri, komut işleyicileri,
-//! yalnızca geçerli kullanıcıya açık pipe (DACL: kullanıcı SID'i + SYSTEM). Olay kuyruğu istemci başına sınırlıdır (dolunca eski olay atılmaz,
-//! YENİ olay atılır; UI/uygulamayı asla bloklamaz).
+//! yalnızca geçerli kullanıcıya açık pipe (DACL: kullanıcı SID'i + SYSTEM). Olay kuyruğu istemci başına sınırlıdır (256; dolunca EN ESKİ olay
+//! atılır, `*.progress`/`ram.status` (ad, id) başına coalesce edilir; yanıtlar ayrı kuyrukta ve asla düşmez — PROTOCOL §4;
+//! UI/uygulamayı asla bloklamaz). En çok 16 eşzamanlı istemci, istemci başına 8 eşzamanlı komut.
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::ServerOptions;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 use crate::{Envelope, MAX_LINE};
 
 pub type HandlerFuture = Pin<Box<dyn Future<Output = Result<Value, String>> + Send>>;
 pub type Handler = Arc<dyn Fn(Option<Value>) -> HandlerFuture + Send + Sync>;
 
+pub const MAX_QUEUED_EVENTS: usize = 256;
+pub const MAX_CLIENTS: usize = 16;
+pub const MAX_CONCURRENT_COMMANDS: usize = 8;
+
+struct QEvent {
+    name: String,
+    id: Option<String>,
+    line: Vec<u8>,
+}
+
+/// Olay kuyruğu (saf mantık, birim testli): en eski atılır + coalesce + terminal olay progress'i siler.
+#[derive(Default)]
+struct EventQueue {
+    q: VecDeque<QEvent>,
+}
+
+impl EventQueue {
+    fn push(&mut self, name: &str, id: Option<String>, line: Vec<u8>) {
+        let coalesce = name.ends_with(".progress") || name == "ram.status";
+        if coalesce {
+            self.q.retain(|e| !(e.name == name && e.id == id));
+        }
+        if let Some(i) = &id {
+            if is_terminal(name) {
+                self.q.retain(|e| !(e.id.as_ref() == Some(i) && e.name.ends_with(".progress")));
+            }
+        }
+        self.q.push_back(QEvent { name: name.into(), id, line });
+        while self.q.len() > MAX_QUEUED_EVENTS {
+            // En eski atılır; kritik terminal olay (completed/failed/canceled) varsa önce sıradan olay atılır.
+            if let Some(pos) = self.q.iter().position(|e| !is_terminal(&e.name)) {
+                self.q.remove(pos);
+            } else {
+                self.q.pop_front();
+            }
+        }
+    }
+}
+
+fn is_terminal(name: &str) -> bool {
+    name.ends_with(".completed") || name.ends_with(".failed") || name.ends_with(".canceled")
+}
+
 struct Session {
-    tx: mpsc::Sender<Vec<u8>>,
+    events: Mutex<EventQueue>,
+    notify: Notify,
+    inflight: AtomicUsize,
     prefixes: Mutex<Vec<String>>,
 }
 
@@ -62,15 +110,17 @@ impl Server {
         self.inner.sessions.lock().unwrap().iter().any(|s| s.prefixes.lock().unwrap().iter().any(|p| event.starts_with(p.as_str())))
     }
 
-    /// Olayı abone istemcilere yollar (bloklamaz; kuyruğu dolu istemcide atılır).
+    /// Olayı abone istemcilere yollar (bloklamaz; kuyruk dolunca en eski olay atılır).
     pub fn publish(&self, name: &str, data: Option<Value>) {
         let mut e = Envelope::new("event");
         e.name = Some(name.into());
         e.data = data;
+        let id = e.data.as_ref().and_then(|d| d.get("id")).and_then(Value::as_str).map(String::from);
         let line = e.to_line();
         for s in self.inner.sessions.lock().unwrap().iter() {
             if s.prefixes.lock().unwrap().iter().any(|p| name.starts_with(p.as_str())) {
-                let _ = s.tx.try_send(line.clone());
+                s.events.lock().unwrap().push(name, id.clone(), line.clone());
+                s.notify.notify_one();
             }
         }
     }
@@ -101,6 +151,10 @@ impl Server {
                 if pipe.connect().await.is_err() {
                     continue;
                 }
+                if inner.sessions.lock().unwrap().len() >= MAX_CLIENTS {
+                    drop(pipe); // istemci sınırı: fazlası bağlantı kesilerek reddedilir
+                    continue;
+                }
                 let inner = inner.clone();
                 tokio::spawn(session(inner, pipe));
             }
@@ -125,20 +179,41 @@ fn create_pipe(name: &str, first: bool, sddl: &str) -> std::io::Result<tokio::ne
 
 async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::NamedPipeServer) {
     let (rd, mut wr) = tokio::io::split(pipe);
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(256);
-    let me = Arc::new(Session { tx: tx.clone(), prefixes: Mutex::new(Vec::new()) });
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let me = Arc::new(Session { events: Mutex::new(EventQueue::default()), notify: Notify::new(), inflight: AtomicUsize::new(0), prefixes: Mutex::new(Vec::new()) });
     inner.sessions.lock().unwrap().push(me.clone());
+    let wme = me.clone();
     let writer = tokio::spawn(async move {
-        while let Some(b) = rx.recv().await {
-            if wr.write_all(&b).await.is_err() || wr.flush().await.is_err() {
-                break;
+        loop {
+            // Yanıtlar önceliklidir ve düşmez; olaylar ayrı kuyruktan.
+            let next = match rx.try_recv() {
+                Ok(b) => Some(b),
+                Err(_) => wme.events.lock().unwrap().q.pop_front().map(|e| e.line),
+            };
+            match next {
+                Some(b) => {
+                    if wr.write_all(&b).await.is_err() || wr.flush().await.is_err() {
+                        break;
+                    }
+                }
+                None => {
+                    tokio::select! {
+                        r = rx.recv() => match r {
+                            Some(b) => {
+                                if wr.write_all(&b).await.is_err() || wr.flush().await.is_err() { break; }
+                            }
+                            None => break,
+                        },
+                        _ = wme.notify.notified() => {}
+                    }
+                }
             }
         }
     });
     let mut hello = Envelope::new("hello");
     hello.name = Some("hello".into());
     hello.data = Some(json!({ "appId": inner.app_id, "version": inner.version, "protocol": crate::PROTOCOL_VERSION, "events": inner.events, "commands": inner.commands }));
-    let _ = tx.send(hello.to_line()).await;
+    let _ = tx.send(hello.to_line());
 
     let mut rd = BufReader::new(rd);
     let mut buf = Vec::new();
@@ -167,12 +242,22 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
                     r.id = e.id.clone();
                     r.name = Some("subscribe".into());
                     r.data = Some(json!({ "ok": false, "error": "bad_subscribe" }));
-                    let _ = tx.send(r.to_line()).await;
+                    let _ = tx.send(r.to_line());
                 }
             },
             "cmd" => {
                 let handler = e.name.as_ref().and_then(|n| inner.handlers.lock().unwrap().get(n).cloned());
                 let tx = tx.clone();
+                if me.inflight.fetch_add(1, Ordering::SeqCst) >= MAX_CONCURRENT_COMMANDS {
+                    me.inflight.fetch_sub(1, Ordering::SeqCst);
+                    let mut r = Envelope::new("reply");
+                    r.id = e.id.clone();
+                    r.name = e.name.clone();
+                    r.data = Some(json!({ "ok": false, "error": "busy" }));
+                    let _ = tx.send(r.to_line());
+                    continue;
+                }
+                let me2 = me.clone();
                 tokio::spawn(async move {
                     let result = match handler {
                         Some(h) => h(e.data.clone()).await,
@@ -185,7 +270,8 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
                         Ok(v) => json!({ "ok": true, "result": v }),
                         Err(m) => json!({ "ok": false, "error": m }),
                     });
-                    let _ = tx.send(r.to_line()).await;
+                    let _ = tx.send(r.to_line());
+                    me2.inflight.fetch_sub(1, Ordering::SeqCst);
                 });
             }
             _ => {} // bilinmeyen tür yok sayılır (ileri uyumluluk)
@@ -208,6 +294,38 @@ fn parse_prefixes(data: Option<&Value>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ev(q: &mut EventQueue, name: &str, id: &str) {
+        q.push(name, Some(id.into()), format!("{name}|{id}").into_bytes());
+    }
+
+    #[test]
+    fn queue_drops_oldest_and_coalesces() {
+        let mut q = EventQueue::default();
+        for i in 0..300 {
+            ev(&mut q, "a.x", &i.to_string());
+        }
+        assert_eq!(q.q.len(), MAX_QUEUED_EVENTS);
+        assert_eq!(q.q.front().unwrap().id.as_deref(), Some("44")); // en eski 44 olay düştü
+        let mut q = EventQueue::default();
+        ev(&mut q, "download.progress", "1");
+        ev(&mut q, "download.progress", "1");
+        ev(&mut q, "download.progress", "2");
+        assert_eq!(q.q.len(), 2);
+        ev(&mut q, "download.completed", "1");
+        assert!(q.q.iter().all(|e| !(e.id.as_deref() == Some("1") && e.name.ends_with(".progress"))));
+    }
+
+    #[test]
+    fn terminal_event_survives_full_queue() {
+        let mut q = EventQueue::default();
+        ev(&mut q, "download.completed", "keep");
+        for i in 0..400 {
+            ev(&mut q, "a.x", &i.to_string());
+        }
+        assert_eq!(q.q.len(), MAX_QUEUED_EVENTS);
+        assert!(q.q.iter().any(|e| e.name == "download.completed"));
+    }
 
     #[test]
     fn prefixes_validated() {

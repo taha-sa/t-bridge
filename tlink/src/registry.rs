@@ -22,6 +22,34 @@ pub struct Manifest {
     pub icon: Option<String>,
     /// 0 = çalışmıyor.
     pub pid: i32,
+    /// İsteğe bağlı: hub'ın telefona ileteceği olay önekleri (yoksa `events` önekleri).
+    #[serde(rename = "forwardPrefixes", skip_serializing_if = "Option::is_none")]
+    pub forward_prefixes: Option<Vec<String>>,
+    /// İsteğe bağlı: kapalıyken başlatma argümanları (yoksa argümansız).
+    #[serde(rename = "launchArgs", skip_serializing_if = "Option::is_none")]
+    pub launch_args: Option<Vec<String>>,
+}
+
+impl Manifest {
+    /// `forwardPrefixes` (boş değilse) yoksa `events` adlarındaki önekler (`download.progress` -> `download.`).
+    pub fn effective_forward_prefixes(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let explicit = self.forward_prefixes.as_deref().filter(|v| !v.is_empty());
+        let src: Vec<String> = match explicit {
+            Some(v) => v.iter().map(|p| p.to_string()).collect(),
+            None => self.events.iter().filter_map(|e| e.find('.').map(|i| e[..=i].to_string())).collect(),
+        };
+        for p in src {
+            if !p.is_empty() && !out.contains(&p) {
+                out.push(p);
+            }
+        }
+        out
+    }
+
+    pub fn effective_launch_args(&self) -> Vec<String> {
+        self.launch_args.clone().unwrap_or_default()
+    }
 }
 
 pub fn default_dir() -> PathBuf {
@@ -148,6 +176,20 @@ pub fn diff(old: &HashMap<String, Manifest>, now: &[Manifest]) -> Vec<Change> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_prefixes_and_args() {
+        let mut m = Manifest { events: vec!["download.progress".into(), "download.done".into(), "x.y".into(), "nodot".into()], ..Default::default() };
+        assert_eq!(m.effective_forward_prefixes(), vec!["download.".to_string(), "x.".to_string()]);
+        assert!(m.effective_launch_args().is_empty());
+        m.forward_prefixes = Some(vec!["foo.".into()]);
+        m.launch_args = Some(vec!["--tray".into()]);
+        assert_eq!(m.effective_forward_prefixes(), vec!["foo.".to_string()]);
+        assert_eq!(m.effective_launch_args(), vec!["--tray".to_string()]);
+        let j: Manifest = serde_json::from_str(r#"{"id":"a","forwardPrefixes":["p."],"launchArgs":["--q"]}"#).unwrap();
+        assert_eq!(j.forward_prefixes, Some(vec!["p.".to_string()]));
+        assert_eq!(j.launch_args, Some(vec!["--q".to_string()]));
+    }
 
     /// t-suite C# AppRegistry'nin yazdığı biçim (camelCase, girintili).
     const CSHARP_JSON: &str = r#"{
