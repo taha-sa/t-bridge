@@ -25,6 +25,11 @@ pub fn lk<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub clipboard_sync: bool,
+    /// Telefon bildirimlerini göster/sakla (kapalıysa özellik tamamen durur).
+    pub notif_mirror: bool,
+    /// Yeni bildirimde kısa ses.
+    pub notif_sound: bool,
+    /// Windows'un sağ altında uyarı (varsayılan kapalı).
     pub notif_toast: bool,
     pub transfer_toast: bool,
     pub low_battery_warn: bool,
@@ -34,13 +39,39 @@ pub struct Settings {
     /// "dark" | "system" | "light"
     pub theme: String,
     pub auto_update: bool,
+    /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
+    #[serde(default = "legacy_version")]
+    pub settings_version: u32,
+}
+
+/// Güncel ayar şeması sürümü (1: Windows bildirimi varsayılanı kapalı).
+pub const SETTINGS_VERSION: u32 = 1;
+
+fn legacy_version() -> u32 {
+    0
+}
+
+impl Settings {
+    /// Eski dosyaları bir kez yükseltir. Değişiklik olduysa `true` (kaydedilmeli).
+    pub fn migrate(&mut self) -> bool {
+        if self.settings_version >= SETTINGS_VERSION {
+            return false;
+        }
+        if self.settings_version < 1 {
+            self.notif_toast = false;
+        }
+        self.settings_version = SETTINGS_VERSION;
+        true
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             clipboard_sync: true,
-            notif_toast: true,
+            notif_mirror: true,
+            notif_sound: true,
+            notif_toast: false,
             transfer_toast: true,
             low_battery_warn: true,
             autostart: true,
@@ -48,6 +79,7 @@ impl Default for Settings {
             muted_apps: Vec::new(),
             theme: "dark".into(),
             auto_update: true,
+            settings_version: SETTINGS_VERSION,
         }
     }
 }
@@ -165,11 +197,12 @@ impl Shared {
                 self.update_tray();
             }
             Event::Notification { data } => {
-                let (muted, toast) = {
+                let (muted, toast, sound, mirror) = {
                     let s = lk(&self.settings);
-                    (s.muted_apps.contains(&data.package), s.notif_toast)
+                    (s.muted_apps.contains(&data.package), s.notif_toast, s.notif_sound, s.notif_mirror)
                 };
-                if muted {
+                // Özellik kapalı: saklama, arayüze iletme, ses/toast yok.
+                if muted || !mirror {
                     return;
                 }
                 let same = {
@@ -181,9 +214,14 @@ impl Shared {
                     same
                 };
                 let quiet = lk(&self.quiet_until).is_some_and(|t| Instant::now() < t);
-                if toast && !same && !quiet && !self.window_visible() {
-                    let title = if data.title.is_empty() { data.app_name.clone() } else { format!("{} · {}", data.app_name, data.title) };
-                    self.toast(&title, &data.text);
+                if !same && !quiet {
+                    if sound {
+                        win::sound::play_throttled();
+                    }
+                    if toast && !self.window_visible() {
+                        let title = if data.title.is_empty() { data.app_name.clone() } else { format!("{} · {}", data.app_name, data.title) };
+                        self.toast(&title, &data.text);
+                    }
                 }
             }
             Event::NotificationRemoved { key } => {
@@ -228,5 +266,44 @@ impl Host for DesktopHost {
     }
     fn open_outgoing(&self, _: String) -> Result<i32, KopruError> {
         Err(KopruError::new("masaüstünde kullanılmaz"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eski_dosya_bir_kez_goc_eder() {
+        // Eski sürüm: notifToast true, sürüm alanı yok.
+        let mut s: Settings = serde_json::from_str(r#"{"notifToast":true,"clipboardSync":false}"#).unwrap();
+        assert_eq!(s.settings_version, 0);
+        assert!(s.notif_toast);
+        assert!(s.migrate());
+        assert!(!s.notif_toast);
+        assert!(!s.clipboard_sync);
+        assert!(s.notif_sound && s.notif_mirror);
+        assert_eq!(s.settings_version, SETTINGS_VERSION);
+        assert!(!s.migrate());
+    }
+
+    #[test]
+    fn kullanicinin_tercihi_korunur() {
+        // Göçten sonra kullanıcı toast'ı açıp kaydeder; yeniden yüklenince dokunulmaz.
+        let mut s = Settings::default();
+        assert!(!s.notif_toast);
+        s.notif_toast = true;
+        let json = serde_json::to_string(&s).unwrap();
+        let mut back: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!back.migrate());
+        assert!(back.notif_toast);
+    }
+
+    #[test]
+    fn bos_dosya_eski_sayilir_varsayilan_yeni() {
+        let mut s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.settings_version, 0);
+        assert!(s.migrate());
+        assert!(Settings::default().settings_version == SETTINGS_VERSION && !Settings::default().notif_toast);
     }
 }

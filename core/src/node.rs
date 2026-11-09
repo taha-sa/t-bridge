@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex, MutexGuard, Weak,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::{Notify, mpsc, oneshot},
-    time::timeout,
+    task::JoinSet,
+    time::{sleep, timeout},
 };
 
 use crate::{
@@ -32,7 +33,17 @@ use crate::{
 const CHUNK: usize = 256 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const PAIR_CODE_TTL: Duration = Duration::from_secs(300);
-const RESCAN_EVERY: Duration = Duration::from_secs(30);
+/// mDNS tarama penceresi: tetiklenince bu süre açık kalır, sonra daemon kapanır (pil).
+const SCAN_WINDOW: Duration = Duration::from_secs(25);
+/// Sessiz doğrudan denemeler (tarama/mDNS yok, arayüz durumu değişmez): artan aralık, üst sınır 2 dk.
+const SILENT_FIRST: Duration = Duration::from_secs(2);
+const SILENT_MAX: Duration = Duration::from_secs(120);
+/// Tek adres için el sıkışma zaman aşımı.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Adresler yarışır; her sonraki adres bu kadar geç başlar (aynı bilgisayarın iki adresinin
+/// birden kazanıp birbirinin oturumunu düşürmesini önler, ölü adres ise yalnızca bu kadar geciktirir).
+const CONNECT_STAGGER: Duration = Duration::from_millis(200);
+const MAX_PARALLEL_ADDRS: usize = 6;
 
 const RUN: u8 = 0;
 const PAUSE: u8 = 1;
@@ -108,6 +119,12 @@ pub(crate) struct Inner {
     advertiser: Mutex<Option<Advertiser>>,
     endpoint: Mutex<Option<Endpoint>>,
     nudge: Notify,
+    /// Tarama penceresi sayacı: her başlatma/durdurma artar, eski zamanlayıcılar etkisiz kalır.
+    scan_gen: AtomicU64,
+    scanning: AtomicBool,
+    scan_window: Mutex<Duration>,
+    /// Bir sonraki bağlanma denemesi tetiklenmiş (görünür): `Connecting` yalnızca o zaman gösterilir.
+    loud: AtomicBool,
     last_clip: Mutex<Option<blake3::Hash>>,
     // Aktarımlar
     queue: Mutex<Vec<OutItem>>,
@@ -172,6 +189,10 @@ impl Inner {
             advertiser: Mutex::new(None),
             endpoint: Mutex::new(None),
             nudge: Notify::new(),
+            scan_gen: AtomicU64::new(0),
+            scanning: AtomicBool::new(false),
+            scan_window: Mutex::new(SCAN_WINDOW),
+            loud: AtomicBool::new(false),
             last_clip: Mutex::new(None),
             queue: Mutex::new(queue),
             out_notify: Notify::new(),
@@ -432,6 +453,9 @@ impl Inner {
         }
         list.sort_by(|a, b| b.paired.cmp(&a.paired).then(a.name.cmp(&b.name)));
         *lk(&self.discovered) = list.clone();
+        if !list.is_empty() {
+            self.loud.store(true, Ordering::Relaxed);
+        }
         self.emit(Event::Discovered { servers: list });
         self.nudge.notify_one();
     }
@@ -440,31 +464,83 @@ impl Inner {
         lk(&self.discovered).clone()
     }
 
-    /// Ağ taramasını baştan başlatır (ağ değişti, kullanıcı istedi veya uzun süredir sonuç yok).
-    /// Uzun süreli sorgular seyrekleştiği ve kilitsiz gönderilen ilk sorgu kaybolabildiği için gerekir.
+    /// Sınırlı bir mDNS tarama penceresi açar (uygulama öne geldi, Wi-Fi geldi, bağlantı koptu,
+    /// kullanıcı istedi, eşleştirme kartı açıldı). Pencere bitince tarayıcı kapanır; durum sabit kalır.
+    /// Bağlıyken yalnızca dürter. Ayrıca hemen (tarama beklemeden) bilinen adreslere görünür deneme yapılır.
     pub fn rescan(self: &Arc<Self>) {
         if self.cfg.role != Role::Client || self.session().is_some() {
             self.nudge.notify_one();
             return;
         }
+        self.loud.store(true, Ordering::Relaxed);
+        let gn = self.scan_gen.fetch_add(1, Ordering::SeqCst) + 1;
         let me = self.clone();
         self.rt.spawn_blocking(move || {
+            // Bu arada yeni bir tarama/durdurma geldiyse ya da bağlandıysa vazgeç.
+            if me.scan_gen.load(Ordering::SeqCst) != gn || me.session().is_some() {
+                return;
+            }
             *lk(&me.browser) = None;
             *lk(&me.discovered) = Vec::new();
             me.emit(Event::Discovered { servers: Vec::new() });
-            // Bu arada bağlandıysa tarama kapalı kalsın (pil).
-            if me.session().is_none() {
-                me.set_browsing(true);
+            me.set_browsing(true);
+            if !me.scanning.swap(true, Ordering::SeqCst) {
+                me.emit(Event::Scanning { on: true });
             }
             me.nudge.notify_one();
+            let window = *lk(&me.scan_window);
+            let me2 = me.clone();
+            me.rt.spawn(async move {
+                sleep(window).await;
+                if me2.scan_gen.load(Ordering::SeqCst) == gn {
+                    me2.stop_scan();
+                }
+            });
         });
     }
 
+    /// Taramayı hemen kapatır (pencere bitti ya da bağlandı) ve bekleyen zamanlayıcıları geçersiz kılar.
+    fn stop_scan(&self) {
+        self.scan_gen.fetch_add(1, Ordering::SeqCst);
+        *lk(&self.browser) = None;
+        if self.scanning.swap(false, Ordering::SeqCst) {
+            self.emit(Event::Scanning { on: false });
+        }
+    }
+
+    /// Tarama penceresi açık mı (yalnızca istemci).
+    pub fn is_scanning(&self) -> bool {
+        self.scanning.load(Ordering::SeqCst)
+    }
+
+    /// Test/ayar: tarama penceresi süresi.
+    pub fn set_scan_window(&self, d: Duration) {
+        *lk(&self.scan_window) = d;
+    }
+
+    /// Eşleşmiş bilgisayar için denenecek adresler: son başarılı adres önce, sonra mDNS'ten gelenler,
+    /// sonra kayıtlı diğerleri.
+    fn candidate_addrs(&self, p: &PeerInfo) -> Vec<String> {
+        let mut addrs: Vec<String> = Vec::new();
+        let mut push = |a: &String| {
+            if !addrs.contains(a) {
+                addrs.push(a.clone());
+            }
+        };
+        if let Some(a) = p.addrs.first() {
+            push(a);
+        }
+        for s in self.discovered().iter().filter(|s| s.fingerprint == p.fingerprint) {
+            s.addrs.iter().for_each(&mut push);
+        }
+        p.addrs.iter().for_each(&mut push);
+        addrs
+    }
+
     async fn client_loop(self: Arc<Self>, ep: Endpoint) {
-        let mut backoff = Duration::from_secs(1);
-        let mut last_scan = Instant::now();
+        let mut backoff = SILENT_FIRST;
         loop {
-            // Bekleyen eşleştirme isteği öncelikli.
+            // Bekleyen eşleştirme isteği öncelikli (kullanıcı tetikledi: görünür).
             let pending = lk(&self.pending_pair).take();
             if let Some((srv, code)) = pending {
                 self.set_state(ConnState::Connecting);
@@ -473,7 +549,7 @@ impl Inner {
                         self.upsert_peer(peer.clone());
                         self.emit(Event::Paired { peer: peer.clone() });
                         self.run_client_session(peer, conn, send, recv).await;
-                        backoff = Duration::from_secs(1);
+                        backoff = SILENT_FIRST;
                         continue;
                     }
                     Err(e) => {
@@ -483,62 +559,62 @@ impl Inner {
                 }
             }
             let peers: Vec<PeerInfo> = self.peers().into_iter().filter(|p| p.platform == Platform::Desktop).collect();
-            self.set_browsing(true);
-            let mut connected = false;
-            if !peers.is_empty() {
+            if peers.is_empty() {
+                // Eşleşmiş bilgisayar yok: denenecek bir şey yok, yalnızca tetikleyici bekle.
+                self.nudge.notified().await;
+                backoff = SILENT_FIRST;
+                continue;
+            }
+            // Bu turdan önce birikmiş dürtmeyi tüket; tur sırasında gelenler bir sonraki turu hemen başlatır.
+            let _ = timeout(Duration::ZERO, self.nudge.notified()).await;
+            // Görünür (tetiklenmiş) deneme `Connecting` gösterir; zamanlayıcıyla gelen sessiz deneme göstermez.
+            let loud = self.loud.swap(false, Ordering::Relaxed);
+            if loud {
                 self.set_state(ConnState::Connecting);
-                let found = self.discovered();
-                for p in &peers {
-                    let mut addrs: Vec<String> = found
-                        .iter()
-                        .filter(|s| s.fingerprint == p.fingerprint)
-                        .flat_map(|s| s.addrs.clone())
-                        .collect();
-                    for a in &p.addrs {
-                        if !addrs.contains(a) {
-                            addrs.push(a.clone());
-                        }
-                    }
-                    if addrs.is_empty() {
-                        continue;
-                    }
-                    match self.connect(&ep, &addrs, &p.fingerprint, None).await {
-                        Ok((peer, conn, send, recv)) => {
-                            self.upsert_peer(peer.clone());
-                            self.run_client_session(peer, conn, send, recv).await;
-                            connected = true;
-                            backoff = Duration::from_secs(1);
-                            break;
-                        }
-                        Err(e) => log::info!("{} bağlanamadı: {e:#}", p.name),
-                    }
+            }
+            let mut connected = false;
+            for p in &peers {
+                let addrs = self.candidate_addrs(p);
+                if addrs.is_empty() {
+                    continue;
                 }
-                if !connected {
-                    self.set_state(ConnState::Disconnected);
+                match self.connect(&ep, &addrs, &p.fingerprint, None).await {
+                    Ok((peer, conn, send, recv)) => {
+                        self.upsert_peer(peer.clone());
+                        self.run_client_session(peer, conn, send, recv).await;
+                        connected = true;
+                        break;
+                    }
+                    Err(e) => log::info!("{} bağlanamadı: {e:#}", p.name),
                 }
             }
             if connected {
+                backoff = SILENT_FIRST;
+                // Oturum bitişinde bırakılan dürtmeyi tüket (aynı kopuş için ikinci deneme olmasın).
+                let _ = timeout(Duration::ZERO, self.nudge.notified()).await;
                 continue;
             }
-            // Sonuç yoksa taramayı tazele: bilgisayar sonradan açıldıysa veya ilk sorgu kaybolduysa bulunsun.
-            if self.discovered().is_empty() && last_scan.elapsed() >= RESCAN_EVERY {
-                last_scan = Instant::now();
-                self.rescan();
+            if loud {
+                self.set_state(ConnState::Disconnected);
             }
-            // Bekle: geri çekilme süresi veya dürtme (ağ değişti, mDNS buldu, eşleştirme istendi).
-            let _ = timeout(backoff, self.nudge.notified()).await;
-            backoff = (backoff * 2).min(Duration::from_secs(30));
+            // Bekle: dürtme (tetikleyici, mDNS buldu) gelirse aralık sıfırlanır; gelmezse artar.
+            if timeout(backoff, self.nudge.notified()).await.is_ok() {
+                backoff = SILENT_FIRST;
+            } else {
+                backoff = (backoff * 2).min(SILENT_MAX);
+            }
         }
     }
 
     async fn run_client_session(self: &Arc<Self>, peer: PeerInfo, conn: Connection, send: SendStream, recv: RecvStream) {
-        self.set_browsing(false);
+        self.stop_scan();
         let s = self.start_session(peer, conn, send, recv);
         s.conn.closed().await;
         // Kısa bekleme: temizlik görevinin durumu güncellemesi için.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(100)).await;
     }
 
+    /// Adresleri yarıştırır (kademeli başlatma): ilk başaran kazanır, kalanlar iptal edilir.
     async fn connect(
         &self,
         ep: &Endpoint,
@@ -547,42 +623,50 @@ impl Inner {
         pair_code: Option<String>,
     ) -> Result<(PeerInfo, Connection, SendStream, RecvStream)> {
         let cc = tls::client_config(&self.ident, server_fp)?;
-        let mut last_err = anyhow!("adres yok");
+        let hello = proto::encode(&Msg::Hello {
+            version: PROTO_VERSION,
+            id: self.ident.id.clone(),
+            name: self.cfg.device_name.clone(),
+            platform: self.cfg.platform,
+            pair_code,
+        })?;
+        let mut set = JoinSet::new();
+        let mut seen: Vec<SocketAddr> = Vec::new();
         for a in addrs {
             let Ok(addr) = a.parse::<SocketAddr>() else { continue };
-            let attempt = async {
-                let conn = ep.connect_with(cc.clone(), addr, "kopru")?.await?;
-                let (mut send, mut recv) = conn.open_bi().await?;
-                send.write_all(&proto::encode(&Msg::Hello {
-                    version: PROTO_VERSION,
-                    id: self.ident.id.clone(),
-                    name: self.cfg.device_name.clone(),
-                    platform: self.cfg.platform,
-                    pair_code: pair_code.clone(),
-                })?)
-                .await?;
-                match proto::read_msg(&mut recv).await? {
-                    Some(Msg::Welcome { id, name, platform }) => {
-                        let mut addrs = vec![a.clone()];
-                        if let Some(old) = lk(&self.peers).iter().find(|p| p.fingerprint == server_fp) {
-                            for x in &old.addrs {
-                                if !addrs.contains(x) && addrs.len() < 4 {
-                                    addrs.push(x.clone());
-                                }
+            if seen.contains(&addr) || seen.len() >= MAX_PARALLEL_ADDRS {
+                continue;
+            }
+            let delay = CONNECT_STAGGER * seen.len() as u32;
+            seen.push(addr);
+            let (ep, cc, hello, a) = (ep.clone(), cc.clone(), hello.clone(), a.clone());
+            set.spawn(async move {
+                sleep(delay).await;
+                dial(ep, cc, addr, hello).await.map(|r| (a, r))
+            });
+        }
+        let mut last_err = anyhow!("adres yok");
+        while let Some(joined) = set.join_next().await {
+            match joined {
+                Ok(Ok((a, Ok((conn, send, recv, id, name, platform))))) => {
+                    set.abort_all();
+                    let mut addrs = vec![a];
+                    if let Some(old) = lk(&self.peers).iter().find(|p| p.fingerprint == server_fp) {
+                        for x in &old.addrs {
+                            if !addrs.contains(x) && addrs.len() < 4 {
+                                addrs.push(x.clone());
                             }
                         }
-                        let peer = PeerInfo { id, name, platform, fingerprint: server_fp.to_string(), addrs };
-                        Ok::<_, anyhow::Error>(Ok((peer, conn, send, recv)))
                     }
-                    Some(Msg::Reject { reason }) => Ok(Err(reason)),
-                    other => bail!("beklenmeyen yanıt: {other:?}"),
+                    let peer = PeerInfo { id, name, platform, fingerprint: server_fp.to_string(), addrs };
+                    return Ok((peer, conn, send, recv));
                 }
-            };
-            match timeout(Duration::from_secs(5), attempt).await {
-                Ok(Ok(Ok(v))) => return Ok(v),
-                Ok(Ok(Err(reason))) => bail!("reddedildi: {reason}"),
+                Ok(Ok((_, Err(reason)))) => {
+                    set.abort_all();
+                    bail!("reddedildi: {reason}");
+                }
                 Ok(Err(e)) => last_err = e,
-                Err(_) => last_err = anyhow!("{a}: zaman aşımı"),
+                Err(_) => {}
             }
         }
         Err(last_err)
@@ -695,6 +779,8 @@ impl Inner {
             });
         }
         self.set_state(ConnState::Disconnected);
+        // İstemci: bağlantı koptu -> sınırlı tarama penceresi + hemen deneme. Sunucu: yalnızca dürtme.
+        self.rescan();
         self.nudge.notify_one();
     }
 
@@ -1424,11 +1510,36 @@ impl Inner {
         if let Some(s) = lk(&self.session).take() {
             s.conn.close(0u32.into(), b"shutdown");
         }
+        self.scan_gen.fetch_add(1, Ordering::SeqCst);
         *lk(&self.browser) = None;
         *lk(&self.advertiser) = None;
         if let Some(ep) = lk(&self.endpoint).take() {
             ep.close(0u32.into(), b"shutdown");
         }
+    }
+}
+
+/// Tek adrese el sıkışma + Hello/Welcome. İç `Err(reason)`: karşı taraf reddetti.
+#[allow(clippy::type_complexity)]
+async fn dial(
+    ep: Endpoint,
+    cc: quinn::ClientConfig,
+    addr: SocketAddr,
+    hello: Vec<u8>,
+) -> Result<std::result::Result<(Connection, SendStream, RecvStream, String, String, Platform), String>> {
+    let attempt = async {
+        let conn = ep.connect_with(cc, addr, "kopru")?.await?;
+        let (mut send, mut recv) = conn.open_bi().await?;
+        send.write_all(&hello).await?;
+        match proto::read_msg(&mut recv).await? {
+            Some(Msg::Welcome { id, name, platform }) => Ok::<_, anyhow::Error>(Ok((conn, send, recv, id, name, platform))),
+            Some(Msg::Reject { reason }) => Ok(Err(reason)),
+            other => bail!("beklenmeyen yanıt: {other:?}"),
+        }
+    };
+    match timeout(CONNECT_TIMEOUT, attempt).await {
+        Ok(r) => r,
+        Err(_) => Err(anyhow!("{addr}: zaman aşımı")),
     }
 }
 

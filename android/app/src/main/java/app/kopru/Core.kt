@@ -36,6 +36,8 @@ data class UiState(
     val peer: PeerInfo? = null,
     val peers: List<PeerInfo> = emptyList(),
     val discovered: List<ServerInfo> = emptyList(),
+    /** Sınırlı mDNS tarama penceresi açık mı (yalnızca metin/kilit için; animasyon yok). */
+    val scanning: Boolean = false,
     val transfers: Map<String, TransferInfo> = emptyMap(),
     val pairError: String? = null,
     val startError: String? = null,
@@ -118,6 +120,10 @@ object Core : Host {
             is Event.Paired -> _ui.update { it.copy(pairError = null, peers = node?.peers() ?: it.peers) }
             is Event.PairFailed -> _ui.update { it.copy(pairError = event.reason) }
             is Event.Discovered -> _ui.update { it.copy(discovered = event.servers) }
+            is Event.Scanning -> {
+                _ui.update { it.copy(scanning = event.on) }
+                if (!event.on) main.post { KopruService.holdMulticast(false) }
+            }
             is Event.ClipboardReceived -> main.post { setClipboard(event.text) }
             is Event.Transfer -> {
                 val t = event.info
@@ -195,6 +201,17 @@ object Core : Host {
         _ui.value.transfers.values.any { it.state == TransferState.ACTIVE }
 
     fun isConnected() = _ui.value.conn == ConnState.CONNECTED
+
+    /**
+     * Sınırlı bir mDNS tarama penceresi açar (bağlıyken hiçbir şey yapmaz). MulticastLock taramadan
+     * ÖNCE alınır; pencere bitince çekirdeğin Scanning(false) olayıyla bırakılır.
+     */
+    fun rescan() {
+        val n = node ?: return
+        if (isConnected()) return n.nudge()
+        KopruService.holdMulticast(true)
+        n.rescan()
+    }
 
     @Suppress("unused")
     private fun dirName(d: Direction) = d.name

@@ -49,6 +49,19 @@ impl Drop for Node {
     }
 }
 
+/// UniFFI'ye açılmayan yardımcılar (test ve masaüstü).
+impl Node {
+    /// Tarama penceresi açık mı.
+    pub fn is_scanning(&self) -> bool {
+        self.inner.is_scanning()
+    }
+
+    /// Tarama penceresi süresini değiştirir (varsayılan 25 sn; testler için).
+    pub fn set_scan_window(&self, d: std::time::Duration) {
+        self.inner.set_scan_window(d)
+    }
+}
+
 #[uniffi::export]
 impl Node {
     /// Düğümü oluşturur ve başlatır (sunucu dinlemeye, istemci bağlanmaya başlar).

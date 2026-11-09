@@ -39,13 +39,13 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -146,10 +146,10 @@ private fun Hero(ui: UiState) {
     val on = ui.conn == ConnState.CONNECTED
     val (eyebrow, title, sub) = when (ui.conn) {
         ConnState.CONNECTED -> Triple("Bağlı", ui.peer?.name ?: "Bilgisayar", "Pano, dosya, bildirim ve kumanda hazır.")
-        ConnState.CONNECTING -> Triple("Durum", "Bağlanıyor…", "Bilgisayar aranıyor.")
+        ConnState.CONNECTING -> Triple("Durum", "Bağlanıyor…", "Bilgisayara bağlanılıyor.")
         ConnState.DISCONNECTED ->
             if (ui.peers.isEmpty()) Triple("Hoş geldin", "Bilgisayarını eşleştir", "Telefon ve bilgisayar aynı Wi‑Fi'da olmalı.")
-            else Triple("Durum", "Bilgisayar bekleniyor", "T-Bridge bilgisayarda açılınca kendiliğinden bağlanır.")
+            else Triple("Durum", "Bağlı değil", "T-Bridge bilgisayarda açılınca kendiliğinden bağlanır.")
     }
     TbCard(gold = on, padding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -256,7 +256,7 @@ private fun HelpCard(defaultOpen: Boolean) {
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 TbButton("Yeniden tara", {
-                    Core.node?.rescan()
+                    Core.rescan()
                     Toast.makeText(ctx, "Ağ yeniden taranıyor", Toast.LENGTH_SHORT).show()
                 }, Modifier.weight(1f), height = 44.dp)
                 TbButton("Wi‑Fi ayarları", {
@@ -282,6 +282,8 @@ private fun ErrorCard(msg: String) {
 @Composable
 private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Unit) {
     val c = tb
+    // Kart açılınca sınırlı bir tarama penceresi aç (zaten tarıyorsa dokunma).
+    LaunchedEffect(Unit) { if (!ui.scanning) Core.rescan() }
     TbCard(gold = true) {
         SectionTitle("Eşleştirme", color = c.gold)
         Spacer(Modifier.height(4.dp))
@@ -295,10 +297,13 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
         Spacer(Modifier.height(6.dp))
         val list = ui.discovered.filter { !it.paired }
         if (list.isEmpty()) {
-            Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(16.dp), color = c.gold, strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-                Text("Aranıyor…", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+            // Sabit metin (dönen animasyon yok): tarama sınırlı bir pencere, bitince "Yeniden tara".
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (ui.scanning) "Ağ taranıyor, birkaç saniye sürer." else "Bu ağda bilgisayar bulunamadı.",
+                    Modifier.weight(1f), color = c.muted, style = MaterialTheme.typography.bodyMedium,
+                )
+                if (!ui.scanning) TextButton({ Core.rescan() }) { Text("Yeniden tara", color = c.goldHi) }
             }
         }
         list.forEach { s ->

@@ -16,7 +16,10 @@ const empty: Snapshot = {
   nowPlaying: null,
   settings: {
     clipboardSync: true,
-    notifToast: true,
+    notifMirror: true,
+    notifSound: true,
+    notifToast: false,
+    settingsVersion: 1,
     transferToast: true,
     lowBatteryWarn: true,
     autostart: true,
@@ -103,7 +106,7 @@ function onEvent(e: CoreEvent) {
     }
     case 'notification': {
       const d = (e as Extract<CoreEvent, { type: 'notification' }>).data
-      if (s.settings.mutedApps.includes(d.package)) break
+      if (!s.settings.notifMirror || s.settings.mutedApps.includes(d.package)) break
       s.notifications = [d, ...s.notifications.filter((n) => n.key !== d.key)].slice(0, 200)
       break
     }

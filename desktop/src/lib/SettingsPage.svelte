@@ -15,6 +15,7 @@
   async function save(patch: Partial<Settings>) {
     const next = { ...s.settings, ...patch }
     s.settings = next
+    if (patch.notifMirror === false) s.notifications = []
     if (patch.theme) applyTheme(patch.theme)
     const r = await call<boolean>('set_settings', { settings: next })
     if (r) restartNeeded = true
@@ -102,7 +103,18 @@
   <section class="card group">
     <h3>Pano ve bildirimler</h3>
     {@render item('Pano eşitleme', 'Kopyaladığın metin telefonda da kopyalanmış olur.', 'clipboardSync')}
-    {@render item('Bildirimleri Windows’ta göster', 'Pencere arkadayken telefon bildirimleri sağ altta çıkar.', 'notifToast')}
+    {@render item('Telefon bildirimlerini göster', 'Kapatırsan telefon bildirimleri hiç alınmaz; ses ve uyarı da durur.', 'notifMirror')}
+    {#if s.settings.notifMirror}
+      <div class="item">
+        <div class="grow">
+          <div class="il">Bildirim sesi</div>
+          <div class="ih">Yeni bildirimde kısa, yumuşak bir ses çalar.</div>
+        </div>
+        <button class="sm" onclick={() => call('test_notification_sound')}>Dene</button>
+        <Toggle checked={s.settings.notifSound} label="Bildirim sesi" onchange={(v) => save({ notifSound: v })} />
+      </div>
+      {@render item('Windows bildirimi', 'Sağ altta uyarı da göster (varsayılan kapalı).', 'notifToast')}
+    {/if}
     {@render item('Şarj azalınca uyar', 'Telefon %15’in altına inince haber verir.', 'lowBatteryWarn')}
     {#if s.settings.mutedApps.length}
       <div class="sub">

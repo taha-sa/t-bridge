@@ -208,6 +208,8 @@ pub enum Event {
     Paired { peer: PeerInfo },
     PairFailed { reason: String },
     Discovered { servers: Vec<ServerInfo> },
+    /// İstemci: sınırlı mDNS tarama penceresi açıldı/kapandı (Android MulticastLock buna bağlı).
+    Scanning { on: bool },
     ClipboardReceived { text: String },
     Transfer { info: TransferInfo },
     TransferRemoved { id: u64, direction: Direction },

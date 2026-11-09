@@ -306,3 +306,79 @@ fn cancel_removes_partial_and_queue() {
     let q = std::fs::read_to_string(p.root.join("phone/data/queue.json")).unwrap();
     assert_eq!(q.trim(), "[]");
 }
+
+/// Ölü (yanıt vermeyen) adres önde, canlı adres arkada: bağlantı zaman aşımını beklememeli.
+#[test]
+fn dead_address_does_not_delay_connect() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pc = node(&tmp.path().join("pc"), "PC", Role::Server, Platform::Desktop, Arc::new(TestHost::default()));
+    // Hiç yanıt vermeyen UDP soketi: ICMP dönmez, bağlantı denemesi ancak zaman aşımıyla biter.
+    let blackhole = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let dead = blackhole.local_addr().unwrap();
+    let info = pc.pairing_info();
+    let base = info.uri.split("&a=").next().unwrap();
+    let uri = format!("{base}&a={dead},127.0.0.1:{}", pc.port());
+    let hh = Arc::new(TestHost::default());
+    let phone = node(&tmp.path().join("phone"), "Telefon", Role::Client, Platform::Android, hh.clone());
+    let t0 = Instant::now();
+    phone.pair_uri(uri).unwrap();
+    hh.wait("telefon bağlı", 20, |e| matches!(e, Event::State { state: ConnState::Connected, .. }).then_some(()));
+    let took = t0.elapsed();
+    // Sıralı eski davranış en az 5 sn (adres başına zaman aşımı) harcardı.
+    assert!(took < Duration::from_secs(4), "ölü adres bağlantıyı geciktirdi: {took:?}");
+    println!("ölü+canlı adres bağlanma süresi: {took:?}");
+    drop(blackhole);
+}
+
+/// Tarama yalnızca tetiklenince, sınırlı bir pencerede çalışır; pencere bitince kapanır ve durum
+/// sabit `Disconnected` kalır (sürekli Connecting/Disconnected dönüşü yok).
+#[test]
+fn scan_window_is_bounded_and_state_stays_disconnected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hh = Arc::new(TestHost::default());
+    let phone = node(&tmp.path().join("phone"), "Telefon", Role::Client, Platform::Android, hh.clone());
+    // Tetikleyici yokken tarama açılmaz.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!phone.is_scanning());
+    assert_eq!(phone.state(), ConnState::Disconnected);
+
+    phone.set_scan_window(Duration::from_millis(600));
+    phone.rescan();
+    hh.wait("tarama açıldı", 10, |e| matches!(e, Event::Scanning { on: true }).then_some(()));
+    assert!(phone.is_scanning());
+    hh.wait("tarama kapandı", 10, |e| matches!(e, Event::Scanning { on: false }).then_some(()));
+    assert!(!phone.is_scanning());
+
+    // Pencere bittikten sonra bir süre daha: yeni tarama açılmamalı, durum değişmemeli.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(!phone.is_scanning());
+    assert_eq!(phone.state(), ConnState::Disconnected);
+    let evs = hh.events.lock().unwrap();
+    let scans_on = evs.iter().filter(|e| matches!(e, Event::Scanning { on: true })).count();
+    let states = evs.iter().filter(|e| matches!(e, Event::State { .. })).count();
+    assert_eq!(scans_on, 1, "tek pencere açılmalı");
+    assert_eq!(states, 0, "eşleşmiş bilgisayar yokken durum olayı üretilmemeli");
+}
+
+/// Eşleşmiş bilgisayar sonradan açılırsa, taramadan bağımsız sessiz denemelerle yine bağlanır;
+/// sessiz denemeler `Connecting` göstermez.
+#[test]
+fn silent_retry_reconnects_without_scanning_or_connecting_state() {
+    let mut p = paired();
+    let phone = p.phone.take().unwrap();
+    let phone_dir = p.root.join("phone");
+    let port = p.pc.port();
+    // Telefonu kapat; PC aynı portta çevrimdışı kalamaz (aynı süreç), bu yüzden PC'yi de kapatıp
+    // aynı veri dizini/kimlikle yeniden aç: eşleşme kalıcı, telefon sessizce yeniden bağlanmalı.
+    drop(phone);
+    p.pch.wait("kopma", 70, |e| matches!(e, Event::State { state: ConnState::Disconnected, .. }).then_some(()));
+    let _ = port;
+    let phh2 = Arc::new(TestHost::default());
+    let phone2 = node(&phone_dir, "Test Telefon", Role::Client, Platform::Android, phh2.clone());
+    // Tarama tetiklenmedi: yalnızca kayıtlı adrese doğrudan deneme.
+    phh2.wait("sessiz yeniden bağlanma", 20, |e| matches!(e, Event::State { state: ConnState::Connected, .. }).then_some(()));
+    assert!(!phone2.is_scanning());
+    let evs = phh2.events.lock().unwrap();
+    assert!(!evs.iter().any(|e| matches!(e, Event::State { state: ConnState::Connecting, .. })), "sessiz deneme Connecting göstermemeli");
+    assert!(!evs.iter().any(|e| matches!(e, Event::Scanning { .. })));
+}

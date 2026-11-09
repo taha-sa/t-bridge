@@ -195,17 +195,28 @@ pub fn phone_cmd(s: S<'_>, cmd: PhoneCommand) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn set_settings(s: S<'_>, settings: Settings) -> Result<bool, String> {
+pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
     let restart_needed = {
         let old = lk(&s.settings);
+        // Sürüm alanı yalnızca arka uçta yönetilir (arayüz eski değer yollasa da göç tekrarlanmasın).
+        settings.settings_version = old.settings_version;
         old.download_dir != settings.download_dir
     };
+    if !settings.notif_mirror {
+        lk(&s.notifications).clear();
+    }
     if settings.autostart != win::system::autostart_enabled() {
         win::system::set_autostart(settings.autostart);
     }
     *lk(&s.settings) = settings;
     s.save_settings();
     Ok(restart_needed)
+}
+
+/// Ayarlar'daki "Dene" düğmesi: bildirim sesini bir kez çalar.
+#[tauri::command]
+pub fn test_notification_sound() {
+    win::sound::play();
 }
 
 #[tauri::command]

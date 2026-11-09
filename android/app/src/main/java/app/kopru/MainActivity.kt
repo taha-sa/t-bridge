@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener)
-        if (Core.isConnected()) Core.node?.nudge() else Core.node?.rescan()
+        Core.rescan()
     }
 
     override fun onPause() {

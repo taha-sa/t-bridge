@@ -158,6 +158,7 @@ pub fn run() {
             commands::mute_app,
             commands::phone_cmd,
             commands::set_settings,
+            commands::test_notification_sound,
             commands::pick_download_dir,
             commands::restart_app,
             commands::fix_firewall,
@@ -170,10 +171,12 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let settings_path = data_dir.join("settings.json");
             let first_run = !settings_path.exists();
-            let settings: Settings = std::fs::read(&settings_path)
+            let mut settings: Settings = std::fs::read(&settings_path)
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default();
+            // Eski sürümden kalan ayarları bir kez yükselt (ör. Windows bildirimi varsayılanı kapalı).
+            let migrated = settings.migrate();
             let shared = Arc::new(Shared {
                 app: app.handle().clone(),
                 settings_path,
@@ -188,7 +191,7 @@ pub fn run() {
                 updater: updater::Updater::new(),
                 node: OnceLock::new(),
             });
-            if first_run {
+            if first_run || migrated {
                 shared.save_settings();
             }
             // Her açılışta kaydı güncel exe yoluna yaz (güncelleme/taşıma sonrası eski yol kalmasın).

@@ -9,3 +9,25 @@ android/app/src/main/jniLibs/
 *.keystore
 keystore.properties
 dist-release/
+
+# Ek (GitHub oncesi)
+.gradle/
+build/
+.vs/
+*.user
+*.log
+logs/
+dist/
+dist-new/
+publish/
+*.jks
+*.key
+*.pem
+*.pfx
+*.p12
+*.pass
+.env
+.env.*
+local.properties
+.idea/
+.DS_Store

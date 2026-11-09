@@ -47,7 +47,10 @@ export interface Battery {
 
 export interface Settings {
   clipboardSync: boolean
+  notifMirror: boolean
+  notifSound: boolean
   notifToast: boolean
+  settingsVersion: number
   transferToast: boolean
   lowBatteryWarn: boolean
   autostart: boolean
