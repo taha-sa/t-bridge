@@ -31,3 +31,4 @@ publish/
 local.properties
 .idea/
 .DS_Store
+android/.kotlin/
