@@ -165,7 +165,8 @@ impl AutoState {
         out
     }
 
-    /// Deneme hakkı tükendi mi (telefonda elle "Aç" yedeği gösterilir).
+    /// Deneme hakkı tükendi mi.
+    #[cfg(test)]
     pub fn failed(&self, id: &str) -> bool {
         self.tries.get(id).is_some_and(|t| t.0 >= AUTO_MAX_TRIES)
     }
