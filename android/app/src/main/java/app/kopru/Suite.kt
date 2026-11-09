@@ -127,6 +127,7 @@ object Suite {
     fun onEvent(app: String, name: String, json: String) {
         val o = runCatching { JSONObject(json) }.getOrDefault(JSONObject())
         when {
+            app == "t-bridge" && name == "file.presented" -> ViewerLink.onPresented(o.optString("name"), o.optBoolean("ok"))
             app == "t-bridge" && name == "file.open" -> ViewerLink.expectOpen(o.optString("name"))
             name == "download.progress" -> _ui.update {
                 val id = o.optString("id")

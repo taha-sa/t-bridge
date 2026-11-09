@@ -143,6 +143,72 @@ object ViewerLink {
         System.currentTimeMillis() - t <= PENDING_TTL_MS
     }
 
+    // ---------------------------------------------------------------- imza sertifikası sabitleme
+
+    /** "AA:BB cc" -> "aabbcc" (küçük harf, yalnız hex). */
+    fun normDigest(s: String): String = s.filter { it.isLetterOrDigit() }.lowercase(Locale.ROOT)
+
+    /** Paketin imzalayan sertifikalarının SHA-256 özetleri (küçük harf hex); okunamazsa boş. */
+    fun signerDigests(ctx: Context, pkg: String): Set<String> = runCatching {
+        val info = ctx.packageManager.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+        val signers = info.signingInfo?.apkContentsSigners ?: return emptySet()
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        signers.map { sig -> md.digest(sig.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
+    }.getOrDefault(emptySet())
+
+    /**
+     * Çağıranın imzası yapılandırılan parmak izlerinden biriyle (virgülle ayrılmış) eşleşmeli ve tüm imzacılar izinli olmalı.
+     * Parmak izi yapılandırılmamışsa: debug yapıda esnek (paket adı yeter), release yapıda reddedilir. Saf mantık.
+     */
+    fun certAllowed(actual: Set<String>, pinnedCsv: String, lenient: Boolean): Boolean {
+        val pinned = pinnedCsv.split(',').map(::normDigest).filter { it.isNotEmpty() }.toSet()
+        if (pinned.isEmpty()) return lenient
+        return actual.isNotEmpty() && actual.all { it in pinned }
+    }
+
+    // ---------------------------------------------------------------- sunum durumu (what=101)
+
+    private class PresentWait(val reply: Messenger, val at: Long)
+    private val presentWait = HashMap<String, PresentWait>()
+
+    private fun key(name: String) = name.substringAfterLast('/').lowercase(Locale.ROOT)
+
+    /** Sunum gönderimi başladı: Viewer'a `transferring` yollar ve PC'nin açma sonucunu bekler. */
+    fun trackPresent(name: String, reply: Messenger?) {
+        reply ?: return
+        synchronized(presentWait) {
+            val now = System.currentTimeMillis()
+            presentWait.entries.removeAll { now - it.value.at > PENDING_TTL_MS }
+            presentWait[key(name)] = PresentWait(reply, now)
+        }
+        sendPresentState(reply, "transferring", "Sunum bilgisayara gönderiliyor")
+    }
+
+    /** Terminal durum (opened/failed): bekleyeni kaldırır ve Viewer'a bildirir. Bekleyen yoksa yok sayar. */
+    fun finishPresent(name: String, ok: Boolean, failMsg: String? = null) {
+        val w = synchronized(presentWait) { presentWait.remove(key(name)) } ?: return
+        if (ok) sendPresentState(w.reply, "opened", "Sunum bilgisayarda açıldı")
+        else sendPresentState(w.reply, "failed", failMsg ?: "Sunum bilgisayarda açılamadı")
+    }
+
+    /** PC `file.presented` olayı. */
+    fun onPresented(name: String, ok: Boolean) = finishPresent(name, ok)
+
+    /** Giden aktarım başarısız/iptal olduysa sunum da başarısızdır. */
+    fun onOutgoingTransfer(name: String, failed: Boolean) {
+        if (failed) finishPresent(name, false, "Dosya bilgisayara gönderilemedi")
+    }
+
+    private fun sendPresentState(to: Messenger, state: String, text: String) {
+        val m = Message.obtain(null, ViewerBridgeService.WHAT_PRESENT_STATE)
+        m.data = Bundle().apply {
+            putString("state", state)
+            putString("msg", text)
+            putBoolean("connected", Core.isConnected())
+        }
+        runCatching { to.send(m) }
+    }
+
     fun mimeOf(ctx: Context, uri: Uri, name: String): String {
         val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
@@ -182,6 +248,7 @@ object ViewerLink {
  *  what=1 SEND   : uri (grantUriPermission ile verilmiş), name, present(bool)  -> dosyayı PC'ye gönderir (present: PC'de tam ekran sunum)
  *  what=2 KEY    : key = "next" | "prev" | "end"                                -> PC'ye ok tuşu / Esc
  *  what=3 PING   : kurulum/bağlantı durumu
+ * present=true ise ek olarak what=101 (state transferring -> opened|failed, msg, connected).
  * Yanıt: replyTo'ya what=100, data {ok:Boolean, msg:String, connected:Boolean}.
  */
 class ViewerBridgeService : Service() {
@@ -215,7 +282,8 @@ class ViewerBridgeService : Service() {
     private fun callerIsViewer(uid: Int): Boolean {
         if (uid <= 0) return false
         val pkgs = packageManager.getPackagesForUid(uid) ?: return false
-        return ViewerLink.PKG in pkgs
+        if (ViewerLink.PKG !in pkgs) return false
+        return ViewerLink.certAllowed(ViewerLink.signerDigests(this, ViewerLink.PKG), BuildConfig.VIEWER_CERT_SHA256, BuildConfig.DEBUG)
     }
 
     private fun handleSend(d: Bundle, reply: Messenger?) {
@@ -228,9 +296,14 @@ class ViewerBridgeService : Service() {
         if (present) {
             if (!Core.isConnected() || !Suite.supported()) { respond(reply, false, "Bilgisayar bağlı değil veya sürüm eski"); return }
             // PC önce adı öğrenir; dosya bitince tam ekran açar.
-            Suite.send("t-bridge", "file.present", JSONObject().put("name", file.name.substringAfterLast('/')).toString())
+            val pname = file.name.substringAfterLast('/')
+            ViewerLink.trackPresent(pname, reply)
+            Suite.send("t-bridge", "file.present", JSONObject().put("name", pname).toString()) { ok, _, err ->
+                if (!ok) ViewerLink.finishPresent(pname, false, Suite.friendlyError(err) ?: "Bilgisayar sunumu kabul etmedi")
+            }
         }
         val n = Core.sendFiles(listOf(file))
+        if (present && n == 0) ViewerLink.finishPresent(file.name, false, "Gönderilemedi")
         when {
             n == 0 -> respond(reply, false, "Gönderilemedi (eşleşmiş bilgisayar yok?)")
             Core.isConnected() -> respond(reply, true, if (present) "Sunum bilgisayara gönderiliyor" else "Dosya gönderiliyor")
@@ -262,5 +335,7 @@ class ViewerBridgeService : Service() {
         const val WHAT_KEY = 2
         const val WHAT_PING = 3
         const val WHAT_RESULT = 100
+        /** Sunum yaşam döngüsü: Bundle state = transferring | opened | failed, msg = Türkçe metin, connected. */
+        const val WHAT_PRESENT_STATE = 101
     }
 }

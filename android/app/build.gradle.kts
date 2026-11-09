@@ -30,6 +30,10 @@ android {
         versionCode = appVersionCode
         versionName = appVersion
         ndk { abiFilters += listOf("arm64-v8a") }
+        // T-Desk Viewer yayın imzasının SHA-256 parmak izi (virgülle birden çok; iki nokta/boşluk yok sayılır). Kaynak: gradle özelliği
+        // `viewerCertSha256` (gradle.properties / -P) veya ortam değişkeni VIEWER_CERT_SHA256. Boşsa: debug esnek, release Viewer'ı REDDEDER.
+        val viewerCert = ((findProperty("viewerCertSha256") as String?) ?: System.getenv("VIEWER_CERT_SHA256") ?: "").trim()
+        buildConfigField("String", "VIEWER_CERT_SHA256", "\"" + viewerCert.replace("\"", "") + "\"")
     }
 
     signingConfigs {

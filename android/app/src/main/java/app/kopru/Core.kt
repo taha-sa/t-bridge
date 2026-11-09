@@ -131,6 +131,7 @@ object Core : Host {
             is Event.Transfer -> {
                 val t = event.info
                 _ui.update { it.copy(transfers = it.transfers + (tkey(t) to t)) }
+                if (t.direction == uniffi.kopru_core.Direction.OUTGOING && (t.state == TransferState.FAILED || t.state == TransferState.CANCELLED)) ViewerLink.onOutgoingTransfer(t.name, true)
                 main.post { KopruService.onTransfer(t) }
             }
             is Event.TransferRemoved -> _ui.update { s ->
