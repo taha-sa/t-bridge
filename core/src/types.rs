@@ -200,6 +200,33 @@ pub enum PhoneCommand {
     DismissNotification { key: String },
 }
 
+/// PC'deki bir monitör (ekran paylaşımı).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct MonitorInfo {
+    pub index: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenFeedback {
+    pub want_key: bool,
+    pub backlog_ms: u64,
+}
+
+/// Telefondan PC'ye ekran paylaşımı denetim komutları.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
+pub enum ScreenCmd {
+    Start { monitor: u32, max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32 },
+    Stop,
+    Keyframe,
+    Config { max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32 },
+    /// Mutlak işaretçi konumu (0..1, seçili monitöre göre).
+    Pointer { x: f32, y: f32, monitor: u32 },
+}
+
 /// Çekirdekten platforma giden olaylar.
 #[derive(Debug, Clone, Serialize, uniffi::Enum)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -221,6 +248,12 @@ pub enum Event {
     NotificationReply { key: String, text: String },
     /// PC'de: yanıtın telefondaki sonucu.
     NotificationReplyResult { key: String, ok: bool, error: Option<String> },
+    /// PC'de: telefon ekran paylaşımı komutu gönderdi.
+    Screen { cmd: ScreenCmd },
+    /// Telefonda: PC monitör listesi / durum (error doluysa reddedildi veya başlatılamadı).
+    ScreenInfo { monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String> },
+    /// Telefonda: kodlanmış H.264 (Annex-B) video karesi.
+    ScreenFrame { pts_us: u64, key: bool, data: Vec<u8> },
     AppIcon { package: String, png: Vec<u8> },
     Battery { level: u8, charging: bool },
     NowPlaying { info: Option<NowPlaying> },

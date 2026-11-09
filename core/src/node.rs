@@ -75,6 +75,12 @@ impl Session {
     }
 }
 
+/// Ekran paylaşımı çıkışı: kareler kanaldan tek yönlü akışa sırayla yazılır.
+pub(crate) struct ScreenOut {
+    tx: mpsc::UnboundedSender<(crate::screen::FrameHeader, Vec<u8>)>,
+    gate: Arc<Mutex<crate::screen::Gate>>,
+}
+
 /// Alıcı tarafında kalıcı küçük durum: tamamlanmış ve iptal edilmiş aktarım anahtarları.
 #[derive(Default, Serialize, Deserialize)]
 struct IncPersist {
@@ -139,6 +145,8 @@ pub(crate) struct Inner {
     pending_accept: Mutex<HashMap<u64, oneshot::Sender<Accept>>>,
     pending_result: Mutex<HashMap<u64, ResultTx>>,
     inc_open: Mutex<HashMap<u64, IncOpen>>,
+    /// PC: etkin ekran paylaşımı çıkışı (video akışı yazıcısı + geri basınç kapısı).
+    screen_out: Mutex<Option<ScreenOut>>,
     active_in: Mutex<HashMap<u64, Arc<AtomicU8>>>,
     inc_persist: Mutex<IncPersist>,
     transfers: Mutex<BTreeMap<(u8, u64), TransferInfo>>,
@@ -206,6 +214,7 @@ impl Inner {
             pending_accept: Mutex::new(HashMap::new()),
             pending_result: Mutex::new(HashMap::new()),
             inc_open: Mutex::new(HashMap::new()),
+            screen_out: Mutex::new(None),
             active_in: Mutex::new(HashMap::new()),
             inc_persist: Mutex::new(inc_persist),
             transfers: Mutex::new(transfers),
@@ -774,6 +783,7 @@ impl Inner {
         lk(&self.pending_accept).clear();
         lk(&self.pending_result).clear();
         lk(&self.inc_open).clear();
+        *lk(&self.screen_out) = None;
         // Yarım kalan aktarımlar "sırada" görünür; bağlanınca devam eder.
         let ids: Vec<(Direction, u64)> = lk(&self.transfers)
             .values()
@@ -804,6 +814,16 @@ impl Inner {
             Msg::NotifExt { key, can_reply, choices } => self.emit(Event::NotificationExt { key, can_reply, choices }),
             Msg::NotifReply { key, text } => self.emit(Event::NotificationReply { key, text }),
             Msg::NotifReplyResult { key, ok, error } => self.emit(Event::NotificationReplyResult { key, ok, error }),
+            Msg::ScreenStart { monitor, max_w, max_h, fps, bitrate_kbps } => {
+                self.emit(Event::Screen { cmd: ScreenCmd::Start { monitor, max_w, max_h, fps, bitrate_kbps } })
+            }
+            Msg::ScreenStop => self.emit(Event::Screen { cmd: ScreenCmd::Stop }),
+            Msg::ScreenKeyframe => self.emit(Event::Screen { cmd: ScreenCmd::Keyframe }),
+            Msg::ScreenConfig { max_w, max_h, fps, bitrate_kbps } => {
+                self.emit(Event::Screen { cmd: ScreenCmd::Config { max_w, max_h, fps, bitrate_kbps } })
+            }
+            Msg::ScreenPointer { x, y, monitor } => self.emit(Event::Screen { cmd: ScreenCmd::Pointer { x, y, monitor } }),
+            Msg::ScreenInfo { monitors, current, active, error } => self.emit(Event::ScreenInfo { monitors, current, active, error }),
             Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
@@ -1392,10 +1412,82 @@ impl Inner {
         });
     }
 
+    /// Telefon: PC'nin video akışını okur, kareleri `ScreenFrame` olayı olarak iletir.
+    async fn receive_video(self: &Arc<Self>, mut recv: RecvStream) -> Result<()> {
+        use crate::screen::{FrameHeader, HEADER_LEN};
+        loop {
+            let mut hb = [0u8; HEADER_LEN];
+            match recv.read_exact(&mut hb).await {
+                Ok(()) => {}
+                Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(()),
+                Err(e) => return Err(e).context("video başlığı"),
+            }
+            let h = FrameHeader::decode(&hb).ok_or_else(|| anyhow!("geçersiz video çerçevesi"))?;
+            let mut data = vec![0u8; h.len as usize];
+            recv.read_exact(&mut data).await.context("video verisi")?;
+            self.emit(Event::ScreenFrame { pts_us: h.pts_us, key: h.key, data });
+        }
+    }
+
+    /// PC: kareyi geri basınç kapısından geçirip akış yazıcısına verir. false = atıldı (anahtar kare istenir).
+    pub fn send_screen_frame(self: &Arc<Self>, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
+        use crate::screen::{FrameHeader, Offer};
+        let Some(s) = self.session() else { return false };
+        if !s.has_cap(proto::CAP_SCREEN) || data.len() > crate::screen::MAX_FRAME_BYTES {
+            return false;
+        }
+        let mut g = lk(&self.screen_out);
+        if g.is_none() {
+            let (tx, mut rx) = mpsc::unbounded_channel::<(FrameHeader, Vec<u8>)>();
+            let gate = Arc::new(Mutex::new(crate::screen::Gate::new()));
+            let (gate2, conn) = (gate.clone(), s.conn.clone());
+            self.rt.spawn(async move {
+                let Ok(mut stream) = conn.open_uni().await else { return };
+                if stream.write_all(&crate::screen::VIDEO_MAGIC.to_le_bytes()).await.is_err() {
+                    return;
+                }
+                while let Some((h, data)) = rx.recv().await {
+                    let ok = stream.write_all(&h.encode()).await.is_ok() && stream.write_all(&data).await.is_ok();
+                    lk(&gate2).done();
+                    if !ok {
+                        break;
+                    }
+                }
+                let _ = stream.finish();
+            });
+            *g = Some(ScreenOut { tx, gate });
+        }
+        let out = g.as_ref().unwrap();
+        let offer = lk(&out.gate).offer(pts_us, key);
+        if offer == Offer::Drop {
+            return false;
+        }
+        out.tx.send((FrameHeader { pts_us, key, len: data.len() as u32 }, data)).is_ok()
+    }
+
+    /// PC: bekleyen kareler nedeniyle kodlayıcıdan anahtar kare istenmeli mi, ve gönderim gecikmesi (ms).
+    pub fn screen_feedback(&self, newest_pts_us: u64) -> (bool, u64) {
+        match lk(&self.screen_out).as_ref() {
+            Some(o) => {
+                let mut g = lk(&o.gate);
+                (g.take_want_key(), g.backlog_ms(newest_pts_us))
+            }
+            None => (false, 0),
+        }
+    }
+
+    /// PC: paylaşım bitti; video akışı kapatılır (yeni oturum yeni akış açar).
+    pub fn end_screen_stream(&self) {
+        *lk(&self.screen_out) = None;
+    }
+
     async fn receive_stream(self: &Arc<Self>, s: &Arc<Session>, mut recv: RecvStream) -> Result<()> {
         let mut idb = [0u8; 8];
         recv.read_exact(&mut idb).await?;
         let id = u64::from_le_bytes(idb);
+        if id == crate::screen::VIDEO_MAGIC {
+            return self.receive_video(recv).await;
+        }
         let Some(open) = lk(&self.inc_open).remove(&id) else {
             let _ = recv.stop(RESET_CANCEL.into());
             bail!("bilinmeyen aktarım {id}");

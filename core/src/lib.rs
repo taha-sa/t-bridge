@@ -11,6 +11,7 @@ pub mod files;
 pub mod host;
 pub mod node;
 pub mod proto;
+pub mod screen;
 pub mod store;
 pub mod tls;
 pub mod types;
@@ -194,6 +195,50 @@ impl Node {
     /// Telefon -> PC: yanıt sonucu.
     pub fn send_notification_reply_result(&self, key: String, ok: bool, error: Option<String>) -> bool {
         self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifReplyResult { key, ok, error })
+    }
+
+    /// Eş ekran paylaşımı yeteneğini duyurdu mu.
+    pub fn peer_supports_screen(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_SCREEN))
+    }
+
+    pub fn send_screen_start(&self, monitor: u32, max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenStart { monitor, max_w, max_h, fps, bitrate_kbps })
+    }
+
+    pub fn send_screen_stop(&self) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenStop)
+    }
+
+    pub fn send_screen_keyframe(&self) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenKeyframe)
+    }
+
+    pub fn send_screen_config(&self, max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenConfig { max_w, max_h, fps, bitrate_kbps })
+    }
+
+    pub fn send_screen_pointer(&self, x: f32, y: f32, monitor: u32) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenPointer { x, y, monitor })
+    }
+
+    pub fn send_screen_info(&self, monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String>) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenInfo { monitors, current, active, error })
+    }
+
+    /// PC: kodlanmış kareyi gönder (geri basınç kapısı). false = atıldı/gönderilemedi.
+    pub fn send_screen_frame(&self, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
+        self.inner.send_screen_frame(pts_us, key, data)
+    }
+
+    /// PC: (anahtar kare isteniyor mu, gönderim kuyruğu gecikmesi ms).
+    pub fn screen_feedback(&self, newest_pts_us: u64) -> ScreenFeedback {
+        let (want_key, backlog_ms) = self.inner.screen_feedback(newest_pts_us);
+        ScreenFeedback { want_key, backlog_ms }
+    }
+
+    pub fn end_screen_stream(&self) {
+        self.inner.end_screen_stream()
     }
 
     pub fn remove_notification(&self, key: String) -> bool {
