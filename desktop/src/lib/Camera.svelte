@@ -25,14 +25,24 @@
   let st = $state<CameraStatus | null>(null)
   let busy = $state(false)
   let error = $state('')
+  let loadFailed = $state(false)
+  let retrying = $state(false)
   const on = $derived(app.s.state === 'Connected')
 
   async function refresh() {
     try {
       st = await invoke<CameraStatus>('camera_status')
+      loadFailed = false
     } catch {
-      /* arka uç henüz hazır değil */
+      // Durum hiç okunamadıysa (st hâlâ null) iskelet yerine hata + yeniden dene gösterilir.
+      if (st === null) loadFailed = true
     }
+  }
+
+  async function retry() {
+    retrying = true
+    await refresh()
+    retrying = false
   }
 
   async function run(cmd: string) {
@@ -64,7 +74,13 @@
 </script>
 
 <div class="page">
-  {#if st === null}
+  {#if st === null && loadFailed}
+    <section class="card loadfail" role="alert">
+      <div class="lf-title">Kamera durumu okunamadı</div>
+      <div class="muted small">Arka uç yanıt vermiyor olabilir. Biraz sonra yeniden deneyin.</div>
+      <button class="sm" disabled={retrying} onclick={retry}>{retrying ? 'Deneniyor…' : 'Yeniden dene'}</button>
+    </section>
+  {:else if st === null}
     <div class="skeleton" aria-busy="true"></div>
   {:else if !st.supported}
     <!-- Windows 10 ve altı: kilitli durum, düğme yok -->
@@ -235,6 +251,19 @@
     height: 180px;
     border-radius: 16px;
     background: var(--s1);
+  }
+  .loadfail {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 20px;
+    border-color: var(--bad);
+    background: var(--bad-soft);
+  }
+  .lf-title {
+    font-weight: 600;
+    color: var(--bad);
   }
   /* Windows 10: kilitli kart */
   .locked {
