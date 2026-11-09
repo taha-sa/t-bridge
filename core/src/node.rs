@@ -1742,15 +1742,23 @@ impl Inner {
     }
 
     pub fn shutdown(&self) {
+        let _ = self.shutdown_endpoint();
+    }
+
+    /// Kapatır ve kapatılan uç noktayı döndürür; çağıran `wait_idle` ile CONNECTION_CLOSE'un
+    /// gerçekten gönderilmesini bekleyebilir.
+    pub(crate) fn shutdown_endpoint(&self) -> Option<Endpoint> {
         if let Some(s) = lk(&self.session).take() {
             s.conn.close(0u32.into(), b"shutdown");
         }
         self.scan_gen.fetch_add(1, Ordering::SeqCst);
         *lk(&self.browser) = None;
         *lk(&self.advertiser) = None;
-        if let Some(ep) = lk(&self.endpoint).take() {
+        let ep = lk(&self.endpoint).take();
+        if let Some(ep) = &ep {
             ep.close(0u32.into(), b"shutdown");
         }
+        ep
     }
 }
 

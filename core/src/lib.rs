@@ -50,8 +50,15 @@ pub struct Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        self.inner.shutdown();
+        let ep = self.inner.shutdown_endpoint();
         if let Some(rt) = lk(&self.rt).take() {
+            // Çalışma zamanını hemen söndürmek CONNECTION_CLOSE paketini yarıda keser; karşı taraf
+            // kopuşu ancak boşta-zaman aşımında (60 sn) görürdü. Kısa süre gönderimin bitmesini bekle.
+            if let (Some(ep), Err(_)) = (ep, tokio::runtime::Handle::try_current()) {
+                rt.block_on(async {
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), ep.wait_idle()).await;
+                });
+            }
             rt.shutdown_background();
         }
     }
