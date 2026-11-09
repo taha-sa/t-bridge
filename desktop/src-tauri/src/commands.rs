@@ -210,6 +210,24 @@ pub fn stop_screen_share(s: S<'_>) {
     crate::screen_share::stop(&s.app, "PC kullanıcısı durdurdu");
 }
 
+/// Hap: paylaşılan monitörün etiketi.
+#[tauri::command]
+pub fn pill_info(s: S<'_>) -> String {
+    crate::screen_share::pill_label(&s.app)
+}
+
+/// Onay penceresi: bekleyen isteğin kimliği ve telefon adı (yoksa None -> pencere kendini kapatır).
+#[tauri::command]
+pub fn consent_info(s: S<'_>) -> Option<crate::screen_share::ConsentInfo> {
+    crate::screen_share::consent_info(&s.app)
+}
+
+/// Onay penceresi kararı: `choice` = "allow" | "always" | "deny" (diğer her şey Reddet). Bayat kimlik yok sayılır.
+#[tauri::command]
+pub fn consent_result(s: S<'_>, id: u64, choice: String) {
+    crate::screen_share::resolve_consent(&s.app, id, crate::screen_share::Choice::parse(&choice));
+}
+
 /// T-Suite uygulama kartları (katalog + kayıtlı uygulamalar).
 #[tauri::command]
 pub fn suite_status() -> Vec<crate::suite::SuiteCard> {

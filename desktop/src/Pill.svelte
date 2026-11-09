@@ -1,7 +1,20 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
 
+  import { onMount } from 'svelte'
+
   let stopping = $state(false)
+  let label = $state('')
+  onMount(() => {
+    invoke<string>('pill_info').then((s) => (label = s)).catch(() => {})
+  })
+  // Klavye: hap odaktayken Esc veya Ctrl+Shift+S paylaşımı durdurur.
+  function onKey(e: KeyboardEvent) {
+    if (e.key === 'Escape' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's')) {
+      e.preventDefault()
+      stop()
+    }
+  }
   async function stop() {
     stopping = true
     try {
@@ -12,11 +25,13 @@
   }
 </script>
 
-<div class="pill" data-tauri-drag-region role="status" aria-live="polite">
+<svelte:window onkeydown={onKey} />
+
+<div class="pill" data-tauri-drag-region role="status" aria-live="polite" aria-keyshortcuts="Escape Control+Shift+S">
   <span class="dot" aria-hidden="true"></span>
-  <span class="t" data-tauri-drag-region>Ekran paylaşılıyor</span>
+  <span class="t" data-tauri-drag-region>Ekran paylaşılıyor{label ? ` · ${label}` : ''}</span>
   <span class="sep" aria-hidden="true">·</span>
-  <button class="stop" onclick={stop} disabled={stopping}>{stopping ? 'Durduruluyor…' : 'Durdur'}</button>
+  <button class="stop" onclick={stop} disabled={stopping} title="Durdur (Esc veya Ctrl+Shift+S)">{stopping ? 'Durduruluyor…' : 'Durdur'}</button>
 </div>
 
 <style>

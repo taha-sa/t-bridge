@@ -4,7 +4,8 @@
   "description": "Ana pencere izinleri",
   "windows": [
     "main",
-    "pill"
+    "pill",
+    "consent"
   ],
   "permissions": [
     "core:default",
