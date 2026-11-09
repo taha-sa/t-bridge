@@ -144,6 +144,7 @@ object Core : Host {
             is Event.SuiteEvent -> Suite.onEvent(event.app, event.name, event.json)
             is Event.SuiteReply -> Suite.onReply(event.req.toLong(), event.ok, event.json, event.error)
             is Event.SuiteCmd -> Unit
+            is Event.PairCodeRotated -> Unit
             is Event.Cam -> main.post { CameraService.onCmd(ctx, event.cmd) }
             is Event.CamState, is Event.CamFrame -> Unit
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.

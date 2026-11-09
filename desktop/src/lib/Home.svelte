@@ -43,6 +43,9 @@
   }
 
   $effect(() => {
+    if (app.codeRev > 0 && showPair) refreshCode()
+  })
+  $effect(() => {
     if (app.ready && !paired && !showPair) openPairing()
   })
   $effect(() => {

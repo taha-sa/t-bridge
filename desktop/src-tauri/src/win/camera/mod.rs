@@ -21,7 +21,7 @@ use windows::{
         Media::MediaFoundation::*,
         System::{
             Com::{COINIT_MULTITHREADED, CoInitializeEx},
-            Memory::{FILE_MAP_ALL_ACCESS, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile},
+            Memory::{FILE_MAP_READ, FILE_MAP_WRITE, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile},
             Registry::*,
             SystemInformation::{GetTickCount64, OSVERSIONINFOW},
             Threading::{GetExitCodeProcess, WaitForSingleObject},
@@ -401,6 +401,8 @@ pub type FrameMsg = (u64, bool, Vec<u8>);
 pub trait PhoneLink: Send + Sync + 'static {
     fn request_keyframe(&self);
     fn request_format(&self, w: u32, h: u32);
+    /// Tüketici kapandı / akış bitti: telefona CamStop gönder.
+    fn request_stop(&self);
 }
 
 pub struct Hub {
@@ -410,6 +412,7 @@ pub struct Hub {
     pub in_use: Arc<AtomicBool>,
     pub decoded: Arc<AtomicU64>,
     pub phone: Arc<Mutex<PhoneCam>>,
+    link: Arc<dyn PhoneLink>,
 }
 
 impl Hub {
@@ -424,8 +427,9 @@ impl Hub {
         let decoded = Arc::new(AtomicU64::new(0));
         let phone = Arc::new(Mutex::new(PhoneCam::default()));
         let (iu, dc, ph) = (in_use.clone(), decoded.clone(), phone.clone());
-        let _ = std::thread::Builder::new().name("cam-decode".into()).spawn(move || decode_thread(frx, link, iu, dc, ph));
-        Hub { vcam_tx: vtx, frame_tx: ftx, running, in_use, decoded, phone }
+        let l2 = link.clone();
+        let _ = std::thread::Builder::new().name("cam-decode".into()).spawn(move || decode_thread(frx, l2, iu, dc, ph));
+        Hub { vcam_tx: vtx, frame_tx: ftx, running, in_use, decoded, phone, link }
     }
 
     pub fn enable(&self) -> Result<(), String> {
@@ -439,6 +443,7 @@ impl Hub {
         if self.vcam_tx.send(VcamCmd::Disable(tx)).is_ok() {
             let _ = rx.recv_timeout(Duration::from_secs(10));
         }
+        self.link.request_stop();
     }
 
     /// Telefondan gelen kodlanmış kare (QUIC okuyucu thread'i): kuyruk doluysa kare atılır.
@@ -457,8 +462,9 @@ impl RingMap {
     fn open() -> Option<Self> {
         unsafe {
             let name = wide(kopru_camring::SECTION_NAME);
-            let h = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(name.as_ptr())).ok()?;
-            let view = MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+            // DACL (kopru_camring::build_sddl) yalnızca GR|GW verir: FILE_MAP_ALL_ACCESS istemek ACCESS_DENIED döner.
+            let h = OpenFileMappingW((FILE_MAP_READ | FILE_MAP_WRITE).0, false, PCWSTR(name.as_ptr())).ok()?;
+            let view = MapViewOfFile(h, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
             if view.Value.is_null() {
                 let _ = CloseHandle(h);
                 return None;
@@ -503,6 +509,8 @@ fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<A
                 // Tüketici 3 sn'dir dokunmadıysa kamera kapatıldı: bağlantıyı bırak.
                 if tick.saturating_sub(r.ring.consumer_ms()) > 3000 && r.ring.consumer_ms() != 0 {
                     ring = None;
+                    last_want = (0, 0);
+                    link.request_stop(); // tüketici kapandı: telefon kamerayı/kodlayıcıyı durdursun
                 }
             }
             if ring.is_none() {
@@ -569,6 +577,34 @@ fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<A
 #[cfg(test)]
 mod helper_tests {
     use super::*;
+
+    /// Y1: yaratıcı tarafın SDDL'iyle bölüm yarat, uygulama tarafı hakları (READ|WRITE) ile aç; ALL_ACCESS reddedilmeli.
+    #[test]
+    fn ring_section_opens_with_read_write() {
+        use windows::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+        use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+        use windows::Win32::System::Memory::{CreateFileMappingW, FILE_MAP_ALL_ACCESS, PAGE_READWRITE};
+        let sid = current_user_sid().expect("sid");
+        let sddl = wide(&kopru_camring::build_sddl(Some(&sid)));
+        let name_s = format!(r"Local\TBridgeCameraRingTest{}", std::process::id());
+        let name = wide(&name_s);
+        unsafe {
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(sddl.as_ptr()), SDDL_REVISION_1, &mut sd, None).unwrap();
+            let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
+            let size = kopru_camring::TOTAL_SIZE as u64;
+            let creator = CreateFileMappingW(INVALID_HANDLE_VALUE, Some(&sa), PAGE_READWRITE, (size >> 32) as u32, size as u32, PCWSTR(name.as_ptr())).unwrap();
+            let h = OpenFileMappingW((FILE_MAP_READ | FILE_MAP_WRITE).0, false, PCWSTR(name.as_ptr())).expect("READ|WRITE açılmalı");
+            let view = MapViewOfFile(h, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+            assert!(!view.Value.is_null());
+            let _ = UnmapViewOfFile(view);
+            let _ = CloseHandle(h);
+            // Belgeleme: tam erişim (WRITE_DAC vb.) DACL'de yok.
+            assert!(OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(name.as_ptr())).is_err());
+            let _ = CloseHandle(creator);
+        }
+    }
 
     #[test]
     fn register_args_strict() {

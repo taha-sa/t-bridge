@@ -111,6 +111,7 @@ export type CoreEvent =
   | { type: 'state'; state: ConnState; peer: PeerInfo | null }
   | { type: 'paired'; peer: PeerInfo }
   | { type: 'pairFailed'; reason: string }
+  | { type: 'pairCodeRotated' }
   | { type: 'clipboardReceived'; text: string }
   | { type: 'transfer'; info: TransferInfo }
   | { type: 'transferRemoved'; id: number; direction: Direction }

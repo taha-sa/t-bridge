@@ -57,10 +57,13 @@ export const app = $state<{
   reply: Record<string, ReplyInfo>
   /** Son yanıt sonucu (NotifReplyResult). */
   replyState: Record<string, ReplyResult>
+  /** Eşleştirme kodu çekirdekte yenilendi (yanlış denemeler): Home kodu yeniden okur. */
+  codeRev: number
 }>({
   s: empty,
   reply: {},
   replyState: {},
+  codeRev: 0,
   ready: false,
   toast: null,
   lastClip: null,
@@ -113,6 +116,9 @@ function onEvent(e: CoreEvent) {
       }
       break
     }
+    case 'pairCodeRotated':
+      app.codeRev++
+      break
     case 'paired': {
       const ev = e as Extract<CoreEvent, { type: 'paired' }>
       s.peers = [ev.peer, ...s.peers.filter((p) => p.id !== ev.peer.id)]

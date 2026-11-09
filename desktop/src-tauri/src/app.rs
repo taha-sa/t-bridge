@@ -233,6 +233,8 @@ impl Shared {
                     crate::screen_share::on_connected(&self.app);
                 } else {
                     crate::screen_share::on_disconnected(&self.app);
+                    // Bağlantı sürükleme sırasında koptuysa sol tuş basılı kalmasın.
+                    win::input::exec(&kopru_core::PcCommand::Button { button: kopru_core::MouseButton::Left, down: false });
                 }
                 if *state == ConnState::Connected {
                     // Telefon güncel listeyi baştan gönderecek: bağlantı yokken kalkanlar burada kalmasın.

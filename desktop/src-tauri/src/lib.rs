@@ -117,6 +117,11 @@ impl win::camera::PhoneLink for DesktopPhoneLink {
             n.send_cam_start(w, h, 30, kbps);
         }
     }
+    fn request_stop(&self) {
+        if let Some(n) = self.0.node() {
+            n.send_cam_stop();
+        }
+    }
 }
 
 fn init_camera(shared: &Arc<Shared>) {
