@@ -74,10 +74,13 @@ impl Pipeline {
         *self.cfg.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Durdurma bayrağını kurar; iş parçacığının bitmesini ayrı bir thread bekler (çağıran, ör. QUIC okuyucu, bloke olmaz).
     pub fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(j) = self.join.take() {
-            let _ = j.join();
+            let _ = std::thread::Builder::new().name("screen-share-join".into()).spawn(move || {
+                let _ = j.join();
+            });
         }
     }
 }
