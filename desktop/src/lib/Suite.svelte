@@ -92,8 +92,10 @@
               {#if c.updateAvailable}
                 <button class="primary sm" disabled={busy !== null} onclick={() => update(c)}>Güncelle</button>
               {/if}
-            {:else}
+            {:else if c.releasesUrl}
               <button class="ghost sm" onclick={() => releases(c)}>Sürümler sayfası</button>
+            {:else}
+              <span class="muted small">Kurulum için uygulamanın yayın sayfasına bakın.</span>
             {/if}
           </footer>
         </article>

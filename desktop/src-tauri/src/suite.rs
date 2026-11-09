@@ -14,12 +14,31 @@ use tokio::sync::mpsc;
 
 use crate::app::Shared;
 
+/// Varsayılan (güvenli) iletme önekleri: manifestte ne `forwardPrefixes` ne de `events` önekleri varsa kullanılır.
 pub const WHITELIST: &[&str] = &["download.", "ram.", "disk.", "scan.", "app.update."];
 const CATALOG: &[(&str, &str)] = &[("t-ramcash", "T-RamCash"), ("t-downloader", "T-Downloader"), ("t-desktree", "T-DeskTree")];
 const PROGRESS_MIN_GAP: Duration = Duration::from_millis(500); // ≤ 2 Hz / öğe
 
-pub fn whitelisted(name: &str) -> bool {
+#[cfg(test)]
+fn whitelisted(name: &str) -> bool {
     WHITELIST.iter().any(|p| name.starts_with(p))
+}
+
+/// Uygulamanın telefona iletilecek olay önekleri: manifest (`forwardPrefixes` ya da `events` önekleri) + `app.update.`
+/// (güncelleme akışı için her zaman). Boş önek ("hepsi") ve boş sonuç → varsayılan beyaz liste. Saf mantık (birim testli).
+pub fn forward_prefixes(m: &registry::Manifest) -> Vec<String> {
+    let mut v: Vec<String> = m.effective_forward_prefixes().into_iter().filter(|p| !p.is_empty() && p.len() <= 64).collect();
+    if v.is_empty() {
+        return WHITELIST.iter().map(|s| s.to_string()).collect();
+    }
+    if !v.iter().any(|p| "app.update.".starts_with(p.as_str())) {
+        v.push("app.update.".into());
+    }
+    v
+}
+
+pub fn prefix_match(prefixes: &[String], name: &str) -> bool {
+    prefixes.iter().any(|p| name.starts_with(p.as_str()))
 }
 
 /// İlerleme olayları için kısıtlayıcı: aynı (uygulama, olay, öğe) en çok 2 Hz. Saf mantık (birim testli).
@@ -52,6 +71,7 @@ struct Entry {
     running: bool,
     update: Option<String>,
     client: Option<ReconnectingClient>,
+    prefixes: Vec<String>,
 }
 
 pub struct Hub {
@@ -80,8 +100,12 @@ fn shared(app: &AppHandle) -> Arc<Shared> {
     app.state::<Arc<Shared>>().inner().clone()
 }
 
-fn launch_args(id: &str) -> &'static [&'static str] {
-    if id == "t-downloader" { &["--background"] } else { &[] }
+/// Kapalıyken başlatma argümanları: manifest `launchArgs`; yoksa argümansız (eski T-Downloader kaydı için `--background`).
+fn launch_args(m: &registry::Manifest) -> Vec<String> {
+    if m.launch_args.is_none() && m.id == "t-downloader" {
+        return vec!["--background".into()];
+    }
+    m.effective_launch_args()
 }
 
 impl Hub {
@@ -107,7 +131,10 @@ impl Hub {
                 installed: e.is_some(),
                 running: e.is_some_and(|e| e.running),
                 update_available: e.and_then(|e| e.update.clone()),
-                releases_url: format!("https://github.com/taha-sa/{id}-releases/releases"),
+                releases_url: e
+                    .and_then(|e| e.m.releases_repo.as_ref())
+                    .map(|r| format!("https://github.com/{r}/releases"))
+                    .unwrap_or_else(|| format!("https://github.com/taha-sa/{id}-releases/releases")),
             });
         }
         // Kataloğda olmayan (gelecekteki) uygulamalar otomatik görünür
@@ -140,11 +167,16 @@ impl Hub {
                 }
                 let running = registry::pid_alive(m.pid);
                 let id = m.id.clone();
-                let e = g.entry(id.clone()).or_insert_with(|| Entry { m: m.clone(), running, update: None, client: None });
+                let pf = forward_prefixes(&m);
+                let e = g.entry(id.clone()).or_insert_with(|| Entry { m: m.clone(), running, update: None, client: None, prefixes: pf.clone() });
                 e.m = m;
                 e.running = running;
+                if e.prefixes != pf {
+                    e.prefixes = pf; // manifest önekleri değişti: istemci yeni aboneliklerle yeniden açılır
+                    e.client = None;
+                }
                 if running && e.client.is_none() {
-                    e.client = Some(ReconnectingClient::spawn(&id, WHITELIST.iter().map(|s| s.to_string()).collect(), self.ev_tx.clone(), Duration::from_secs(2)));
+                    e.client = Some(ReconnectingClient::spawn(&id, e.prefixes.clone(), self.ev_tx.clone(), Duration::from_secs(2)));
                 } else if !running {
                     e.client = None;
                     e.update = e.update.take().filter(|_| false);
@@ -163,7 +195,8 @@ impl Hub {
 
     fn on_event(&self, app: String, e: Envelope) {
         let Some(name) = e.name.clone() else { return };
-        if !whitelisted(&name) {
+        let allowed = self.apps.lock().unwrap().get(&app).is_some_and(|en| prefix_match(&en.prefixes, &name));
+        if !allowed {
             return;
         }
         let data = e.data.clone().unwrap_or(Value::Null);
@@ -185,7 +218,7 @@ impl Hub {
 
     // ---------------------------------------------------------------- komutlar
 
-    fn launch(&self, id: &str, extra: &[&str]) -> Result<(), String> {
+    fn launch(&self, id: &str, extra: &[String]) -> Result<(), String> {
         let exe = {
             let g = self.apps.lock().unwrap();
             g.get(id).map(|e| e.m.exe_path.clone()).ok_or_else(|| "uygulama kurulu değil".to_string())?
@@ -219,7 +252,8 @@ impl Hub {
         let connected = |h: &Hub| h.apps.lock().unwrap().get(id).and_then(|e| e.client.as_ref().map(|c| c.is_connected())).unwrap_or(false);
         if !connected(self) {
             self.refresh();
-            self.launch(id, launch_args(id))?;
+            let args = self.apps.lock().unwrap().get(id).map(|e| launch_args(&e.m)).unwrap_or_default();
+            self.launch(id, &args)?;
             let deadline = Instant::now() + Duration::from_secs(12);
             loop {
                 self.refresh();
@@ -302,7 +336,7 @@ impl Hub {
         };
         let mut n = 0;
         for (id, live) in targets {
-            let ok = if live { self.app_cmd(&id, "app.update.install", None).await.is_ok() } else { self.launch(&id, &["--update"]).is_ok() };
+            let ok = if live { self.app_cmd(&id, "app.update.install", None).await.is_ok() } else { self.launch(&id, &["--update".to_string()]).is_ok() };
             if ok {
                 n += 1;
             }
@@ -370,6 +404,8 @@ pub fn start(app: &AppHandle) {
             releases_repo: Some("taha-sa/t-bridge-releases".into()),
             icon: None,
             pid: std::process::id() as i32,
+            forward_prefixes: None,
+            launch_args: None,
         };
         let _ = registry::write(&h2.dir, &m);
         let h3 = h2.clone();
@@ -474,16 +510,29 @@ pub fn validate_present_path(path: &str, recv_dir: &std::path::Path) -> Result<s
     Ok(canon)
 }
 
+/// Telefona sunum sonucu (`file.presented` suite olayı; eski telefon yok sayar): Viewer'a opened/failed iletilir.
+fn notify_present_result(name: &str, ok: bool) {
+    let Some(h) = HUB.get() else { return };
+    if let Some(n) = shared(&h.app).node() {
+        n.send_suite_event("t-bridge".into(), "file.presented".into(), json!({ "name": name, "ok": ok }).to_string());
+    }
+}
+
 /// Telefondan bir dosya tamamlandı: sunum için beklenen dosyaysa PC'de tam ekran aç.
 pub fn on_incoming_done(name: &str, path: Option<&str>, recv_dir: &std::path::Path) {
     let Some(path) = path else { return };
     if !PENDING_PRESENT.lock().unwrap().take(name, Instant::now()) {
         return;
     }
-    let Ok(safe) = validate_present_path(path, recv_dir) else { return };
+    let name = name.to_string();
+    let Ok(safe) = validate_present_path(path, recv_dir) else {
+        notify_present_result(&name, false);
+        return;
+    };
     let path = safe.to_string_lossy().into_owned();
     std::thread::spawn(move || {
-        crate::win::system::present_file(&path);
+        let ok = crate::win::system::present_file(&path);
+        notify_present_result(&name, ok);
     });
 }
 
@@ -590,6 +639,32 @@ mod tests {
         for no in ["clipboard.text", "app.show", "secret.x", "phone.connected"] {
             assert!(!whitelisted(no), "{no}");
         }
+    }
+
+    #[test]
+    fn forward_prefixes_from_manifest() {
+        let mut m = registry::Manifest { id: "t-fake".into(), events: vec!["fake.progress".into(), "fake.done".into()], ..Default::default() };
+        let p = forward_prefixes(&m);
+        assert!(prefix_match(&p, "fake.progress") && prefix_match(&p, "app.update.available"));
+        assert!(!prefix_match(&p, "download.progress"), "events dışı önek geçmez");
+        m.forward_prefixes = Some(vec!["other.".into()]);
+        let p = forward_prefixes(&m);
+        assert!(prefix_match(&p, "other.x") && !prefix_match(&p, "fake.progress"));
+        // manifestte hiçbir şey yoksa varsayılan beyaz liste (mevcut uygulamalar değişmeden çalışır)
+        let p = forward_prefixes(&registry::Manifest { id: "t-old".into(), ..Default::default() });
+        assert!(prefix_match(&p, "download.progress") && prefix_match(&p, "ram.status") && !prefix_match(&p, "clipboard.text"));
+        // boş önek "hepsi" anlamına gelemez
+        let p = forward_prefixes(&registry::Manifest { forward_prefixes: Some(vec!["".into()]), ..Default::default() });
+        assert!(!prefix_match(&p, "secret.x"));
+    }
+
+    #[test]
+    fn launch_args_from_manifest() {
+        let mut m = registry::Manifest { id: "t-fake".into(), ..Default::default() };
+        assert!(launch_args(&m).is_empty());
+        m.launch_args = Some(vec!["--tray".into()]);
+        assert_eq!(launch_args(&m), vec!["--tray".to_string()]);
+        assert_eq!(launch_args(&registry::Manifest { id: "t-downloader".into(), ..Default::default() }), vec!["--background".to_string()]);
     }
 
     #[test]
