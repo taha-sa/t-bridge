@@ -10,6 +10,7 @@ pub mod discovery;
 pub mod files;
 pub mod host;
 pub mod node;
+pub mod camera;
 pub mod proto;
 pub mod screen;
 pub mod store;
@@ -195,6 +196,44 @@ impl Node {
     /// Telefon -> PC: yanıt sonucu.
     pub fn send_notification_reply_result(&self, key: String, ok: bool, error: Option<String>) -> bool {
         self.peer_supports_notif_reply() && self.inner.send_msg(Msg::NotifReplyResult { key, ok, error })
+    }
+
+    /// Eş `camera` yeteneğini duyurdu mu (masaüstü: yalnızca Windows 11).
+    pub fn peer_supports_camera(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_CAMERA))
+    }
+
+    /// PC -> telefon: kamera biçimi iste.
+    pub fn send_cam_start(&self, w: u32, h: u32, fps: u32, bitrate_kbps: u32) -> bool {
+        self.peer_supports_camera() && self.inner.send_msg(Msg::CamStart { w, h, fps, bitrate_kbps })
+    }
+
+    pub fn send_cam_stop(&self) -> bool {
+        self.peer_supports_camera() && self.inner.send_msg(Msg::CamStop)
+    }
+
+    pub fn send_cam_keyframe(&self) -> bool {
+        self.peer_supports_camera() && self.inner.send_msg(Msg::CamKeyframe)
+    }
+
+    /// Telefon -> PC: kamera durumu.
+    pub fn send_cam_state(&self, active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool) -> bool {
+        self.peer_supports_camera() && self.inner.send_msg(Msg::CamState { active, w, h, fps, facing, mirror })
+    }
+
+    /// Telefon: kodlanmış kamera karesi gönder (geri basınç kapısı). false = atıldı.
+    pub fn send_cam_frame(&self, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
+        self.inner.send_cam_frame(pts_us, key, data)
+    }
+
+    /// Telefon: (anahtar kare isteniyor mu, gönderim kuyruğu gecikmesi ms).
+    pub fn cam_feedback(&self, newest_pts_us: u64) -> ScreenFeedback {
+        let (want_key, backlog_ms) = self.inner.cam_feedback(newest_pts_us);
+        ScreenFeedback { want_key, backlog_ms }
+    }
+
+    pub fn end_cam_stream(&self) {
+        self.inner.end_cam_stream()
     }
 
     /// Eş ekran paylaşımı yeteneğini duyurdu mu.

@@ -12,10 +12,16 @@ pub const ALPN: &[u8] = b"kopru/1";
 pub const CAP_NOTIF_REPLY: &str = "notif-reply";
 /// Yetenek: ekran paylaşımı (Screen* mesajları + video akışı). İki taraf da duyurmadıkça kullanılmaz.
 pub const CAP_SCREEN: &str = "screen-share";
+/// Yetenek: telefon kamerası (Cam* mesajları + kamera video akışı). Masaüstü yalnızca Windows 11'de duyurur.
+pub const CAP_CAMERA: &str = "camera";
 
 /// Bu sürümün duyurduğu yetenekler (Hello/Welcome sonuna eklenir; eski eş sondaki baytları yok sayar).
 pub fn local_caps() -> Vec<String> {
-    vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string()]
+    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string()];
+    if crate::camera::camera_cap() {
+        v.push(CAP_CAMERA.to_string());
+    }
+    v
 }
 /// Tek kontrol mesajı üst sınırı (pano 1 MB + pay).
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;
@@ -114,6 +120,13 @@ pub enum Msg {
     ScreenConfig { max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32 },
     ScreenInfo { monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String> },
     ScreenPointer { x: f32, y: f32, monitor: u32 },
+    // ---- yalnızca `camera` yeteneğini duyuran eşlere gönderilir ----
+    /// PC -> telefon: istenen kamera biçimi.
+    CamStart { w: u32, h: u32, fps: u32, bitrate_kbps: u32 },
+    CamStop,
+    CamKeyframe,
+    /// Telefon -> PC: kamera durumu. facing: 0 arka, 1 ön.
+    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool },
     /// Çözülemeyen/bilinmeyen çerçeve (daha yeni eşten). Asla gönderilmez; yalnızca okuyucuda üretilir.
     Unknown,
 }

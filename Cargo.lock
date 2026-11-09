@@ -2327,6 +2327,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopru-camring"
+version = "0.1.0"
+
+[[package]]
 name = "kopru-core"
 version = "0.2.1"
 dependencies = [
@@ -4778,6 +4782,14 @@ dependencies = [
  "thiserror 2.0.21",
  "windows",
  "windows-version",
+]
+
+[[package]]
+name = "tbridge-vcam"
+version = "0.1.0"
+dependencies = [
+ "kopru-camring",
+ "windows",
 ]
 
 [[package]]

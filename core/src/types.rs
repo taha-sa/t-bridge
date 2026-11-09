@@ -227,6 +227,14 @@ pub enum ScreenCmd {
     Pointer { x: f32, y: f32, monitor: u32 },
 }
 
+/// PC'den telefona kamera komutları.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Enum)]
+pub enum CamCmd {
+    Start { w: u32, h: u32, fps: u32, bitrate_kbps: u32 },
+    Stop,
+    Keyframe,
+}
+
 /// Çekirdekten platforma giden olaylar.
 #[derive(Debug, Clone, Serialize, uniffi::Enum)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -254,6 +262,12 @@ pub enum Event {
     ScreenInfo { monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String> },
     /// Telefonda: kodlanmış H.264 (Annex-B) video karesi.
     ScreenFrame { pts_us: u64, key: bool, data: Vec<u8> },
+    /// Telefonda: PC kamera komutu gönderdi.
+    Cam { cmd: CamCmd },
+    /// PC'de: telefon kamera durumu.
+    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool },
+    /// PC'de: telefon kamerasından kodlanmış H.264 (Annex-B) kare.
+    CamFrame { pts_us: u64, key: bool, data: Vec<u8> },
     AppIcon { package: String, png: Vec<u8> },
     Battery { level: u8, charging: bool },
     NowPlaying { info: Option<NowPlaying> },

@@ -147,6 +147,8 @@ pub(crate) struct Inner {
     inc_open: Mutex<HashMap<u64, IncOpen>>,
     /// PC: etkin ekran paylaşımı çıkışı (video akışı yazıcısı + geri basınç kapısı).
     screen_out: Mutex<Option<ScreenOut>>,
+    /// Telefon: etkin kamera video akışı çıkışı.
+    cam_out: Mutex<Option<ScreenOut>>,
     active_in: Mutex<HashMap<u64, Arc<AtomicU8>>>,
     inc_persist: Mutex<IncPersist>,
     transfers: Mutex<BTreeMap<(u8, u64), TransferInfo>>,
@@ -215,6 +217,7 @@ impl Inner {
             pending_result: Mutex::new(HashMap::new()),
             inc_open: Mutex::new(HashMap::new()),
             screen_out: Mutex::new(None),
+            cam_out: Mutex::new(None),
             active_in: Mutex::new(HashMap::new()),
             inc_persist: Mutex::new(inc_persist),
             transfers: Mutex::new(transfers),
@@ -784,6 +787,7 @@ impl Inner {
         lk(&self.pending_result).clear();
         lk(&self.inc_open).clear();
         *lk(&self.screen_out) = None;
+        *lk(&self.cam_out) = None;
         // Yarım kalan aktarımlar "sırada" görünür; bağlanınca devam eder.
         let ids: Vec<(Direction, u64)> = lk(&self.transfers)
             .values()
@@ -824,6 +828,10 @@ impl Inner {
             }
             Msg::ScreenPointer { x, y, monitor } => self.emit(Event::Screen { cmd: ScreenCmd::Pointer { x, y, monitor } }),
             Msg::ScreenInfo { monitors, current, active, error } => self.emit(Event::ScreenInfo { monitors, current, active, error }),
+            Msg::CamStart { w, h, fps, bitrate_kbps } => self.emit(Event::Cam { cmd: CamCmd::Start { w, h, fps, bitrate_kbps } }),
+            Msg::CamStop => self.emit(Event::Cam { cmd: CamCmd::Stop }),
+            Msg::CamKeyframe => self.emit(Event::Cam { cmd: CamCmd::Keyframe }),
+            Msg::CamState { active, w, h, fps, facing, mirror } => self.emit(Event::CamState { active, w, h, fps, facing, mirror }),
             Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
@@ -1413,7 +1421,7 @@ impl Inner {
     }
 
     /// Telefon: PC'nin video akışını okur, kareleri `ScreenFrame` olayı olarak iletir.
-    async fn receive_video(self: &Arc<Self>, mut recv: RecvStream) -> Result<()> {
+    async fn receive_video(self: &Arc<Self>, mut recv: RecvStream, cam: bool) -> Result<()> {
         use crate::screen::{FrameHeader, HEADER_LEN};
         loop {
             let mut hb = [0u8; HEADER_LEN];
@@ -1425,25 +1433,46 @@ impl Inner {
             let h = FrameHeader::decode(&hb).ok_or_else(|| anyhow!("geçersiz video çerçevesi"))?;
             let mut data = vec![0u8; h.len as usize];
             recv.read_exact(&mut data).await.context("video verisi")?;
-            self.emit(Event::ScreenFrame { pts_us: h.pts_us, key: h.key, data });
+            if cam {
+                self.emit(Event::CamFrame { pts_us: h.pts_us, key: h.key, data });
+            } else {
+                self.emit(Event::ScreenFrame { pts_us: h.pts_us, key: h.key, data });
+            }
         }
     }
 
     /// PC: kareyi geri basınç kapısından geçirip akış yazıcısına verir. false = atıldı (anahtar kare istenir).
     pub fn send_screen_frame(self: &Arc<Self>, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
+        self.send_video(&self.screen_out, crate::screen::VIDEO_MAGIC, proto::CAP_SCREEN, pts_us, key, data)
+    }
+
+    /// Telefon: kamera karesi (aynı kapı/çerçeveleme, farklı sihirli sayı).
+    pub fn send_cam_frame(self: &Arc<Self>, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
+        self.send_video(&self.cam_out, crate::camera::CAM_MAGIC, proto::CAP_CAMERA, pts_us, key, data)
+    }
+
+    fn send_video(
+        self: &Arc<Self>,
+        slot: &Mutex<Option<ScreenOut>>,
+        magic: u64,
+        cap: &str,
+        pts_us: u64,
+        key: bool,
+        data: Vec<u8>,
+    ) -> bool {
         use crate::screen::{FrameHeader, Offer};
         let Some(s) = self.session() else { return false };
-        if !s.has_cap(proto::CAP_SCREEN) || data.len() > crate::screen::MAX_FRAME_BYTES {
+        if !s.has_cap(cap) || data.len() > crate::screen::MAX_FRAME_BYTES {
             return false;
         }
-        let mut g = lk(&self.screen_out);
+        let mut g = lk(slot);
         if g.is_none() {
             let (tx, mut rx) = mpsc::unbounded_channel::<(FrameHeader, Vec<u8>)>();
             let gate = Arc::new(Mutex::new(crate::screen::Gate::new()));
             let (gate2, conn) = (gate.clone(), s.conn.clone());
             self.rt.spawn(async move {
                 let Ok(mut stream) = conn.open_uni().await else { return };
-                if stream.write_all(&crate::screen::VIDEO_MAGIC.to_le_bytes()).await.is_err() {
+                if stream.write_all(&magic.to_le_bytes()).await.is_err() {
                     return;
                 }
                 while let Some((h, data)) = rx.recv().await {
@@ -1463,6 +1492,21 @@ impl Inner {
             return false;
         }
         out.tx.send((FrameHeader { pts_us, key, len: data.len() as u32 }, data)).is_ok()
+    }
+
+    /// Telefon: (anahtar kare isteniyor mu, gönderim kuyruğu gecikmesi ms).
+    pub fn cam_feedback(&self, newest_pts_us: u64) -> (bool, u64) {
+        match lk(&self.cam_out).as_ref() {
+            Some(o) => {
+                let mut g = lk(&o.gate);
+                (g.take_want_key(), g.backlog_ms(newest_pts_us))
+            }
+            None => (false, 0),
+        }
+    }
+
+    pub fn end_cam_stream(&self) {
+        *lk(&self.cam_out) = None;
     }
 
     /// PC: bekleyen kareler nedeniyle kodlayıcıdan anahtar kare istenmeli mi, ve gönderim gecikmesi (ms).
@@ -1486,7 +1530,10 @@ impl Inner {
         recv.read_exact(&mut idb).await?;
         let id = u64::from_le_bytes(idb);
         if id == crate::screen::VIDEO_MAGIC {
-            return self.receive_video(recv).await;
+            return self.receive_video(recv, false).await;
+        }
+        if id == crate::camera::CAM_MAGIC {
+            return self.receive_video(recv, true).await;
         }
         let Some(open) = lk(&self.inc_open).remove(&id) else {
             let _ = recv.stop(RESET_CANCEL.into());
