@@ -113,6 +113,8 @@ export type CoreEvent =
   | { type: 'transferRemoved'; id: number; direction: Direction }
   | { type: 'notification'; data: NotificationData }
   | { type: 'notificationRemoved'; key: string }
+  | { type: 'notificationExt'; key: string; can_reply: boolean; choices: string[] }
+  | { type: 'notificationReplyResult'; key: string; ok: boolean; error: string | null }
   | { type: 'appIconUrl'; package: string; url: string }
   | { type: 'battery'; level: number; charging: boolean }
   | { type: 'nowPlaying'; info: NowPlaying | null }

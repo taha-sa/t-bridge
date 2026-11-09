@@ -35,8 +35,29 @@ const empty: Snapshot = {
   update: { phase: 'idle', version: null, notes: null, progress: 0, error: null },
 }
 
-export const app = $state<{ s: Snapshot; ready: boolean; toast: string | null; lastClip: string | null }>({
+export interface ReplyInfo {
+  canReply: boolean
+  choices: string[]
+}
+export interface ReplyResult {
+  ok: boolean
+  error: string | null
+  at: number
+}
+
+export const app = $state<{
+  s: Snapshot
+  ready: boolean
+  toast: string | null
+  lastClip: string | null
+  /** Telefonun bildirim başına bildirdiği yanıt yeteneği (NotifExt). */
+  reply: Record<string, ReplyInfo>
+  /** Son yanıt sonucu (NotifReplyResult). */
+  replyState: Record<string, ReplyResult>
+}>({
   s: empty,
+  reply: {},
+  replyState: {},
   ready: false,
   toast: null,
   lastClip: null,
@@ -81,6 +102,8 @@ function onEvent(e: CoreEvent) {
       if (ev.state === 'Connected') {
         // Telefon etkin bildirimleri baştan gönderir (arka uç da listeyi temizledi).
         s.notifications = []
+        app.reply = {}
+        app.replyState = {}
       } else {
         s.battery = null
         s.nowPlaying = null
@@ -112,7 +135,26 @@ function onEvent(e: CoreEvent) {
     }
     case 'notificationRemoved': {
       const k = (e as Extract<CoreEvent, { type: 'notificationRemoved' }>).key
-      s.notifications = s.notifications.filter((n) => n.key !== k)
+      const rs = app.replyState[k]
+      const drop = () => {
+        s.notifications = s.notifications.filter((n) => n.key !== k)
+        delete app.reply[k]
+        delete app.replyState[k]
+      }
+      // Yanıt gönderilince kaynak uygulama bildirimi kaldırabilir: "Gönderildi" 2 sn görünsün.
+      const wait = rs?.ok ? 2200 - (Date.now() - rs.at) : 0
+      if (wait > 0) setTimeout(drop, wait)
+      else drop()
+      break
+    }
+    case 'notificationExt': {
+      const ev = e as unknown as { key: string; can_reply: boolean; choices: string[] }
+      app.reply[ev.key] = { canReply: ev.can_reply, choices: (ev.choices ?? []).slice(0, 3) }
+      break
+    }
+    case 'notificationReplyResult': {
+      const ev = e as unknown as { key: string; ok: boolean; error: string | null }
+      app.replyState[ev.key] = { ok: ev.ok, error: ev.error, at: Date.now() }
       break
     }
     case 'appIconUrl': {

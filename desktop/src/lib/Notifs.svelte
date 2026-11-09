@@ -4,6 +4,21 @@
   import { app, call, fmtTime } from './store.svelte'
   import type { NotificationData } from './types'
   import Icon from './Icon.svelte'
+  import NotifReply from './NotifReply.svelte'
+
+  // Mesajlaşma uygulamalarında yanıt alanı belirgin (her zaman görünen alan).
+  const MESSAGING = new Set([
+    'com.whatsapp',
+    'com.whatsapp.w4b',
+    'org.telegram.messenger',
+    'org.telegram.messenger.web',
+    'org.thoughtcrime.securesms',
+    'com.google.android.apps.messaging',
+    'com.samsung.android.messaging',
+    'com.android.mms',
+    'com.facebook.orca',
+    'com.instagram.android',
+  ])
 
   const s = $derived(app.s)
   let filter = $state('')
@@ -113,6 +128,7 @@
                   <span class="faint small num">{fmtTime(n.time)}</span>
                 </div>
                 {#if n.text}<div class="text selectable">{n.text}</div>{/if}
+                <NotifReply {n} prominent={MESSAGING.has(n.package)} />
               </div>
               <button class="ghost icon sm x" title="Kapat (telefonda da)" onclick={() => dismiss(n.key)}><Icon name="x" size={15} /></button>
             </article>

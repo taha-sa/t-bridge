@@ -154,6 +154,7 @@ pub fn run() {
             commands::reveal,
             commands::open_downloads,
             commands::dismiss_notification,
+            commands::reply_notification,
             commands::clear_notifications,
             commands::mute_app,
             commands::phone_cmd,

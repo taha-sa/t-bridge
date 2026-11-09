@@ -164,6 +164,25 @@ pub fn dismiss_notification(s: S<'_>, key: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Telefondaki bildirime yanıt gönderir. Sonuç `notificationReplyResult` olayıyla asenkron gelir.
+/// Telefondaki T-Bridge eski sürümse (yetenek duyurmaz) hata döner; hiçbir şey gönderilmez.
+#[tauri::command]
+pub fn reply_notification(s: S<'_>, key: String, text: String) -> Result<(), String> {
+    let text = text.trim().to_string();
+    if text.is_empty() || text.len() > 4000 {
+        return Err("Yanıt boş veya çok uzun".into());
+    }
+    let n = node(&s)?;
+    if !n.peer_supports_notif_reply() {
+        return Err("Telefondaki T-Bridge sürümü yanıtı desteklemiyor; telefonu güncelle".into());
+    }
+    if n.send_notification_reply(key, text) {
+        Ok(())
+    } else {
+        Err("Telefona gönderilemedi (bağlı değil)".into())
+    }
+}
+
 #[tauri::command]
 pub fn clear_notifications(s: S<'_>) -> Result<(), String> {
     let keys: Vec<String> = lk(&s.notifications).drain(..).map(|n| n.key).collect();
