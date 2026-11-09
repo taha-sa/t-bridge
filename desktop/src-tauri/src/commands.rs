@@ -197,7 +197,7 @@ pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {
     let phone = hub.and_then(|h| h.phone.lock().ok().map(|p| *p)).unwrap_or_default();
     win::camera::CameraStatus {
         supported,
-        installed: supported && win::camera::is_installed(),
+        installed: supported && win::camera::is_installed_for_me(),
         running: hub.is_some_and(|h| h.running.load(std::sync::atomic::Ordering::SeqCst)),
         phone_supports: s.node().is_some_and(|n| n.peer_supports_camera()),
         phone,
@@ -214,11 +214,12 @@ pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
     }
     let sh = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        if !win::camera::is_installed() {
+        if !win::camera::is_installed_for_me() {
             let dir = sh.app.path().resource_dir().ok();
             let dll = win::camera::locate_dll(dir).ok_or("tbridge_vcam.dll bulunamadı (uygulama klasöründe olmalı)")?;
-            let code = win::camera::run_elevated(&format!("--camera-register \"{}\"", dll.display()))?;
-            if code != 0 || !win::camera::is_installed() {
+            let sid = win::camera::current_user_sid().ok_or("kullanıcı SID'i okunamadı")?;
+            let code = win::camera::run_elevated(&format!("--camera-register \"{}\" \"{}\"", dll.display(), sid))?;
+            if code != 0 || !win::camera::is_installed_for_me() {
                 return Err("Kamera kaydı tamamlanamadı (yönetici izni verilmedi veya DLL kopyalanamadı).".into());
             }
         }

@@ -556,6 +556,6 @@ private fun CameraSection(connected: Boolean) {
                 colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
             )
         }
-        Text("Görüntü, telefon yatay tutulduğunda dik görünür.", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        Text("Telefonu dikey ya da yatay tutabilirsin; bilgisayara her zaman dik görüntü gider.", color = c.faint, style = MaterialTheme.typography.bodySmall)
     }
 }

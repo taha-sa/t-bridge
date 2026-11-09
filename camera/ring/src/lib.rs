@@ -25,8 +25,22 @@ pub const STALE_MS: u64 = 1000;
 /// Bölümü Frame Server kaynağı (LocalService, oturum 0) yaratır; uygulama (kullanıcı oturumu) açıp yazar.
 /// (Global\ ad alanında bölüm YARATMA ayrıcalığı hizmet hesaplarındadır, standart kullanıcıda yoktur; açmak için gerekmez.)
 pub const SECTION_NAME: &str = r"Global\TBridgeCameraRing";
-/// DACL: SYSTEM + LocalService tam, etkileşimli kullanıcı okuma/yazma; diğerleri yok.
-pub const SDDL: &str = "D:(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGW;;;IU)";
+/// DACL: SYSTEM + LocalService tam, YALNIZCA kamerayı etkinleştiren kullanıcının SID'i okuma/yazma; diğerleri yok.
+/// SID kayıt sırasında HKLM kaynak anahtarına yazılır, DLL oradan okur. SID yoksa/geçersizse kullanıcı ACE'si eklenmez (kapalı güvenli).
+pub fn build_sddl(owner_sid: Option<&str>) -> String {
+    let mut s = String::from("D:(A;;GA;;;SY)(A;;GA;;;LS)");
+    if let Some(sid) = owner_sid {
+        if is_valid_sid(sid) {
+            s.push_str(&format!("(A;;GRGW;;;{sid})"));
+        }
+    }
+    s
+}
+
+/// `S-1-...` biçimi: yalnızca rakam ve tire (SDDL enjeksiyonunu önler).
+pub fn is_valid_sid(sid: &str) -> bool {
+    sid.len() >= 8 && sid.len() <= 184 && sid.starts_with("S-1-") && sid[4..].chars().all(|c| c.is_ascii_digit() || c == '-') && !sid.ends_with('-')
+}
 
 const OFF_MAGIC: usize = 0;
 const OFF_VERSION: usize = 4;
@@ -178,6 +192,71 @@ pub fn mirror_nv12(buf: &mut [u8], w: usize, h: usize) {
             row.swap(a + 1, b + 1);
         }
     }
+}
+
+/// NV12'yi saat yönünde `deg` (0/90/180/270) döndürür; (veri, genişlik, yükseklik). Boyutlar çift olmalı.
+pub fn rotate_nv12(src: &[u8], w: usize, h: usize, deg: u32) -> (Vec<u8>, usize, usize) {
+    let deg = deg % 360;
+    if deg == 0 || w == 0 || h == 0 || src.len() != w * h * 3 / 2 {
+        return (src.to_vec(), w, h);
+    }
+    let (nw, nh) = if deg == 90 || deg == 270 { (h, w) } else { (w, h) };
+    let mut dst = vec![0u8; nw * nh * 3 / 2];
+    // (nx, ny) hedef -> (x, y) kaynak
+    let map = |nx: usize, ny: usize, sw: usize, sh: usize| -> (usize, usize) {
+        match deg {
+            90 => (ny, sh - 1 - nx),
+            180 => (sw - 1 - nx, sh - 1 - ny),
+            _ => (sw - 1 - ny, nx), // 270
+        }
+    };
+    for ny in 0..nh {
+        for nx in 0..nw {
+            let (x, y) = map(nx, ny, w, h);
+            dst[ny * nw + nx] = src[y * w + x];
+        }
+    }
+    let (suv, duv) = (&src[w * h..], &mut dst[nw * nh..]);
+    for ny in 0..nh / 2 {
+        for nx in 0..nw / 2 {
+            let (x, y) = map(nx, ny, w / 2, h / 2);
+            let (si, di) = (y * w + x * 2, ny * nw + nx * 2);
+            duv[di] = suv[si];
+            duv[di + 1] = suv[si + 1];
+        }
+    }
+    (dst, nw, nh)
+}
+
+/// En-boyu koruyarak `dw`x`dh` çerçeveye sığdırır (en yakın komşu), kalan alanı siyah doldurur (portre görüntü yatay kamerada yanlardan boşluklu).
+pub fn letterbox_nv12(src: &[u8], sw: usize, sh: usize, dw: usize, dh: usize) -> Vec<u8> {
+    let mut dst = vec![0u8; dw * dh * 3 / 2];
+    dst[..dw * dh].fill(16);
+    dst[dw * dh..].fill(128);
+    if sw == 0 || sh == 0 || src.len() != sw * sh * 3 / 2 {
+        return dst;
+    }
+    let scale = (dw as f64 / sw as f64).min(dh as f64 / sh as f64);
+    let tw = (((sw as f64 * scale) as usize).max(2)) & !1;
+    let th = (((sh as f64 * scale) as usize).max(2)) & !1;
+    let (ox, oy) = (((dw - tw) / 2) & !1, ((dh - th) / 2) & !1);
+    for y in 0..th {
+        let sy = y * sh / th;
+        for x in 0..tw {
+            dst[(oy + y) * dw + ox + x] = src[sy * sw + x * sw / tw];
+        }
+    }
+    let (suv, duv) = (&src[sw * sh..], &mut dst[dw * dh..]);
+    for y in 0..th / 2 {
+        let sy = y * (sh / 2) / (th / 2);
+        for x in 0..tw / 2 {
+            let sx = x * (sw / 2) / (tw / 2);
+            let (si, di) = (sy * sw + sx * 2, (oy / 2 + y) * dw + ox + x * 2);
+            duv[di] = suv[si];
+            duv[di + 1] = suv[si + 1];
+        }
+    }
+    dst
 }
 
 #[cfg(test)]
@@ -335,4 +414,55 @@ mod tests {
         assert_eq!(m, orig);
     }
 
+
+    #[test]
+    fn rotate_90_180_270_dimensions_and_pixels() {
+        // 4x2 NV12: Y = 0..7, UV = (100,101),(102,103)
+        let mut src: Vec<u8> = (0..8).collect();
+        src.extend([100, 101, 102, 103]);
+        let (r, w, h) = rotate_nv12(&src, 4, 2, 90);
+        assert_eq!((w, h), (2, 4));
+        // 90 cw: sol sütun alttan yukarı = eski ilk satır: (0,0)->(1,0)
+        assert_eq!(&r[..2], &[4, 0]);
+        let (r, w, h) = rotate_nv12(&src, 4, 2, 180);
+        assert_eq!((w, h), (4, 2));
+        assert_eq!(&r[..4], &[7, 6, 5, 4]);
+        assert_eq!(&r[8..], &[102, 103, 100, 101]);
+        let (r, w, h) = rotate_nv12(&src, 4, 2, 270);
+        assert_eq!((w, h), (2, 4));
+        assert_eq!(&r[..2], &[3, 7]);
+        // 4 x 90 = kimlik
+        let mut cur = (src.clone(), 4usize, 2usize);
+        for _ in 0..4 {
+            cur = rotate_nv12(&cur.0, cur.1, cur.2, 90);
+        }
+        assert_eq!(cur.0, src);
+        assert_eq!(rotate_nv12(&src, 4, 2, 0).0, src);
+    }
+
+    #[test]
+    fn letterbox_pillarboxes_portrait_and_keeps_aspect() {
+        // 2x4 (portre) -> 8x4 (yatay): içerik ortada, kenarlar siyah (Y=16)
+        let mut src = vec![200u8; 2 * 4];
+        src.extend(vec![90u8; 2 * 4 / 2]);
+        let out = letterbox_nv12(&src, 2, 4, 8, 4);
+        assert_eq!(out.len(), 8 * 4 * 3 / 2);
+        assert_eq!(out[0], 16, "sol kenar siyah");
+        assert_eq!(out[7], 16, "sağ kenar siyah");
+        assert!(out[..32].iter().any(|y| *y == 200), "içerik var");
+        assert_eq!(out[32], 128, "UV nötr");
+        // aynı en-boyda kayıpsız doldurur
+        let same = letterbox_nv12(&vec![77u8; 4 * 2 * 3 / 2], 4, 2, 8, 4);
+        assert!(same[..32].iter().all(|y| *y == 77));
+    }
+
+    #[test]
+    fn sddl_only_owner_sid_and_rejects_injection() {
+        let ok = build_sddl(Some("S-1-5-21-1111111111-2222222222-3333333333-1001"));
+        assert_eq!(ok, "D:(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGW;;;S-1-5-21-1111111111-2222222222-3333333333-1001)");
+        assert!(!ok.contains(";IU") && !ok.contains(";WD") && !ok.contains(";AU"), "genel gruplar yok");
+        for bad in [None, Some(""), Some("IU"), Some("S-1-5-21-1)(A;;GA;;;WD"), Some("S-1-"), Some("S-1-5-21-")] {
+            assert_eq!(build_sddl(bad), "D:(A;;GA;;;SY)(A;;GA;;;LS)", "{bad:?}: kullanıcı ACE'si eklenmemeli");
+        }
+    }
 }

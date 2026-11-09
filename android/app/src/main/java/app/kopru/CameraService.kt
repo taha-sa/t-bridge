@@ -18,6 +18,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import android.util.Size
+import android.view.OrientationEventListener
 import android.view.Surface
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -45,6 +46,8 @@ data class CamUi(
     val exposure: Int = 0,
     val exposureRange: IntRange = 0..0,
     val zoom: Float = 0f,
+    /** Karenin dik görünmesi için PC'nin uygulayacağı saat yönü derecesi (0/90/180/270). */
+    val rotation: Int = 0,
     val w: Int = 0,
     val h: Int = 0,
     val error: String? = null,
@@ -62,6 +65,8 @@ class CameraService : Service(), LifecycleOwner {
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var enc: Encoder? = null
+    private var preview: Preview? = null
+    private var orient: OrientationEventListener? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -122,6 +127,7 @@ class CameraService : Service(), LifecycleOwner {
                     )
                     .build()
                 val preview = Preview.Builder().setResolutionSelector(rs).build()
+                this.preview = preview
                 val exec = ContextCompat.getMainExecutor(this)
                 preview.setSurfaceProvider(exec) { req ->
                     val size = req.resolution
@@ -130,6 +136,11 @@ class CameraService : Service(), LifecycleOwner {
                     val e = Encoder(size.width, size.height, fps, kbps)
                     enc = e
                     req.provideSurface(e.surface, exec) { e.release() }
+                    // Cihaz yönüne göre dik görünmesi için gereken dönüş; PC döndürür (kodlayıcı boyutu değişmez).
+                    req.setTransformationInfoListener(exec) { info ->
+                        _ui.update { it.copy(rotation = info.rotationDegrees) }
+                        publishState(size.width, size.height)
+                    }
                     publishState(size.width, size.height)
                 }
                 val sel = if (ui.front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
@@ -140,6 +151,7 @@ class CameraService : Service(), LifecycleOwner {
                 cam.cameraControl.enableTorch(ui.torch && cam.cameraInfo.hasFlashUnit())
                 cam.cameraControl.setExposureCompensationIndex(ui.exposure.coerceIn(ev.exposureCompensationRange.lower, ev.exposureCompensationRange.upper))
                 cam.cameraControl.setLinearZoom(ui.zoom)
+                startOrientation()
                 _ui.update { it.copy(streaming = true, error = null, exposureRange = ev.exposureCompensationRange.lower..ev.exposureCompensationRange.upper) }
             } catch (e: Exception) {
                 Log.w(TAG, "kamera başlatılamadı: $e")
@@ -148,14 +160,35 @@ class CameraService : Service(), LifecycleOwner {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    /** Cihaz dönünce Preview hedef dönüşünü güncelle (dikey/yatay tutuş); TransformationInfo ile PC'ye bildirilir. */
+    private fun startOrientation() {
+        orient?.disable()
+        val l = object : OrientationEventListener(this) {
+            override fun onOrientationChanged(deg: Int) {
+                if (deg == ORIENTATION_UNKNOWN) return
+                val r = when {
+                    deg >= 315 || deg < 45 -> Surface.ROTATION_0
+                    deg < 135 -> Surface.ROTATION_270
+                    deg < 225 -> Surface.ROTATION_180
+                    else -> Surface.ROTATION_90
+                }
+                preview?.targetRotation = r
+            }
+        }
+        if (l.canDetectOrientation()) l.enable()
+        orient = l
+    }
+
     private fun stopCamera() {
+        orient?.disable()
+        orient = null
         try { provider?.unbindAll() } catch (_: Exception) {}
         camera = null
         enc?.release()
         enc = null
         Core.node?.endCamStream()
         _ui.update { it.copy(streaming = false) }
-        Core.node?.sendCamState(false, 0u, 0u, 30u, if (_ui.value.front) 1u else 0u, _ui.value.mirror)
+        Core.node?.sendCamState(false, 0u, 0u, 30u, if (_ui.value.front) 1u else 0u, _ui.value.mirror, 0u.toUShort())
     }
 
     private fun fail(msg: String) {
@@ -166,7 +199,7 @@ class CameraService : Service(), LifecycleOwner {
     private fun publishState(w: Int, h: Int) {
         _ui.update { it.copy(w = w, h = h) }
         val u = _ui.value
-        Core.node?.sendCamState(true, w.toUInt(), h.toUInt(), 30u, if (u.front) 1u else 0u, u.mirror)
+        Core.node?.sendCamState(true, w.toUInt(), h.toUInt(), 30u, if (u.front) 1u else 0u, u.mirror, u.rotation.toUShort())
     }
 
     fun control(c: (Camera) -> Unit) {

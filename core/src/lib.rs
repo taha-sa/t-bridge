@@ -222,9 +222,9 @@ impl Node {
         self.peer_supports_camera() && self.inner.send_msg(Msg::CamKeyframe)
     }
 
-    /// Telefon -> PC: kamera durumu.
-    pub fn send_cam_state(&self, active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool) -> bool {
-        self.peer_supports_camera() && self.inner.send_msg(Msg::CamState { active, w, h, fps, facing, mirror })
+    /// Telefon -> PC: kamera durumu. rotation: karenin dik görünmesi için saat yönünde uygulanacak derece (0/90/180/270).
+    pub fn send_cam_state(&self, active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool, rotation: u16) -> bool {
+        self.peer_supports_camera() && self.inner.send_msg(Msg::CamState { active, w, h, fps, facing, mirror, rotation })
     }
 
     /// Telefon: kodlanmış kamera karesi gönder (geri basınç kapısı). false = atıldı.

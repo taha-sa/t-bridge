@@ -24,13 +24,13 @@ CameraX Preview ──Surface──▶ MediaCodec H.264    desktop (kopru-deskto
                                                  │ CurrentUser)                  │            └──────────────▲──────────────────┘
                                                  └──────────────────────────────┘                           │ Zoom / Teams / Kamera
 ```
-- **Protokol** (`core/src/proto.rs`): `CamStart{w,h,fps,bitrate_kbps}` (PC→tel), `CamStop`, `CamKeyframe`, `CamState{active,w,h,fps,facing,mirror}` (tel→PC).
+- **Protokol** (`core/src/proto.rs`): `CamStart{w,h,fps,bitrate_kbps}` (PC→tel), `CamStop`, `CamKeyframe`, `CamState{active,w,h,fps,facing,mirror,rotation}` (tel→PC).
   Video akışı ekran paylaşımıyla aynı çerçeveleme ve geri basınç kapısını kullanır (`screen::Gate`, 150 ms), yalnızca farklı sihirli sayı (`CAM_MAGIC`) ve yön.
   İki taraf `camera` yeteneğini duyurmadıkça hiçbir `Cam*` mesajı gönderilmez; eski eşler etkilenmez.
 - **Halka** (`camera/ring`, `kopru-camring`): başlık + 3 yuva, yuva başına seqlock; yazıcı = uygulama, okuyucu = DLL. 9 birim testi: yazıcı/okuyucu, sarma,
   çözünürlük değişimi, bayatlık, yırtık okuma reddi, eşzamanlı yazıcı/okuyucu, ayna.
 - **Bölümü DLL yaratır** (`Global\TBridgeCameraRing`): `Global\` ad alanında bölüm *yaratmak* SeCreateGlobalPrivilege ister (LocalService'te var, standart kullanıcıda yok);
-  *açmak* istemez. DACL (SDDL): SYSTEM + LocalService tam, etkileşimli kullanıcı okuma/yazma; diğerleri yok.
+  *açmak* istemez. DACL (SDDL): SYSTEM + LocalService tam, **yalnızca kamerayı etkinleştiren kullanıcının SID'i** okuma/yazma; başka hiçbir grup/kullanıcı yok. SID, kayıt sırasında (çağıran süreç `--camera-register <dll> <sid>` ile iletir; SDDL enjeksiyonuna karşı yalnızca `S-1-` + rakam/tire kabul edilir) HKLM `CLSID\{..}\OwnerSid` değerine yazılır; DLL bölümü yaratırken oradan okur. SID yoksa/geçersizse kullanıcı ACE'si eklenmez (kapalı güvenli). Başka bir Windows kullanıcısı etkinleştirmek isterse sahip SID'i farklı olduğundan kayıt yeniden yapılır (UAC).
   Sonuç: kimse kamerayı açmadıkça bölüm yoktur → uygulama gelen kareleri **çözmeden atar** (CPU harcanmaz); bölüm belirince anahtar kare ister.
 - **Biçim**: DLL NV12 1280×720@30 ve 1920×1080@30 sunar; istemcinin seçtiği biçimi halkaya `want` olarak yazar, uygulama telefondan bu boyutu ister
   (`CamStart`). Boyut uyuşmazsa DLL en yakın komşu ölçekler. YUY2 eklenmedi (NV12 çoğu istemci için yeterli; Frame Server dönüştürür).
@@ -50,15 +50,15 @@ bağımlılığı yok); `#[implement]` COM nesnelerini güvenli üretir. Çıkt�
    Ömür *Session*: T-Bridge kapanınca (veya "Durdur") kamera kalkar. `camera_enabled` ayarı açıksa her açılışta otomatik başlatılır (kayıt varsa).
 4. **"Kamerayı kaldır"**: `--camera-unregister` (UAC) HKLM kaydını ve DLL'i siler.
 NSIS: `installer-hooks.nsh` kaldırma sırasında kayıt varsa yalnızca bu adım için UAC ister (kurulum kullanıcı başına kalır).
-DLL dağıtımı: `tbridge_vcam.dll` uygulama exe'sinin yanında (veya `camera\`) bulunmalıdır; geliştirmede `cargo build -p tbridge-vcam --release` çıktısını exe klasörüne kopyalayın.
-(Tauri `bundle.resources` girdisi eklenmedi: dosya yokken derleme kırılmasın; release betiğine eklenmelidir.)
+**DLL paketleme:** `tauri.conf.json > bundle.resources` `camera/tbridge_vcam.dll` dosyasını kurulumda `camera\` klasörüne koyar. Sürüm derlemesinde `beforeBuildCommand` (`npm run build && node scripts/build-vcam.mjs`) önce `cargo build -p tbridge-vcam --release` çalıştırıp DLL'i `desktop/src-tauri/camera/` altına kopyalar (`release.mjs` → `npx tauri build` → beforeBuildCommand bu adımı otomatik çalıştırır). Geliştirme derlemelerinde `build.rs` boş bir yer tutucu dosya bırakır (Tauri kaynak denetimi geçsin); uygulama 4 KB altı dosyayı "yok" sayar ve `target\release\tbridge_vcam.dll` / `target\debug` yollarına bakar. Elle: `cargo build -p tbridge-vcam --release` yeterli.
 
 ## Telefon (Kotlin)
 - `CameraService` (ön plan hizmeti, `foregroundServiceType="camera"`, Android 14): CameraX `Preview` çıktısı doğrudan `MediaCodec` giriş yüzeyine; CBR, GOP 2 sn,
   `KEY_LOW_LATENCY` (API 30+), Baseline profil; SPS/PPS her IDR'ye eklenir; geri basınçta bit hızı düşer, kare atılırsa anahtar kare istenir.
   Bildirim: "T-Bridge kamera olarak kullanılıyor". Ekran kapalıyken yayın hizmet sayesinde sürer.
 - Kontroller (Kumanda → Kamera): ön/arka, 720p/1080p, ayna, fener, pozlama ±, yakınlık (lens zoom), "Yayını durdur". İzin akışı gerekçe metniyle.
-- Ayna PC'de uygulanır (NV12 yatay çevirme). Görüntü sensör yönündedir: telefon yatay tutulunca dik görünür (döndürme seçeneği yok).
+- **Yön:** `OrientationEventListener` cihaz yönüne göre `Preview.targetRotation` değerini günceller; CameraX `TransformationInfo.rotationDegrees` değeri `CamState.rotation` (0/90/180/270) olarak PC'ye gider. Kodlayıcı boyutu sabit kalır; PC çözülen kareyi saat yönünde döndürür (dikey tutuşta 1280×720 → 720×1280), ayna uygular, sonra DLL'in istediği yatay çerçeveye en-boyu koruyarak sığdırır (yanlarda siyah boşluk). Yatay tutuş (rotation 0/180) eskisi gibi çalışır.
+- Ayna PC'de uygulanır (NV12 yatay çevirme, döndürmeden sonra).
 
 ## Sorun giderme
 | Belirti | Çözüm |
@@ -70,6 +70,6 @@ DLL dağıtımı: `tbridge_vcam.dll` uygulama exe'sinin yanında (veya `camera\`
 | Güncelleme sonrası kamera yok | "Kamerayı kaldır" → "Kamerayı etkinleştir" (DLL yeniden kaydedilir) |
 
 ## Doğrulananlar / doğrulanmayanlar
-- Doğrulandı (derleme + birim testi): kapı mantığı, halka (9 test), yer tutucu/ölçekleme/ayna, protokol, DLL ve masaüstü derlemesi, Svelte kontrolü, Android derlemesi.
+- Doğrulandı (derleme + birim testi): kapı mantığı, halka (12 test: + döndürme, letterbox, SDDL), yer tutucu/ölçekleme/ayna, protokol, DLL ve masaüstü derlemesi, Svelte kontrolü, Android derlemesi.
 - **Doğrulanmadı** (bu oturumda yönetici izni/kayıt yok, DLL kaydedilmedi): Frame Server'ın DLL'i yükleyip yüklemediği, `IMFActivate` ile etkinleştirme varsayımı,
   öznitelik kümesinin Zoom/Teams tarafından kabulü, canlı QUIC akışı, MF H.264 çözücü çıktı yerleşimi (stride/hizalı yükseklik varsayımı), telefonda CameraX/MediaCodec yolu.

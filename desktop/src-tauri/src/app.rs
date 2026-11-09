@@ -207,10 +207,10 @@ impl Shared {
                 }
                 return; // video kareleri arayüze gönderilmez
             }
-            Event::CamState { active, w, h, fps, facing, mirror } => {
+            Event::CamState { active, w, h, fps, facing, mirror, rotation } => {
                 if let Some(hub) = self.camera.get() {
                     if let Ok(mut p) = hub.phone.lock() {
-                        *p = crate::win::camera::PhoneCam { active: *active, w: *w, h: *h, fps: *fps, facing: *facing, mirror: *mirror };
+                        *p = crate::win::camera::PhoneCam { active: *active, w: *w, h: *h, fps: *fps, facing: *facing, mirror: *mirror, rotation: *rotation };
                     }
                 }
             }

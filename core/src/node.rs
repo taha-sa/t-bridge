@@ -831,7 +831,7 @@ impl Inner {
             Msg::CamStart { w, h, fps, bitrate_kbps } => self.emit(Event::Cam { cmd: CamCmd::Start { w, h, fps, bitrate_kbps } }),
             Msg::CamStop => self.emit(Event::Cam { cmd: CamCmd::Stop }),
             Msg::CamKeyframe => self.emit(Event::Cam { cmd: CamCmd::Keyframe }),
-            Msg::CamState { active, w, h, fps, facing, mirror } => self.emit(Event::CamState { active, w, h, fps, facing, mirror }),
+            Msg::CamState { active, w, h, fps, facing, mirror, rotation } => self.emit(Event::CamState { active, w, h, fps, facing, mirror, rotation }),
             Msg::Unknown => {}
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),

@@ -126,7 +126,7 @@ pub enum Msg {
     CamStop,
     CamKeyframe,
     /// Telefon -> PC: kamera durumu. facing: 0 arka, 1 ön.
-    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool },
+    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool, rotation: u16 },
     /// Çözülemeyen/bilinmeyen çerçeve (daha yeni eşten). Asla gönderilmez; yalnızca okuyucuda üretilir.
     Unknown,
 }

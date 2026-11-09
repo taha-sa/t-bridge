@@ -46,10 +46,27 @@ struct Shm {
 unsafe impl Send for Shm {}
 unsafe impl Sync for Shm {}
 
+/// Kamerayı etkinleştiren kullanıcının SID'i: kayıt sırasında HKLM\SOFTWARE\Classes\CLSID\{..} altına `OwnerSid` olarak yazılır.
+fn read_owner_sid() -> Option<String> {
+    use windows::Win32::System::Registry::*;
+    unsafe {
+        let key: Vec<u16> = "SOFTWARE\\Classes\\CLSID\\{7B3F1C52-4D2E-4C71-9A0B-5E2D8F6A1C34}".encode_utf16().chain(std::iter::once(0)).collect();
+        let name: Vec<u16> = "OwnerSid".encode_utf16().chain(std::iter::once(0)).collect();
+        let mut buf = [0u16; 256];
+        let mut len = (buf.len() * 2) as u32;
+        let r = RegGetValueW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()), PCWSTR(name.as_ptr()), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut c_void), Some(&mut len));
+        if r.0 != 0 {
+            return None;
+        }
+        let n = (len as usize / 2).saturating_sub(1).min(buf.len());
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+}
+
 fn open_shm() -> Option<Shm> {
     unsafe {
         let mut sd = PSECURITY_DESCRIPTOR::default();
-        let sddl: Vec<u16> = kopru_camring::SDDL.encode_utf16().chain(std::iter::once(0)).collect();
+        let sddl: Vec<u16> = kopru_camring::build_sddl(read_owner_sid().as_deref()).encode_utf16().chain(std::iter::once(0)).collect();
         ConvertStringSecurityDescriptorToSecurityDescriptorW(PCWSTR(sddl.as_ptr()), SDDL_REVISION_1, &mut sd, None).ok()?;
         let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
         let name: Vec<u16> = kopru_camring::SECTION_NAME.encode_utf16().chain(std::iter::once(0)).collect();

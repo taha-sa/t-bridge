@@ -84,8 +84,55 @@ fn reg_set_sz(sub: &str, name: Option<&str>, value: &str) -> Result<(), String> 
     }
 }
 
+/// Bu sürecin kullanıcısının SID dizgesi (S-1-5-21-...).
+pub fn current_user_sid() -> Option<String> {
+    use windows::Win32::{
+        Security::{Authorization::ConvertSidToStringSidW, GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser},
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    unsafe {
+        let mut tok = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok).ok()?;
+        let mut len = 0u32;
+        let _ = GetTokenInformation(tok, TokenUser, None, 0, &mut len);
+        let mut buf = vec![0u8; len as usize];
+        let r = GetTokenInformation(tok, TokenUser, Some(buf.as_mut_ptr() as *mut _), len, &mut len);
+        let _ = CloseHandle(tok);
+        r.ok()?;
+        let user = &*(buf.as_ptr() as *const TOKEN_USER);
+        let mut p = windows::core::PWSTR::null();
+        ConvertSidToStringSidW(user.User.Sid, &mut p).ok()?;
+        let s = p.to_string().ok();
+        let _ = windows::Win32::Foundation::LocalFree(Some(windows::Win32::Foundation::HLOCAL(p.0 as *mut _)));
+        s
+    }
+}
+
+/// Kayıtta saklanan sahip SID'i (HKLM).
+pub fn registered_owner_sid() -> Option<String> {
+    unsafe {
+        let key = wide(&clsid_key());
+        let name = wide("OwnerSid");
+        let mut buf = [0u16; 256];
+        let mut len = (buf.len() * 2) as u32;
+        let r = RegGetValueW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()), PCWSTR(name.as_ptr()), RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len));
+        if r.0 != 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..(len as usize / 2).saturating_sub(1).min(buf.len())]))
+    }
+}
+
+/// Kayıt var ve DLL yerinde VE sahip SID'i bu kullanıcı (başka kullanıcı etkinleştirdiyse yeniden kayıt gerekir).
+pub fn is_installed_for_me() -> bool {
+    is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid()
+}
+
 /// Yükseltilmiş süreçte çalışır: DLL'i %ProgramFiles%\T-Bridge\camera\ altına kopyalar ve COM kaydını HKLM'ye yazar.
-pub fn register_elevated(src_dll: &Path) -> Result<(), String> {
+pub fn register_elevated(src_dll: &Path, owner_sid: &str) -> Result<(), String> {
+    if !kopru_camring::is_valid_sid(owner_sid) {
+        return Err("geçersiz kullanıcı SID'i".into());
+    }
     let dir = install_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("klasör: {e}"))?;
     let dst = dir.join(DLL_NAME);
@@ -94,6 +141,8 @@ pub fn register_elevated(src_dll: &Path) -> Result<(), String> {
     reg_set_sz(&key, None, FRIENDLY_NAME)?;
     reg_set_sz(&format!("{key}\\InprocServer32"), None, &dst.to_string_lossy())?;
     reg_set_sz(&format!("{key}\\InprocServer32"), Some("ThreadingModel"), "Both")?;
+    // Halka DACL'i yalnızca bu kullanıcıya açılır (DLL bu değeri okur).
+    reg_set_sz(&key, Some("OwnerSid"), owner_sid)?;
     Ok(())
 }
 
@@ -153,19 +202,29 @@ pub fn run_elevated(args: &str) -> Result<u32, String> {
 
 /// DLL'in aranacağı yerler: exe yanı, kaynak klasörü, geliştirme derleme çıktısı.
 pub fn locate_dll(extra_dir: Option<PathBuf>) -> Option<PathBuf> {
+    // 4 KB'tan küçük dosya build.rs'in bıraktığı yer tutucudur (geliştirme): gerçek DLL sayılmaz.
+    let real = |p: &PathBuf| p.metadata().map(|m| m.len() > 4096).unwrap_or(false);
     let mut c: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
+            c.push(d.join("camera").join(DLL_NAME)); // Tauri kaynakları (kurulu sürüm)
             c.push(d.join(DLL_NAME));
-            c.push(d.join("camera").join(DLL_NAME));
-            // geliştirme: <repo>/target/{release,debug}/tbridge_vcam.dll (exe aynı klasörde)
+            // geliştirme: <repo>/target/{release,debug}/ (exe zaten target\debug içinde)
+            let mut up = Some(d);
+            for _ in 0..4 {
+                if let Some(u) = up {
+                    c.push(u.join("release").join(DLL_NAME));
+                    c.push(u.join(DLL_NAME));
+                    up = u.parent();
+                }
+            }
         }
     }
     if let Some(d) = extra_dir {
-        c.push(d.join(DLL_NAME));
         c.push(d.join("camera").join(DLL_NAME));
+        c.push(d.join(DLL_NAME));
     }
-    c.into_iter().find(|p| p.exists())
+    c.into_iter().find(real)
 }
 
 /// Komut satırı yükseltilmiş yardımcı modu. `Some(çıkış kodu)` dönerse süreç bununla çıkmalıdır.
@@ -174,7 +233,8 @@ pub fn maybe_run_helper() -> Option<i32> {
     match args.get(1).map(String::as_str) {
         Some("--camera-register") => {
             let src = args.get(2).map(PathBuf::from)?;
-            Some(match register_elevated(&src) {
+            let sid = args.get(3).cloned().unwrap_or_default();
+            Some(match register_elevated(&src, &sid) {
                 Ok(()) => 0,
                 Err(e) => {
                     let _ = std::fs::write(std::env::temp_dir().join("tbridge-camera-register.log"), e);
@@ -271,6 +331,8 @@ pub struct PhoneCam {
     pub fps: u32,
     pub facing: u8,
     pub mirror: bool,
+    /// Karenin dik görünmesi için saat yönünde uygulanacak derece.
+    pub rotation: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -431,13 +493,21 @@ fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<A
         let Some(d) = dec.as_mut() else { continue };
         match d.decode(&data, pts as i64 * 10) {
             Ok(frames) => {
-                let mirror = phone.lock().map(|p| p.mirror).unwrap_or(false);
-                for mut f in frames {
+                let (mirror, rot) = phone.lock().map(|p| (p.mirror, p.rotation as u32)).unwrap_or((false, 0));
+                for f in frames {
+                    // Dik görüntü: önce döndür (portre tutuş), sonra ayna; ardından halkanın istediği çerçeveye sığdır.
+                    let (mut nv, mut w, mut h) = kopru_camring::rotate_nv12(&f.nv12, f.w as usize, f.h as usize, rot);
                     if mirror {
-                        kopru_camring::mirror_nv12(&mut f.nv12, f.w as usize, f.h as usize);
+                        kopru_camring::mirror_nv12(&mut nv, w, h);
+                    }
+                    let (ww, wh) = r.ring.want();
+                    if ww > 0 && wh > 0 && (w as u32 != ww || h as u32 != wh) {
+                        nv = kopru_camring::letterbox_nv12(&nv, w, h, ww as usize, wh as usize);
+                        w = ww as usize;
+                        h = wh as usize;
                     }
                     let now = unsafe { GetTickCount64() };
-                    if r.ring.write(f.w, f.h, pts, now, &f.nv12) {
+                    if r.ring.write(w as u32, h as u32, pts, now, &nv) {
                         decoded.fetch_add(1, Ordering::Relaxed);
                     }
                 }

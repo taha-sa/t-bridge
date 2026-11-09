@@ -265,7 +265,7 @@ pub enum Event {
     /// Telefonda: PC kamera komutu gönderdi.
     Cam { cmd: CamCmd },
     /// PC'de: telefon kamera durumu.
-    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool },
+    CamState { active: bool, w: u32, h: u32, fps: u32, facing: u8, mirror: bool, rotation: u16 },
     /// PC'de: telefon kamerasından kodlanmış H.264 (Annex-B) kare.
     CamFrame { pts_us: u64, key: bool, data: Vec<u8> },
     AppIcon { package: String, png: Vec<u8> },
