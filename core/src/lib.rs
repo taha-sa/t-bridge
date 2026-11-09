@@ -82,11 +82,6 @@ impl Node {
         self.inner.screen_feedback_ex(now_us)
     }
 
-    /// Eş `screen-tune` (ack, istatistik, saat senkronu, datagram işaretçi) duyuruyor mu.
-    pub fn peer_supports_screen_tune(&self) -> bool {
-        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_SCREEN_TUNE))
-    }
-
     /// Tarama penceresi süresini değiştirir (varsayılan 25 sn; testler için).
     pub fn set_scan_window(&self, d: std::time::Duration) {
         self.inner.set_scan_window(d)
@@ -289,6 +284,11 @@ impl Node {
 
     pub fn end_cam_stream(&self) {
         self.inner.end_cam_stream()
+    }
+
+    /// Eş `screen-tune` (ack, istatistik, saat senkronu, datagram işaretçi) duyuruyor mu.
+    pub fn peer_supports_screen_tune(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_SCREEN_TUNE))
     }
 
     /// Eş ekran paylaşımı yeteneğini duyurdu mu.

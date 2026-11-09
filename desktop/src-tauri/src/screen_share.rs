@@ -117,13 +117,13 @@ impl ScreenState {
     }
 }
 
-/// Telefondan gelen değerleri güvenli aralığa sıkıştırır. Görüntü alanı dikey telefonlarda yüksekliği 4096'ya kadar kabul eder;
-/// `bitrate_kbps == 0` = otomatik (boyut ve fps'e göre tablo).
+/// Telefondan gelen değerleri güvenli aralığa sıkıştırır. Telefon çözücüsü uyarlanabilir oynatmayı en çok 3840x2160 (genişlik x
+/// yükseklik) için kurar; bu yüzden dikey telefonda da yükseklik 2160'ı aşmaz. `bitrate_kbps == 0` = otomatik (tablo).
 pub fn clamp_params(monitor: u32, max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32) -> Params {
     Params {
         monitor,
-        max_w: max_w.clamp(160, 4096),
-        max_h: max_h.clamp(160, 4096),
+        max_w: max_w.clamp(160, 3840),
+        max_h: max_h.clamp(160, 2160),
         fps: fps.clamp(5, 60),
         bitrate_kbps: if bitrate_kbps == 0 { 0 } else { bitrate_kbps.clamp(300, 20_000) },
     }
@@ -560,10 +560,11 @@ mod tests {
     #[test]
     fn params_are_clamped_and_zero_bitrate_means_auto() {
         use super::clamp_params;
-        let p = clamp_params(0, 1080, 2400, 30, 0);
-        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (1080, 2400, 30, 0)); // dikey telefon sığar, 0 = otomatik
+        let p = clamp_params(0, 1080, 1920, 30, 0);
+        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (1080, 1920, 30, 0)); // dikey telefon sığar, 0 = otomatik
+        assert_eq!(clamp_params(0, 1440, 3200, 30, 0).max_h, 2160); // telefon çözücü sınırı
         let p = clamp_params(1, 10, 99_999, 500, 5);
-        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (160, 4096, 60, 300));
+        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (160, 2160, 60, 300));
         assert_eq!(clamp_params(0, 1920, 1080, 1, 99_999_999).bitrate_kbps, 20_000);
     }
 

@@ -419,6 +419,7 @@ fn run_session(stop: &AtomicBool, key: &AtomicBool, gen_: &AtomicU64, cfg: &Mute
         if key.swap(false, Ordering::SeqCst) {
             chain.enc.force_key();
             dirty = true;
+            cap_us = now_us(); // yeniden kodlanan içerik güncel ekrandır; eski pts gecikme ölçümünü bozmasın
         }
         if last_encode.elapsed() > Duration::from_secs(2) && !smon.secure() {
             dirty = true; // durağan ekranda da zaman zaman tazele
@@ -465,6 +466,7 @@ fn run_session(stop: &AtomicBool, key: &AtomicBool, gen_: &AtomicU64, cfg: &Mute
         if fb.want_key {
             chain.enc.force_key();
             dirty = true;
+            cap_us = now_us();
         }
         win.lag(fb.lag_ms, fb.pending, fb.inflight_bytes);
         tick_lag_max = tick_lag_max.max(fb.lag_ms);
