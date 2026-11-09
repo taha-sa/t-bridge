@@ -1,6 +1,7 @@
 //! PC ekran paylaşımı ardışık düzeni: yakala (WGC / DXGI-DD) -> BGRA→NV12 (GPU video işlemcisi, ölçekleme) -> H.264 (MF) -> sink.
 pub mod capture;
 pub mod encode;
+pub mod secure;
 
 use std::sync::{
     Arc, Mutex,
@@ -33,6 +34,8 @@ pub struct Sink {
     /// pts_us -> (anahtar kare iste, gönderim kuyruğu gecikmesi ms)
     pub feedback: Box<dyn Fn(u64) -> (bool, u64) + Send>,
     pub on_status: Box<dyn Fn(Result<String, String>) + Send>,
+    /// Güvenli masaüstü (UAC / kilit) açıldı (true) ya da kapandı (false).
+    pub on_secure: Box<dyn Fn(bool) + Send>,
 }
 
 /// Boru hatları arası dışlama: durdurulan eski hat (WGC oturumu / D3D aygıtı / MF kodlayıcı / QUIC video akışı) hâlâ sönerken
@@ -144,20 +147,75 @@ enum Exit {
     Restart,
 }
 
+/// Güvenli masaüstü izleyicisi: oturum yeniden kurulumlarında da yaşar (iş parçacığı ömrü).
+struct SecureMonitor {
+    watch: secure::SecureWatch,
+    last_probe: Instant,
+}
+
+impl SecureMonitor {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self { watch: secure::SecureWatch::new(now), last_probe: now.checked_sub(secure::PROBE_EVERY).unwrap_or(now) }
+    }
+
+    fn secure(&self) -> bool {
+        self.watch.is_secure()
+    }
+
+    fn apply(&self, changed: Option<bool>, sink: &Sink, key: &AtomicBool) -> bool {
+        if let Some(s) = changed {
+            log::info!("ekran paylaşımı: güvenli masaüstü {}", if s { "açıldı, görüntü durdu" } else { "kapandı, görüntü sürüyor" });
+            (sink.on_secure)(s);
+            if !s {
+                key.store(true, Ordering::SeqCst); // devam eden ilk kare anahtar kare olsun
+            }
+        }
+        changed.is_some()
+    }
+
+    /// Yeni kare yakalandı.
+    fn frame(&mut self, sink: &Sink, key: &AtomicBool) {
+        let c = self.watch.frame(Instant::now());
+        self.apply(c, sink, key);
+    }
+
+    /// Aralıklı masaüstü sınaması (`force` = aralığı bekleme). Durum değiştiyse true.
+    fn poll(&mut self, sink: &Sink, key: &AtomicBool, force: bool) -> bool {
+        let now = Instant::now();
+        if !force && now.duration_since(self.last_probe) < secure::PROBE_EVERY {
+            return false;
+        }
+        self.last_probe = now;
+        let c = self.watch.probe(now, secure::probe_desktop());
+        self.apply(c, sink, key)
+    }
+}
+
 fn thread_main(stop: Arc<AtomicBool>, key: Arc<AtomicBool>, gen_: Arc<AtomicU64>, cfg: Arc<Mutex<Params>>, sink: Sink) {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let _ = MFStartup(MF_VERSION, MFSTARTUP_FULL);
     }
     let started = Instant::now();
+    let mut mon = SecureMonitor::new();
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        match run_session(&stop, &key, &gen_, &cfg, &sink, started) {
+        match run_session(&stop, &key, &gen_, &cfg, &sink, started, &mut mon) {
             Ok(Exit::Stop) => break,
-            Ok(Exit::Restart) => std::thread::sleep(Duration::from_millis(150)),
+            Ok(Exit::Restart) => {
+                mon.poll(&sink, &key, true);
+                std::thread::sleep(Duration::from_millis(if mon.secure() { 500 } else { 150 }));
+            }
             Err(e) => {
+                // Güvenli masaüstünde kurulum başarısız olabilir (yakalama kaynağı yok): hata değil, bekle ve yeniden dene.
+                if mon.poll(&sink, &key, true) || mon.secure() || secure::probe_desktop() != secure::Desktop::Default {
+                    log::info!("ekran paylaşımı: güvenli masaüstü, yeniden denenecek ({e})");
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
                 (sink.on_status)(Err(e.to_string()));
                 break;
             }
@@ -176,6 +234,7 @@ fn run_session(
     cfg: &Mutex<Params>,
     sink: &Sink,
     started: Instant,
+    smon: &mut SecureMonitor,
 ) -> windows::core::Result<Exit> {
     use capture::{Converter, Dup, GrabError, Source, Wgc, bgra_texture, create_gpu};
     let seen_gen = gen_.load(Ordering::SeqCst);
@@ -218,14 +277,20 @@ fn run_session(
         }
         let wait = interval.as_millis().min(8) as u32;
         match src.grab(&bgra, &gpu.ctx, wait) {
-            Ok(new) => dirty |= new,
+            Ok(new) => {
+                dirty |= new;
+                if new {
+                    smon.frame(sink, key);
+                }
+            }
             Err(GrabError::Restart) => return Ok(Exit::Restart),
         }
+        smon.poll(sink, key, false);
         if key.swap(false, Ordering::SeqCst) {
             enc.force_key();
             dirty = true;
         }
-        if last_encode.elapsed() > Duration::from_secs(2) {
+        if last_encode.elapsed() > Duration::from_secs(2) && !smon.secure() {
             dirty = true; // durağan ekranda da zaman zaman tazele
         }
         let now = Instant::now();

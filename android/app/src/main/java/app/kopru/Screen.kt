@@ -26,6 +26,8 @@ data class ScreenUi(
     /** Telefon "ekranı göster" modunda mı (kullanıcı isteği). */
     val viewing: Boolean = false,
     val error: String? = null,
+    /** PC güvenli masaüstünde (UAC / kilit ekranı): görüntü geçici olarak durdu. */
+    val secure: Boolean = false,
     val videoW: Int = 0,
     val videoH: Int = 0,
     val fps: Int = 0,
@@ -66,13 +68,13 @@ object Screen {
             return
         }
         baseOffset = Long.MAX_VALUE
-        _ui.update { it.copy(viewing = true, error = null, current = monitor, preset = preset, fps = 0, latencyMs = 0) }
+        _ui.update { it.copy(viewing = true, error = null, secure = false, current = monitor, preset = preset, fps = 0, latencyMs = 0) }
         needKey = true
         n.sendScreenStart(monitor.toUInt(), preset.w.toUInt(), preset.h.toUInt(), preset.fps.toUInt(), preset.kbps.toUInt())
     }
 
     fun stopViewing() {
-        _ui.update { it.copy(viewing = false, active = false, fps = 0, latencyMs = 0) }
+        _ui.update { it.copy(viewing = false, active = false, secure = false, fps = 0, latencyMs = 0) }
         Core.node?.sendScreenStop()
         release()
     }
@@ -102,11 +104,18 @@ object Screen {
     // ---------------------------------------------------------------- olaylar (Rust iş parçacığı)
 
     fun onInfo(monitors: List<MonitorInfo>, current: Int, active: Boolean, error: String?) {
-        _ui.update { it.copy(monitors = monitors, current = if (it.viewing) it.current else current, active = active, error = error) }
+        // Paylaşım bittiyse güvenli masaüstü notu da kalkar; aktifken (yeniden kurulum bildirimi) not korunur.
+        _ui.update { it.copy(monitors = monitors, current = if (it.viewing) it.current else current, active = active, error = error, secure = it.secure && active) }
+    }
+
+    /** PC güvenli masaüstüne geçti / döndü (eski PC bu bildirimi göndermez). */
+    fun onSecure(secure: Boolean) {
+        _ui.update { it.copy(secure = secure) }
+        if (!secure) needKey = true // devam eden ilk karede anahtar kare iste
     }
 
     fun onDisconnected() {
-        _ui.update { it.copy(viewing = false, active = false, fps = 0, latencyMs = 0) }
+        _ui.update { it.copy(viewing = false, active = false, secure = false, fps = 0, latencyMs = 0) }
         release()
     }
 

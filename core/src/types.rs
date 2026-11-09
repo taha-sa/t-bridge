@@ -272,6 +272,8 @@ pub enum Event {
     Screen { cmd: ScreenCmd },
     /// Telefonda: PC monitör listesi / durum (error doluysa reddedildi veya başlatılamadı).
     ScreenInfo { monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String> },
+    /// Telefonda: PC güvenli masaüstüne geçti (`secure=true`, yakalama durur) ya da geri döndü.
+    ScreenNotice { secure: bool },
     /// Telefonda: kodlanmış H.264 (Annex-B) video karesi.
     ScreenFrame { pts_us: u64, key: bool, data: Vec<u8> },
     /// Telefonda: T-Suite uygulama listesi.

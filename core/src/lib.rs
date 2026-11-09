@@ -304,6 +304,11 @@ impl Node {
         self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenInfo { monitors, current, active, error })
     }
 
+    /// PC: güvenli masaüstü (UAC / kilit) açıldı (`true`) ya da kapandı (`false`); yalnızca `screen-share` duyuran eşe.
+    pub fn send_screen_notice(&self, secure: bool) -> bool {
+        self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenNotice { secure })
+    }
+
     /// PC: kodlanmış kareyi gönder (geri basınç kapısı). false = atıldı/gönderilemedi.
     pub fn send_screen_frame(&self, pts_us: u64, key: bool, data: Vec<u8>) -> bool {
         self.inner.send_screen_frame(pts_us, key, data)

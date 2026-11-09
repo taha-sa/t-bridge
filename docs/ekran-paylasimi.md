@@ -26,6 +26,7 @@ PC (desktop/src-tauri)                                        Telefon (android)
 | `ScreenStop` / `ScreenKeyframe` | tel→PC | – |
 | `ScreenConfig` | tel→PC | canlı kalite değişimi (boru hattı yeni parametrelerle yeniden kurulur, ilk kare IDR) |
 | `ScreenInfo` | PC→tel | monitör listesi, seçili, aktif mi, hata/ret metni |
+| `ScreenNotice` | PC→tel | `secure`: güvenli masaüstü (UAC / Ctrl+Alt+Del / kilit) açık, yakalama geçici durdu; `false` = devam. Sona eklenen isteğe bağlı mesaj: tanımayan eş çerçeveyi atlar, yalnızca `screen-share` duyuran eşe gönderilir |
 | `ScreenPointer` | tel→PC | mutlak konum x,y ∈ [0,1] + monitör (tık/kaydırma mevcut `Pc` komutlarıyla) |
 
 Video, oturum başına **tek** tek yönlü QUIC akışıdır: 8 bayt `VIDEO_MAGIC` (dosya akışlarının 8 baytlık `id` başlığından ayrışır), sonra

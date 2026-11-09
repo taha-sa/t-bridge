@@ -138,6 +138,10 @@ pub enum Msg {
     SuiteCmd { req: u64, app: String, name: String, json: String },
     /// PC -> telefon: komut yanıtı.
     SuiteReply { req: u64, ok: bool, json: String, error: Option<String> },
+    // ---- `screen-share` yeteneği: sonradan eklenen isteğe bağlı bildirim (varyant dizini SONA eklenir) ----
+    /// PC -> telefon: güvenli masaüstü (UAC / Ctrl+Alt+Del / kilit ekranı) açık; yakalama geçici olarak durdu. `secure=false` = devam.
+    /// Tanımayan eş çerçeveyi atlar (decode_msg -> None); yine de yalnızca `screen-share` duyuran eşe gönderilir.
+    ScreenNotice { secure: bool },
 }
 
 /// Sürüm 1 el sıkışması (caps alanından önceki biçim): eski eşten gelen Hello/Welcome çözümlemesi için.
@@ -286,6 +290,7 @@ mod tests {
             Msg::SuiteEvent { app: "t-downloader".into(), name: "download.progress".into(), json: "{\"pct\":42}".into() },
             Msg::SuiteCmd { req: 7, app: "t-downloader".into(), name: "download.add".into(), json: "{\"url\":\"https://x\"}".into() },
             Msg::SuiteReply { req: 7, ok: false, json: String::new(), error: Some("kapalı".into()) },
+            Msg::ScreenNotice { secure: true },
         ] {
             let b = postcard::to_stdvec(&m).unwrap();
             assert_eq!(decode_msg(&b), Some(m));

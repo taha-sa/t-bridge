@@ -8,6 +8,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -43,7 +44,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -239,6 +242,30 @@ fun ScreenViewer(
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+
+        // PC güvenli masaüstünde (UAC / kilit ekranı): son kare donuk kalır; bilgi kartı üstte, kare silik.
+        AnimatedVisibility(ui.secure, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
+            Column(
+                Modifier
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xF0111113))
+                    .border(1.dp, c.goldHi.copy(alpha = 0.32f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("🔒", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Bilgisayarda güvenlik ekranı açık (UAC / kilit) — görüntü geçici olarak durdu",
+                    color = c.goldHi,
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text("Ekran kapanınca görüntü kendiliğinden devam eder.", color = c.muted, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
+            }
         }
 
         // Üst çubuk (3 sn sonra gizlenir, dokununca geri gelir)
