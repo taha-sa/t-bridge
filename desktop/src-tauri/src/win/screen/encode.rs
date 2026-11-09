@@ -1,5 +1,5 @@
-//! Media Foundation H.264 kodlayıcı (düşük gecikme, CBR, B karesi yok, GOP ~2 sn).
-//! Önce donanım MFT (D3D11 dokusu doğrudan, sıfır kopya); olmazsa/başarısızsa yazılım MFT (NV12 CPU örneği).
+//! Media Foundation H.264 kodlayıcı (düşük gecikme, gerçek zamanlı, CBR, B karesi yok, uzun GOP + isteğe bağlı IDR).
+//! Tercih sırası: donanım MFT + sıfır kopya > donanım MFT + CPU örneği > yazılım MFT (NV12 CPU örneği).
 use std::mem::ManuallyDrop;
 
 use windows::{
@@ -65,6 +65,16 @@ fn var_bool(b: bool) -> VARIANT {
             }),
         },
     }
+}
+
+/// VBV tampon boyutu (bit): ~300 ms'lik bit hızı. Daha büyüğü IDR/hareket anlarında gecikme sıçraması, daha küçüğü bulanık IDR demektir.
+pub fn vbv_bits(kbps: u32) -> u32 {
+    (kbps as u64 * 1000 * 3 / 10).min(u32::MAX as u64) as u32
+}
+
+/// GOP uzunluğu (kare): 10 sn. Periyodik anahtar kare gecikme sıçraması yaratır; kurtarma isteğe bağlı IDR ile yapılır.
+pub fn gop_frames(fps: u32) -> u32 {
+    fps.max(1) * 10
 }
 
 fn pack(hi: u32, lo: u32) -> u64 {
@@ -165,12 +175,23 @@ impl Encoder {
     /// COM + MFStartup çağıran thread'de başlatılmış olmalı.
     pub fn new(gpu: &Gpu, w: u32, h: u32, fps: u32, kbps: u32) -> Result<Self> {
         let mut last = windows::core::Error::new(windows::core::HRESULT(-1), "H.264 kodlayıcı bulunamadı");
+        // Donanım MFT başka bir GPU'ya aitse D3D yöneticisini kabul etmez (hibrit dizüstü): CPU kopyalı donanım yolu yedeğe alınır,
+        // önce sıfır kopya veren başka bir donanım MFT aranır.
+        let mut hw_cpu: Option<Self> = None;
         for hw in [true, false] {
             for act in enum_mfts(hw) {
                 match unsafe { Self::setup(&act, gpu, hw, w, h, fps, kbps) } {
+                    Ok(e) if hw && !e.zero_copy => {
+                        if hw_cpu.is_none() {
+                            hw_cpu = Some(e);
+                        }
+                    }
                     Ok(e) => return Ok(e),
                     Err(e) => last = e,
                 }
+            }
+            if hw && let Some(e) = hw_cpu.take() {
+                return Ok(e);
             }
         }
         Err(last)
@@ -206,8 +227,13 @@ impl Encoder {
             if let Some(c) = &codec {
                 let _ = c.SetValue(&CODECAPI_AVEncCommonRateControlMode, &var_u32(0)); // CBR
                 let _ = c.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &var_u32(kbps * 1000));
+                let _ = c.SetValue(&CODECAPI_AVEncCommonBufferSize, &var_u32(vbv_bits(kbps)));
                 let _ = c.SetValue(&CODECAPI_AVLowLatencyMode, &var_bool(true));
-                let _ = c.SetValue(&CODECAPI_AVEncMPVGOPSize, &var_u32(fps * 2));
+                let _ = c.SetValue(&CODECAPI_AVEncCommonLowLatency, &var_bool(true));
+                let _ = c.SetValue(&CODECAPI_AVEncCommonRealTime, &var_bool(true));
+                // Güvenilir (QUIC) aktarımda periyodik IDR gereksiz ve her seferinde gecikme sıçraması yapar; kurtarma için
+                // ihtiyaç anında IDR istenir (ScreenKeyframe / çözücü hatası / geri basınç).
+                let _ = c.SetValue(&CODECAPI_AVEncMPVGOPSize, &var_u32(gop_frames(fps)));
                 let _ = c.SetValue(&CODECAPI_AVEncMPVDefaultBPictureCount, &var_u32(0));
             }
 
@@ -219,12 +245,17 @@ impl Encoder {
             out.SetUINT64(&MF_MT_FRAME_RATE, pack(fps, 1))?;
             out.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1))?;
             out.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            out.SetUINT32(&MF_MT_MPEG2_PROFILE, 77)?; // Main
+            // High profil: CABAC + 8x8 dönüşüm ile aynı bit hızında metin/kenarlar belirgin daha keskin; telefon çözücüleri destekler.
+            // Reddedilirse Main'e düşülür.
+            out.SetUINT32(&MF_MT_MPEG2_PROFILE, 100)?;
             set_color(&out);
             if mft.SetOutputType(0, &out, 0).is_err() {
-                log::warn!("kodlayıcı çıkış türü renk niteliklerini kabul etmedi; varsayılan renk kullanılıyor");
-                clear_color(&out);
-                mft.SetOutputType(0, &out, 0)?;
+                out.SetUINT32(&MF_MT_MPEG2_PROFILE, 77)?;
+                if mft.SetOutputType(0, &out, 0).is_err() {
+                    log::warn!("kodlayıcı çıkış türü renk niteliklerini kabul etmedi; varsayılan renk kullanılıyor");
+                    clear_color(&out);
+                    mft.SetOutputType(0, &out, 0)?;
+                }
             }
 
             let mut set_in = false;
@@ -299,6 +330,7 @@ impl Encoder {
     pub fn set_bitrate(&self, kbps: u32) {
         if let Some(c) = &self.codec {
             let _ = unsafe { c.SetValue(&CODECAPI_AVEncCommonMeanBitRate, &var_u32(kbps * 1000)) };
+            let _ = unsafe { c.SetValue(&CODECAPI_AVEncCommonBufferSize, &var_u32(vbv_bits(kbps))) };
         }
     }
 
@@ -476,6 +508,15 @@ mod tests {
         assert_eq!(stream_change_action(9, false), ChangeAction::Renegotiate);
         assert_eq!(stream_change_action(10, true), ChangeAction::Fail);
         assert_eq!(stream_change_action(3, true), ChangeAction::Retry);
+    }
+
+    #[test]
+    fn vbv_and_gop_settings() {
+        assert_eq!(vbv_bits(8000), 2_400_000);
+        assert_eq!(vbv_bits(0), 0);
+        assert_eq!(vbv_bits(u32::MAX), u32::MAX);
+        assert_eq!(gop_frames(30), 300);
+        assert_eq!(gop_frames(0), 10);
     }
 
     #[test]

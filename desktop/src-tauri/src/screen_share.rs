@@ -117,6 +117,18 @@ impl ScreenState {
     }
 }
 
+/// Telefondan gelen değerleri güvenli aralığa sıkıştırır. Görüntü alanı dikey telefonlarda yüksekliği 4096'ya kadar kabul eder;
+/// `bitrate_kbps == 0` = otomatik (boyut ve fps'e göre tablo).
+pub fn clamp_params(monitor: u32, max_w: u32, max_h: u32, fps: u32, bitrate_kbps: u32) -> Params {
+    Params {
+        monitor,
+        max_w: max_w.clamp(160, 4096),
+        max_h: max_h.clamp(160, 4096),
+        fps: fps.clamp(5, 60),
+        bitrate_kbps: if bitrate_kbps == 0 { 0 } else { bitrate_kbps.clamp(300, 20_000) },
+    }
+}
+
 fn shared(app: &AppHandle) -> Arc<Shared> {
     app.state::<Arc<Shared>>().inner().clone()
 }
@@ -153,13 +165,7 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
     let Some(node) = sh.node().cloned() else { return };
     match cmd {
         ScreenCmd::Start { monitor, max_w, max_h, fps, bitrate_kbps } => {
-            let p = Params {
-                monitor,
-                max_w: max_w.clamp(320, 3840),
-                max_h: max_h.clamp(240, 2160),
-                fps: fps.clamp(5, 60),
-                bitrate_kbps: bitrate_kbps.clamp(300, 20_000),
-            };
+            let p = clamp_params(monitor, max_w, max_h, fps, bitrate_kbps);
             if !lk(&sh.settings).screen_share {
                 send_info(&sh, &node, false, Some("Bu bilgisayarda uzaktan ekran görüntüleme kapalı".into()));
                 return;
@@ -185,13 +191,7 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
         ScreenCmd::Config { max_w, max_h, fps, bitrate_kbps } => {
             if let Some(p) = lk(&sh.screen).pipeline.as_ref() {
                 let cur = p.current();
-                p.reconfigure(Params {
-                    monitor: cur.monitor,
-                    max_w: max_w.clamp(320, 3840),
-                    max_h: max_h.clamp(240, 2160),
-                    fps: fps.clamp(5, 60),
-                    bitrate_kbps: bitrate_kbps.clamp(300, 20_000),
-                });
+                p.reconfigure(clamp_params(cur.monitor, max_w, max_h, fps, bitrate_kbps));
             }
         }
         ScreenCmd::Pointer { x, y, monitor } => {
@@ -326,10 +326,7 @@ fn start_pipeline(app: &AppHandle, p: Params) {
     let app3 = app.clone();
     let sink = Sink {
         send: Box::new(move |pts, key, data| n1.send_screen_frame(pts, key, data)),
-        feedback: Box::new(move |pts| {
-            let f = n2.screen_feedback(pts);
-            (f.want_key, f.backlog_ms)
-        }),
+        feedback: Box::new(move |now_us| n2.screen_feedback_ex(now_us)),
         on_secure: Box::new(move |secure| {
             // Eski/yeteneksiz eşe gitmez (send_screen_notice yetenek kapısı).
             n4.send_screen_notice(secure);
@@ -558,6 +555,16 @@ mod tests {
         // Onay beklerken başka cihaz bağlandı / bağlantı koptu: bayat.
         assert_eq!(outcome(&p, Choice::Allow, Some("p2")), Outcome::Ignore);
         assert_eq!(outcome(&p, Choice::Always, None), Outcome::Ignore);
+    }
+
+    #[test]
+    fn params_are_clamped_and_zero_bitrate_means_auto() {
+        use super::clamp_params;
+        let p = clamp_params(0, 1080, 2400, 30, 0);
+        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (1080, 2400, 30, 0)); // dikey telefon sığar, 0 = otomatik
+        let p = clamp_params(1, 10, 99_999, 500, 5);
+        assert_eq!((p.max_w, p.max_h, p.fps, p.bitrate_kbps), (160, 4096, 60, 300));
+        assert_eq!(clamp_params(0, 1920, 1080, 1, 99_999_999).bitrate_kbps, 20_000);
     }
 
     #[test]

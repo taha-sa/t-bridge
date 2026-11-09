@@ -9,21 +9,35 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use kopru_core::screen::{adapt_bitrate, fit_size};
+use kopru_core::ScreenFeedbackEx;
+use kopru_core::ScreenStatsReport;
+use kopru_core::screen::{Adaptor, Quality, SKIP_LAG_MS, StatsWindow, choose_size, now_us, phone_line, target_bitrate_kbps, verdict};
 use windows::Win32::{
-    Media::MediaFoundation::{MF_VERSION, MFSTARTUP_FULL, MFShutdown, MFStartup},
-    System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
+    Foundation::HANDLE,
+    Graphics::Direct3D11::ID3D11Texture2D,
+    Media::{MediaFoundation::{MF_VERSION, MFSTARTUP_FULL, MFShutdown, MFStartup}, timeBeginPeriod, timeEndPeriod},
+    System::{
+        Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize},
+        Threading::{
+            AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, GetCurrentProcess, GetCurrentThread,
+            PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+            PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetProcessInformation, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+        },
+    },
 };
 
 pub use capture::monitors;
-
+use capture::Dup;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Params {
     pub monitor: u32,
+    /// Telefonun bildirdiği görüntü alanı (piksel). Kodlama boyutu buna sığar (en-boy korunur, büyütme yok).
     pub max_w: u32,
     pub max_h: u32,
+    /// Hedef kare hızı (uyarlama bunu kademe kademe düşürüp geri çıkarabilir).
     pub fps: u32,
+    /// 0 = otomatik (boyut ve fps'e göre tablo).
     pub bitrate_kbps: u32,
 }
 
@@ -31,8 +45,8 @@ pub struct Params {
 pub struct Sink {
     /// (pts_us, anahtar mı, Annex-B verisi) -> gönderildi mi (false = geri basınçla atıldı).
     pub send: Box<dyn Fn(u64, bool, Vec<u8>) -> bool + Send>,
-    /// pts_us -> (anahtar kare iste, gönderim kuyruğu gecikmesi ms)
-    pub feedback: Box<dyn Fn(u64) -> (bool, u64) + Send>,
+    /// `now_us` -> geri bildirim (anahtar kare iste, teslim gecikmesi, uçuştaki bayt, telefon istatistiği)
+    pub feedback: Box<dyn Fn(u64) -> ScreenFeedbackEx + Send>,
     pub on_status: Box<dyn Fn(Result<String, String>) + Send>,
     /// Güvenli masaüstü (UAC / kilit) açıldı (true) ya da kapandı (false).
     pub on_secure: Box<dyn Fn(bool) + Send>,
@@ -192,18 +206,58 @@ impl SecureMonitor {
     }
 }
 
+/// Gerçek zamanlı davranış: 1 ms sistem zamanlayıcı çözünürlüğü (varsayılan ~15,6 ms: her `sleep(1ms)` bir kare süresi
+/// uzar), Win11'de arka plan işleminin zamanlayıcı çözünürlüğünün yok sayılmaması, MMCSS "Playback" ve yüksek iş parçacığı önceliği.
+struct Realtime {
+    mmcss: Option<HANDLE>,
+}
+
+impl Realtime {
+    fn enter() -> Self {
+        unsafe {
+            timeBeginPeriod(1);
+            let st = PROCESS_POWER_THROTTLING_STATE {
+                Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask: PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+                StateMask: 0,
+            };
+            let _ = SetProcessInformation(
+                GetCurrentProcess(),
+                ProcessPowerThrottling,
+                &st as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+            );
+            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+            let mut idx = 0u32;
+            let mmcss = AvSetMmThreadCharacteristicsW(windows::core::w!("Playback"), &mut idx).ok();
+            Realtime { mmcss }
+        }
+    }
+}
+
+impl Drop for Realtime {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(h) = self.mmcss.take() {
+                let _ = AvRevertMmThreadCharacteristics(h);
+            }
+            timeEndPeriod(1);
+        }
+    }
+}
+
 fn thread_main(stop: Arc<AtomicBool>, key: Arc<AtomicBool>, gen_: Arc<AtomicU64>, cfg: Arc<Mutex<Params>>, sink: Sink) {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let _ = MFStartup(MF_VERSION, MFSTARTUP_FULL);
     }
-    let started = Instant::now();
+    let _rt = Realtime::enter();
     let mut mon = SecureMonitor::new();
     loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        match run_session(&stop, &key, &gen_, &cfg, &sink, started, &mut mon) {
+        match run_session(&stop, &key, &gen_, &cfg, &sink, &mut mon) {
             Ok(Exit::Stop) => break,
             Ok(Exit::Restart) => {
                 mon.poll(&sink, &key, true);
@@ -227,18 +281,51 @@ fn thread_main(stop: Arc<AtomicBool>, key: Arc<AtomicBool>, gen_: Arc<AtomicU64>
     }
 }
 
-fn run_session(
-    stop: &AtomicBool,
-    key: &AtomicBool,
-    gen_: &AtomicU64,
-    cfg: &Mutex<Params>,
-    sink: &Sink,
-    started: Instant,
-    smon: &mut SecureMonitor,
-) -> windows::core::Result<Exit> {
-    use capture::{Converter, Dup, GrabError, Source, Wgc, bgra_texture, create_gpu};
-    let seen_gen = gen_.load(Ordering::SeqCst);
-    let p = *cfg.lock().unwrap_or_else(|e| e.into_inner());
+/// Kodlama zinciri: GPU dönüştürücü + kodlayıcı + etkin boyut/fps/bit hızı.
+struct Chain {
+    conv: capture::Converter,
+    enc: encode::Encoder,
+    size: (u32, u32),
+    fps: u32,
+    kbps: u32,
+}
+
+/// İstenen parametreler + uyarlama kademesi → (boyut, fps, kbps).
+fn plan(src: (u32, u32), p: &Params, q: Quality) -> ((u32, u32), u32, u32) {
+    let fps = q.fps.min(p.fps).clamp(5, 60);
+    let size = choose_size(src.0, src.1, p.max_w, p.max_h, q.res_pct);
+    let kbps = target_bitrate_kbps(p.bitrate_kbps, size.0, size.1, fps, q.bitrate_pct);
+    (size, fps, kbps)
+}
+
+fn build_chain(gpu: &capture::Gpu, bgra: &ID3D11Texture2D, src: (u32, u32), p: &Params, q: Quality) -> windows::core::Result<Chain> {
+    let (size, fps, kbps) = plan(src, p, q);
+    let conv = capture::Converter::new(gpu, bgra, src.0, src.1, size.0, size.1, fps)?;
+    let enc = encode::Encoder::new(gpu, size.0, size.1, fps, kbps)?;
+    Ok(Chain { conv, enc, size, fps, kbps })
+}
+
+/// Uyarlama kademesi değişti: fps/boyut değiştiyse zinciri yeniden kur, yalnız bit hızıysa canlı güncelle.
+fn apply_quality(mut chain: Chain, gpu: &capture::Gpu, bgra: &ID3D11Texture2D, src: (u32, u32), p: &Params, q: Quality) -> windows::core::Result<(Chain, bool)> {
+    let (size, fps, kbps) = plan(src, p, q);
+    if size != chain.size || fps != chain.fps {
+        // Eski kodlayıcı/dönüştürücü önce bırakılır (bazı donanım MFT'ler tek örnek ister).
+        drop(chain);
+        return Ok((build_chain(gpu, bgra, src, p, q)?, true));
+    }
+    if kbps != chain.kbps {
+        chain.enc.set_bitrate(kbps);
+        chain.kbps = kbps;
+    }
+    Ok((chain, false))
+}
+
+const TICK: Duration = Duration::from_millis(500);
+
+fn run_session(stop: &AtomicBool, key: &AtomicBool, gen_: &AtomicU64, cfg: &Mutex<Params>, sink: &Sink, smon: &mut SecureMonitor) -> windows::core::Result<Exit> {
+    use capture::{GrabError, Source, Wgc, bgra_texture, create_gpu};
+    let mut seen_gen = gen_.load(Ordering::SeqCst);
+    let mut p = *cfg.lock().unwrap_or_else(|e| e.into_inner());
     let mons = monitors();
     let mon = mons
         .iter()
@@ -253,33 +340,76 @@ fn run_session(
         Ok(w) => Box::new(w),
         Err(_) => Box::new(Dup::new(&gpu, mon.hmon)?), // WGC yoksa DXGI Desktop Duplication (imleç çizilmez)
     };
-    let (sw, sh) = src.size();
-    let fps = p.fps.clamp(5, 60);
-    let (ow, oh) = fit_size(sw, sh, p.max_w, p.max_h);
-    let bgra = bgra_texture(&gpu.device, sw, sh)?;
-    let conv = Converter::new(&gpu, &bgra, sw, sh, ow, oh, fps)?;
-    let mut enc = encode::Encoder::new(&gpu, ow, oh, fps, p.bitrate_kbps)?;
-    (sink.on_status)(Ok(format!("{} · {} · {}x{}@{}", src.name(), enc.describe(), ow, oh, fps)));
+    let src_size = src.size();
+    let bgra = bgra_texture(&gpu.device, src_size.0, src_size.1)?;
+    let mut adaptor = Adaptor::new(p.fps);
+    let mut chain = build_chain(&gpu, &bgra, src_size, &p, adaptor.current())?;
+    (sink.on_status)(Ok(format!(
+        "{} · {} · {}x{}@{} · {} kbps (kaynak {}x{}, görüntü alanı {}x{})",
+        src.name(),
+        chain.enc.describe(),
+        chain.size.0,
+        chain.size.1,
+        chain.fps,
+        chain.kbps,
+        src_size.0,
+        src_size.1,
+        p.max_w,
+        p.max_h
+    )));
 
-    let interval = Duration::from_micros(1_000_000 / fps as u64);
+    let mut interval = Duration::from_micros(1_000_000 / chain.fps as u64);
     let mut next = Instant::now();
     let mut idx = 0usize;
     let mut dirty = false;
+    let mut cap_us = now_us(); // son yakalanan karenin zamanı (pts)
     let mut last_encode = Instant::now();
-    let mut cur_kbps = p.bitrate_kbps;
-    let mut last_adapt = Instant::now();
+    let mut last_sent = Instant::now();
+    // 1 sn günlük penceresi + 500 ms uyarlama penceresi
+    let mut win = StatsWindow::default();
+    let mut win_start = Instant::now();
+    let mut tick_start = Instant::now();
+    let (mut tick_lag_max, mut tick_skipped, mut tick_phone_drops) = (0u64, 0u32, 0u32);
+    let mut last_phone: Option<ScreenStatsReport> = None;
+    let mut last_dropped = 0u64;
     loop {
         if stop.load(Ordering::SeqCst) {
             return Ok(Exit::Stop);
         }
-        if gen_.load(Ordering::SeqCst) != seen_gen {
-            return Ok(Exit::Restart);
+        let g = gen_.load(Ordering::SeqCst);
+        if g != seen_gen {
+            // Canlı yeniden müzakere (döndürme/görüntü alanı/kalite/fps): yakalama oturumu AYNI kalır, yalnız zincir yeniden kurulur.
+            seen_gen = g;
+            let np = *cfg.lock().unwrap_or_else(|e| e.into_inner());
+            if np.monitor != p.monitor {
+                return Ok(Exit::Restart); // monitör değişimi: yakalama kaynağı yeniden kurulur
+            }
+            if np.fps != p.fps {
+                adaptor = Adaptor::new(np.fps);
+            }
+            p = np;
+            let (c, rebuilt) = apply_quality(chain, &gpu, &bgra, src_size, &p, adaptor.current())?;
+            chain = c;
+            log::info!(
+                "ekran paylaşımı: yeniden müzakere {}x{}@{} {} kbps ({}) görüntü alanı {}x{}",
+                chain.size.0,
+                chain.size.1,
+                chain.fps,
+                chain.kbps,
+                if rebuilt { "zincir yenilendi" } else { "canlı" },
+                p.max_w,
+                p.max_h
+            );
+            interval = Duration::from_micros(1_000_000 / chain.fps as u64);
+            key.store(true, Ordering::SeqCst);
         }
         let wait = interval.as_millis().min(8) as u32;
         match src.grab(&bgra, &gpu.ctx, wait) {
             Ok(new) => {
                 dirty |= new;
                 if new {
+                    cap_us = now_us();
+                    win.grabs += 1;
                     smon.frame(sink, key);
                 }
             }
@@ -287,39 +417,90 @@ fn run_session(
         }
         smon.poll(sink, key, false);
         if key.swap(false, Ordering::SeqCst) {
-            enc.force_key();
+            chain.enc.force_key();
             dirty = true;
         }
         if last_encode.elapsed() > Duration::from_secs(2) && !smon.secure() {
             dirty = true; // durağan ekranda da zaman zaman tazele
+            cap_us = now_us();
         }
+
+        // ---- 500 ms uyarlama + 1 sn günlük
+        if tick_start.elapsed() >= TICK {
+            tick_start = Instant::now();
+            let v = verdict(tick_lag_max, tick_skipped, tick_phone_drops);
+            (tick_lag_max, tick_skipped, tick_phone_drops) = (0, 0, 0);
+            if let Some(nq) = adaptor.tick(v) {
+                log::info!(
+                    "ekran paylaşımı: kalite kademesi L{} → {} fps, %{} bit hızı, %{} çözünürlük",
+                    adaptor.level(),
+                    nq.fps,
+                    nq.bitrate_pct,
+                    nq.res_pct
+                );
+                let (c, rebuilt) = apply_quality(chain, &gpu, &bgra, src_size, &p, nq)?;
+                chain = c;
+                if rebuilt {
+                    interval = Duration::from_micros(1_000_000 / chain.fps as u64);
+                    key.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+        if win_start.elapsed() >= Duration::from_secs(1) {
+            let secs = win_start.elapsed().as_secs_f64();
+            win_start = Instant::now();
+            log::info!("{}", win.line(secs, chain.kbps, chain.size, adaptor.current(), adaptor.level()));
+            if let Some(r) = last_phone {
+                log::info!("{}", phone_line(&r));
+            }
+            win = StatsWindow::default();
+        }
+
         let now = Instant::now();
         if !dirty || now < next {
+            continue;
+        }
+        // ---- üretim kapısı: alıcı onayı geride kaldıysa YENİ KARE ÜRETME (kodlayıcıya verme). En yeni kare sonra gider.
+        let fb = (sink.feedback)(now_us());
+        if fb.want_key {
+            chain.enc.force_key();
+            dirty = true;
+        }
+        win.lag(fb.lag_ms, fb.pending, fb.inflight_bytes);
+        tick_lag_max = tick_lag_max.max(fb.lag_ms);
+        if fb.dropped_total > last_dropped {
+            let d = (fb.dropped_total - last_dropped) as u32;
+            win.dropped += d;
+            tick_skipped += d;
+            last_dropped = fb.dropped_total;
+        }
+        if let Some(r) = fb.phone
+            && Some(r) != last_phone
+        {
+            tick_phone_drops += r.late_drops as u32;
+            last_phone = Some(r);
+        }
+        if fb.ack_mode && fb.lag_ms > SKIP_LAG_MS && last_sent.elapsed() < Duration::from_millis(500) {
+            win.skipped += 1;
+            tick_skipped += 1;
+            next = now + interval / 2;
             continue;
         }
         next = (next + interval).max(now.checked_sub(interval).unwrap_or(now));
         dirty = false;
         last_encode = now;
 
-        conv.convert(idx)?;
-        let pts_100ns = started.elapsed().as_nanos() as i64 / 100;
-        let frames = enc.encode(&gpu, &conv.nv12[idx], pts_100ns)?;
+        let t_enc = Instant::now();
+        chain.conv.convert(idx)?;
+        let frames = chain.enc.encode(&gpu, &chain.conv.nv12[idx], (cap_us * 10) as i64)?;
+        let call_us = t_enc.elapsed().as_micros() as u64;
         idx = (idx + 1) % capture::RING;
         for f in frames {
             let pts_us = (f.pts_100ns / 10) as u64;
-            let (want_key, backlog) = (sink.feedback)(pts_us);
-            if want_key {
-                enc.force_key();
-                dirty = true;
-            }
-            (sink.send)(pts_us, f.key, f.data);
-            if last_adapt.elapsed() > Duration::from_millis(500) {
-                last_adapt = Instant::now();
-                let nk = adapt_bitrate(cur_kbps, p.bitrate_kbps, backlog);
-                if nk.abs_diff(cur_kbps) * 20 > cur_kbps {
-                    cur_kbps = nk;
-                    enc.set_bitrate(nk);
-                }
+            let (len, is_key) = (f.data.len(), f.key);
+            win.encoded(is_key, len, call_us, now_us().saturating_sub(pts_us));
+            if (sink.send)(pts_us, is_key, f.data) {
+                last_sent = Instant::now();
             }
         }
     }
