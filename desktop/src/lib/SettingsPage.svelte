@@ -35,6 +35,12 @@
     flash('Bildirimler tekrar açıldı')
   }
 
+  async function revokeScreen(id: string) {
+    s.settings.screenAllowed = s.settings.screenAllowed.filter((p) => p !== id)
+    await call('revoke_screen_allowed', { id })
+    flash('Bu cihaz için ekran izni kaldırıldı')
+  }
+
   async function checkNow() {
     checking = true
     const found = await call<boolean>('check_update')
@@ -103,6 +109,16 @@
   <section class="card group">
     <h3>Pano ve bildirimler</h3>
     {@render item('Uzaktan ekran görüntüleme', 'Telefon bu bilgisayarın ekranını görüp fare ve klavyeyi kullanabilir. Her yeni telefon için ilk seferde onay sorulur; paylaşırken üstte bir gösterge görünür.', 'screenShare')}
+    {#if s.settings.screenAllowed.length}
+      <div class="sub">
+        <div class="ih">Ekranı her zaman görebilen cihazlar</div>
+        <div class="muted-list">
+          {#each s.settings.screenAllowed as id (id)}
+            <span class="chip">{s.peers.find((p) => p.id === id)?.name ?? id.slice(0, 8)}<button class="ghost icon sm x" title="İzni kaldır" onclick={() => revokeScreen(id)}><Icon name="x" size={12} /></button></span>
+          {/each}
+        </div>
+      </div>
+    {/if}
     {@render item('Pano eşitleme', 'Kopyaladığın metin telefonda da kopyalanmış olur.', 'clipboardSync')}
     {@render item('Telefon bildirimlerini göster', 'Kapatırsan telefon bildirimleri hiç alınmaz; ses ve uyarı da durur.', 'notifMirror')}
     {#if s.settings.notifMirror}

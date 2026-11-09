@@ -194,6 +194,7 @@ pub fn run() {
             commands::snapshot,
             commands::pairing,
             commands::unpair,
+            commands::revoke_screen_allowed,
             commands::send_paths,
             commands::pick_and_send,
             commands::pause_transfer,

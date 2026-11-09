@@ -56,6 +56,7 @@
   async function unpair(id: string, name: string) {
     if (!confirm(`${name} eşleşmesi kaldırılsın mı?`)) return
     await call('unpair', { id })
+    s.settings.screenAllowed = s.settings.screenAllowed.filter((p) => p !== id)
     s.peers = s.peers.filter((p) => p.id !== id)
     flash('Eşleşme kaldırıldı')
   }

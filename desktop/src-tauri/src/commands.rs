@@ -95,7 +95,28 @@ pub fn pairing(s: S<'_>) -> Result<Pairing, String> {
 
 #[tauri::command]
 pub fn unpair(s: S<'_>, id: String) -> Result<(), String> {
-    node(&s)?.unpair(id);
+    node(&s)?.unpair(id.clone());
+    // Eşleşme kalkınca "her zaman izin ver" de kalkar.
+    revoke_screen(&s, &id);
+    Ok(())
+}
+
+fn revoke_screen(s: &Shared, id: &str) {
+    let changed = {
+        let mut st = lk(&s.settings);
+        let n = st.screen_allowed.len();
+        st.screen_allowed.retain(|x| x != id);
+        st.screen_allowed.len() != n
+    };
+    if changed {
+        s.save_settings();
+    }
+}
+
+/// Ayarlardan: bir cihazın "Her zaman izin ver" iznini geri al.
+#[tauri::command]
+pub fn revoke_screen_allowed(s: S<'_>, id: String) -> Result<(), String> {
+    revoke_screen(&s, &id);
     Ok(())
 }
 
