@@ -12,6 +12,9 @@ pub const ALPN: &[u8] = b"kopru/1";
 pub const CAP_NOTIF_REPLY: &str = "notif-reply";
 /// Yetenek: ekran paylaşımı (Screen* mesajları + video akışı). İki taraf da duyurmadıkça kullanılmaz.
 pub const CAP_SCREEN: &str = "screen-share";
+/// Yetenek: ekran paylaşımı ayarlama/teşhis (ScreenAck / ScreenStats / ScreenPing / ScreenPong + mutlak işaretçi datagramı).
+/// Ack, gerçek ağ/alıcı gecikmesini ölçmenin tek yoludur (QUIC yazma çağrısı büyük pencere yüzünden hemen döner).
+pub const CAP_SCREEN_TUNE: &str = "screen-tune";
 /// Yetenek: telefon kamerası (Cam* mesajları + kamera video akışı). Masaüstü yalnızca Windows 11'de duyurur.
 pub const CAP_CAMERA: &str = "camera";
 /// Yetenek: T-Suite ekosistem köprüsü (SuiteApps/SuiteEvent/SuiteCmd/SuiteReply). Uygulamaya özgü varyant YOK: yeni uygulamalar otomatik görünür.
@@ -19,7 +22,7 @@ pub const CAP_SUITE: &str = "suite";
 
 /// Bu sürümün duyurduğu yetenekler (Hello/Welcome sonuna eklenir; eski eş sondaki baytları yok sayar).
 pub fn local_caps() -> Vec<String> {
-    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string(), CAP_SUITE.to_string()];
+    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string(), CAP_SUITE.to_string(), CAP_SCREEN_TUNE.to_string()];
     if crate::camera::camera_cap() {
         v.push(CAP_CAMERA.to_string());
     }
@@ -142,6 +145,15 @@ pub enum Msg {
     /// PC -> telefon: güvenli masaüstü (UAC / Ctrl+Alt+Del / kilit ekranı) açık; yakalama geçici olarak durdu. `secure=false` = devam.
     /// Tanımayan eş çerçeveyi atlar (decode_msg -> None); yine de yalnızca `screen-share` duyuran eşe gönderilir.
     ScreenNotice { secure: bool },
+    // ---- yalnızca `screen-tune` yeteneğini duyuran eşlere gönderilir (varyant dizini SONA eklenir) ----
+    /// Telefon -> PC: `pts_us` dahil öncesindeki tüm video karelerini aldım (geri basınç + gecikme ölçümü).
+    ScreenAck { pts_us: u64 },
+    /// Telefon -> PC: saniyelik alıcı istatistikleri (günlük + uyarlama).
+    ScreenStats(ScreenStatsReport),
+    /// Saat senkronu: gönderen kendi saatini (`t0_us`, `screen::now_us`) yollar.
+    ScreenPing { seq: u32, t0_us: u64 },
+    /// Saat senkronu yanıtı: `t0_us` aynen geri, `t1_us` = yanıtlayanın saati.
+    ScreenPong { seq: u32, t0_us: u64, t1_us: u64 },
 }
 
 /// Sürüm 1 el sıkışması (caps alanından önceki biçim): eski eşten gelen Hello/Welcome çözümlemesi için.
@@ -171,6 +183,8 @@ pub fn decode_msg(buf: &[u8]) -> Option<Msg> {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Datagram {
     Move { dx: i16, dy: i16 },
+    /// Mutlak işaretçi (ekran görüntüleyici; 0..1) — yalnızca `screen-tune` duyuran eşe gönderilir.
+    Abs { x: f32, y: f32, monitor: u8 },
 }
 
 pub fn encode(msg: &Msg) -> Result<Vec<u8>> {
@@ -228,6 +242,21 @@ mod tests {
         assert_eq!(back, m);
         let d = Datagram::Move { dx: -5, dy: 300 };
         assert_eq!(decode_datagram(&encode_datagram(&d)), Some(d));
+    }
+
+    #[test]
+    fn screen_tune_messages_and_datagram_roundtrip() {
+        let stats = ScreenStatsReport { rx_fps10: 298, render_fps10: 295, decode_ms10: 61, recv_to_render_ms10: 90, e2e_ms: 58, e2e_max_ms: 120, late_drops: 1, input_waits: 2, queue_max: 3, rtt_ms10: 42 };
+        for m in [Msg::ScreenAck { pts_us: 77 }, Msg::ScreenStats(stats), Msg::ScreenPing { seq: 3, t0_us: 9 }, Msg::ScreenPong { seq: 3, t0_us: 9, t1_us: 11 }] {
+            let e = encode(&m).unwrap();
+            assert_eq!(decode_msg(&e[4..]), Some(m));
+        }
+        let d = Datagram::Abs { x: 0.25, y: 0.75, monitor: 1 };
+        assert_eq!(decode_datagram(&encode_datagram(&d)), Some(d));
+        // Eski çerçeve (ScreenNotice) hâlâ aynı varyant dizininde
+        let n = Msg::ScreenNotice { secure: true };
+        assert_eq!(decode_msg(&encode(&n).unwrap()[4..]), Some(n));
+        assert!(local_caps().iter().any(|c| c == CAP_SCREEN_TUNE));
     }
 
     #[test]

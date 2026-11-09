@@ -210,6 +210,52 @@ pub struct MonitorInfo {
     pub primary: bool,
 }
 
+/// Telefonun saniyelik ekran alıcı istatistikleri (PC günlüğü + uyarlama girdisi). Ondalıklı değerler ×10 tamsayıdır.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
+pub struct ScreenStatsReport {
+    /// Alınan kare/sn ×10.
+    pub rx_fps10: u16,
+    /// Ekrana çizilen kare/sn ×10.
+    pub render_fps10: u16,
+    /// Çözücü girişi → çıkış ortalaması (ms ×10).
+    pub decode_ms10: u16,
+    /// Ağdan alındı → çizildi ortalaması (ms ×10).
+    pub recv_to_render_ms10: u16,
+    /// Uçtan uca (PC yakalama → telefon çizim) ortalama ve en büyük (ms); saat senkronu yoksa 0.
+    pub e2e_ms: u16,
+    pub e2e_max_ms: u16,
+    /// Geç/dolu çözücü nedeniyle atılan kare sayısı.
+    pub late_drops: u16,
+    /// Çözücü girişi için bekleme zaman aşımı sayısı.
+    pub input_waits: u16,
+    /// Çözücü kuyruğunda bekleyen en çok kare.
+    pub queue_max: u16,
+    /// Saat senkronu ağ gidiş-dönüş süresi (ms ×10).
+    pub rtt_ms10: u16,
+}
+
+/// PC içi (uniffi dışı): video üretimi öncesi geri bildirim.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScreenFeedbackEx {
+    pub want_key: bool,
+    /// Teslim edilmemiş en eski kareden şimdiye (ms).
+    pub lag_ms: u64,
+    pub inflight_bytes: usize,
+    pub pending: u32,
+    pub dropped_total: u64,
+    pub ack_mode: bool,
+    /// Telefonun son (≤3 sn eski) alıcı istatistikleri.
+    pub phone: Option<ScreenStatsReport>,
+}
+
+/// Telefon saat kestirimi: `pc_time = yerel_time + offset_us` (screen_now_us saatinde).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenClock {
+    pub valid: bool,
+    pub offset_us: i64,
+    pub rtt_us: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct ScreenFeedback {
     pub want_key: bool,
@@ -275,7 +321,8 @@ pub enum Event {
     /// Telefonda: PC güvenli masaüstüne geçti (`secure=true`, yakalama durur) ya da geri döndü.
     ScreenNotice { secure: bool },
     /// Telefonda: kodlanmış H.264 (Annex-B) video karesi.
-    ScreenFrame { pts_us: u64, key: bool, data: Vec<u8> },
+    /// `recv_us` = karenin ağdan tam alındığı an (`screen_now_us` saatinde).
+    ScreenFrame { pts_us: u64, recv_us: u64, key: bool, data: Vec<u8> },
     /// Telefonda: T-Suite uygulama listesi.
     SuiteApps { apps: Vec<SuiteApp> },
     /// Telefonda: bir T-Suite uygulamasının olayı.

@@ -42,6 +42,12 @@ pub fn set_camera_capability(on: bool) {
     camera::set_camera_cap(on);
 }
 
+/// Ekran paylaşımı saati (µs, süreç içi monoton). Karelerin `pts_us` değerleri PC'de bu saatten alınır.
+#[uniffi::export]
+pub fn screen_now_us() -> u64 {
+    screen::now_us()
+}
+
 #[derive(uniffi::Object)]
 pub struct Node {
     inner: Arc<Inner>,
@@ -69,6 +75,16 @@ impl Node {
     /// Tarama penceresi açık mı.
     pub fn is_scanning(&self) -> bool {
         self.inner.is_scanning()
+    }
+
+    /// PC: kodlayıcıya kare vermeden önce ayrıntılı geri bildirim (ack tabanlı gecikme, uçuştaki bayt, telefon istatistiği).
+    pub fn screen_feedback_ex(&self, now_us: u64) -> ScreenFeedbackEx {
+        self.inner.screen_feedback_ex(now_us)
+    }
+
+    /// Eş `screen-tune` (ack, istatistik, saat senkronu, datagram işaretçi) duyuruyor mu.
+    pub fn peer_supports_screen_tune(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_SCREEN_TUNE))
     }
 
     /// Tarama penceresi süresini değiştirir (varsayılan 25 sn; testler için).
@@ -298,6 +314,26 @@ impl Node {
 
     pub fn send_screen_pointer(&self, x: f32, y: f32, monitor: u32) -> bool {
         self.peer_supports_screen() && self.inner.send_msg(Msg::ScreenPointer { x, y, monitor })
+    }
+
+    /// Mutlak işaretçi, düşük gecikme yolu: destekleyen PC'ye datagram (güvenilmez, sırada beklemez), değilse kontrol mesajı.
+    pub fn send_screen_pointer_fast(&self, x: f32, y: f32, monitor: u32) -> bool {
+        self.inner.send_screen_pointer_fast(x, y, monitor)
+    }
+
+    /// Telefon: saniyelik alıcı istatistiklerini PC'ye gönder (`screen-tune` yoksa yok sayılır).
+    pub fn send_screen_stats(&self, r: ScreenStatsReport) -> bool {
+        self.peer_supports_screen_tune() && self.inner.send_msg(Msg::ScreenStats(r))
+    }
+
+    /// Telefon: PC ile saat senkronu döngüsünü aç/kapat (ekran görüntülenirken açık).
+    pub fn screen_sync(&self, on: bool) {
+        self.inner.screen_sync(on)
+    }
+
+    /// Telefon: saat kestirimi (`pc_zamanı = screen_now_us() + offset_us`). Henüz örnek yoksa `valid=false`.
+    pub fn screen_clock(&self) -> ScreenClock {
+        self.inner.screen_clock()
     }
 
     pub fn send_screen_info(&self, monitors: Vec<MonitorInfo>, current: u32, active: bool, error: Option<String>) -> bool {

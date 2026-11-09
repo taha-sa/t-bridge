@@ -107,10 +107,10 @@ mod video_slot_tests {
         drop(rx); // yazıcı görevi öldü
         assert!(reset_if_dead(&mut slot));
         assert!(slot.is_none());
-        let mut g = Gate::awaiting_key();
-        assert_eq!(g.offer(0, false), Offer::Drop); // P kare atılır
+        let mut g = Gate::awaiting_key(false);
+        assert_eq!(g.offer(0, false, 1), Offer::Drop); // P kare atılır
         assert!(g.take_want_key()); // anahtar kare istenir
-        assert_eq!(g.offer(1, true), Offer::Accept);
+        assert_eq!(g.offer(1, true, 1), Offer::Accept);
     }
 }
 
@@ -183,6 +183,11 @@ pub(crate) struct Inner {
     screen_out: Mutex<Option<ScreenOut>>,
     /// Telefon: etkin kamera video akışı çıkışı.
     cam_out: Mutex<Option<ScreenOut>>,
+    /// Telefon: PC ile saat farkı kestirimi (ping/pong), PC: telefonun son alıcı istatistikleri.
+    clock: Mutex<crate::screen::ClockSync>,
+    sync_on: AtomicBool,
+    sync_seq: AtomicU64,
+    phone_stats: Mutex<Option<(Instant, ScreenStatsReport)>>,
     active_in: Mutex<HashMap<u64, Arc<AtomicU8>>>,
     inc_persist: Mutex<IncPersist>,
     transfers: Mutex<BTreeMap<(u8, u64), TransferInfo>>,
@@ -253,6 +258,10 @@ impl Inner {
             inc_open: Mutex::new(HashMap::new()),
             screen_out: Mutex::new(None),
             cam_out: Mutex::new(None),
+            clock: Mutex::new(Default::default()),
+            sync_on: AtomicBool::new(false),
+            sync_seq: AtomicU64::new(0),
+            phone_stats: Mutex::new(None),
             active_in: Mutex::new(HashMap::new()),
             inc_persist: Mutex::new(inc_persist),
             transfers: Mutex::new(transfers),
@@ -809,8 +818,12 @@ impl Inner {
         let c = conn.clone();
         self.rt.spawn(async move {
             while let Ok(b) = c.read_datagram().await {
-                if let Some(Datagram::Move { dx, dy }) = proto::decode_datagram(&b) {
-                    me.emit(Event::PointerMove { dx: dx as i32, dy: dy as i32 });
+                match proto::decode_datagram(&b) {
+                    Some(Datagram::Move { dx, dy }) => me.emit(Event::PointerMove { dx: dx as i32, dy: dy as i32 }),
+                    Some(Datagram::Abs { x, y, monitor }) => {
+                        me.emit(Event::Screen { cmd: ScreenCmd::Pointer { x, y, monitor: monitor as u32 } })
+                    }
+                    None => {}
                 }
             }
         });
@@ -911,6 +924,18 @@ impl Inner {
             Msg::SuiteCmd { req, app, name, json } => self.emit(Event::SuiteCmd { req, app, name, json }),
             Msg::SuiteReply { req, ok, json, error } => self.emit(Event::SuiteReply { req, ok, json, error }),
             Msg::ScreenNotice { secure } => self.emit(Event::ScreenNotice { secure }),
+            Msg::ScreenAck { pts_us } => {
+                if let Some(o) = lk(&self.screen_out).as_ref() {
+                    lk(&o.gate).ack(pts_us);
+                }
+            }
+            Msg::ScreenStats(r) => *lk(&self.phone_stats) = Some((Instant::now(), r)),
+            Msg::ScreenPing { seq, t0_us } => {
+                s.send(Msg::ScreenPong { seq, t0_us, t1_us: crate::screen::now_us() });
+            }
+            Msg::ScreenPong { t0_us, t1_us, .. } => {
+                lk(&self.clock).sample(t0_us, t1_us, crate::screen::now_us());
+            }
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
             Msg::Pc(cmd) => self.emit(Event::Pc { cmd }),
@@ -1500,7 +1525,7 @@ impl Inner {
     }
 
     /// Telefon: PC'nin video akışını okur, kareleri `ScreenFrame` olayı olarak iletir.
-    async fn receive_video(self: &Arc<Self>, mut recv: RecvStream, cam: bool) -> Result<()> {
+    async fn receive_video(self: &Arc<Self>, s: &Arc<Session>, mut recv: RecvStream, cam: bool) -> Result<()> {
         use crate::screen::{FrameHeader, HEADER_LEN};
         loop {
             let mut hb = [0u8; HEADER_LEN];
@@ -1512,10 +1537,15 @@ impl Inner {
             let h = FrameHeader::decode(&hb).ok_or_else(|| anyhow!("geçersiz video çerçevesi"))?;
             let mut data = vec![0u8; h.len as usize];
             recv.read_exact(&mut data).await.context("video verisi")?;
+            let recv_us = crate::screen::now_us();
             if cam {
                 self.emit(Event::CamFrame { pts_us: h.pts_us, key: h.key, data });
             } else {
-                self.emit(Event::ScreenFrame { pts_us: h.pts_us, key: h.key, data });
+                // Alındı bildirimi: PC gerçek ağ/alıcı gecikmesini yalnızca bundan görür (QUIC tamponu yazmayı hemen onaylar).
+                if s.has_cap(proto::CAP_SCREEN_TUNE) {
+                    s.send(Msg::ScreenAck { pts_us: h.pts_us });
+                }
+                self.emit(Event::ScreenFrame { pts_us: h.pts_us, recv_us, key: h.key, data });
             }
         }
     }
@@ -1549,7 +1579,8 @@ impl Inner {
         let recovering = reset_if_dead(&mut g);
         if g.is_none() {
             let (tx, mut rx) = mpsc::unbounded_channel::<(FrameHeader, Vec<u8>)>();
-            let gate = Arc::new(Mutex::new(if recovering { crate::screen::Gate::awaiting_key() } else { crate::screen::Gate::new() }));
+            let ack = cap == proto::CAP_SCREEN && s.has_cap(proto::CAP_SCREEN_TUNE);
+            let gate = Arc::new(Mutex::new(if recovering { crate::screen::Gate::awaiting_key(ack) } else { crate::screen::Gate::with_ack(ack) }));
             let (gate2, conn) = (gate.clone(), s.conn.clone());
             self.rt.spawn(async move {
                 let Ok(mut stream) = conn.open_uni().await else { return };
@@ -1568,7 +1599,7 @@ impl Inner {
             *g = Some(ScreenOut { tx, gate });
         }
         let out = g.as_ref().unwrap();
-        let offer = lk(&out.gate).offer(pts_us, key);
+        let offer = lk(&out.gate).offer(pts_us, key, data.len() as u32);
         if offer == Offer::Drop {
             return false;
         }
@@ -1605,6 +1636,70 @@ impl Inner {
         }
     }
 
+    /// PC: üretim öncesi ayrıntılı geri bildirim (şimdi = `screen::now_us` saatinde).
+    pub fn screen_feedback_ex(&self, now_us: u64) -> ScreenFeedbackEx {
+        let phone = lk(&self.phone_stats).filter(|(t, _)| t.elapsed() < Duration::from_secs(3)).map(|(_, r)| r);
+        match lk(&self.screen_out).as_ref() {
+            Some(o) => {
+                let mut g = lk(&o.gate);
+                ScreenFeedbackEx {
+                    want_key: g.take_want_key(),
+                    lag_ms: g.lag_ms(now_us),
+                    inflight_bytes: g.inflight_bytes(),
+                    pending: g.pending() as u32,
+                    dropped_total: g.dropped,
+                    ack_mode: g.ack_mode(),
+                    phone,
+                }
+            }
+            None => ScreenFeedbackEx { phone, ..Default::default() },
+        }
+    }
+
+    /// Telefon: saat senkronu döngüsünü aç/kapat (görüntüleme sürerken ~1 sn'de bir ping; başta sık).
+    pub fn screen_sync(self: &Arc<Self>, on: bool) {
+        let was = self.sync_on.swap(on, Ordering::SeqCst);
+        if !on || was {
+            return;
+        }
+        lk(&self.clock).clear();
+        let me = self.clone();
+        self.rt.spawn(async move {
+            let mut n = 0u32;
+            while me.sync_on.load(Ordering::SeqCst) {
+                let Some(s) = me.session() else { break };
+                if s.has_cap(proto::CAP_SCREEN_TUNE) {
+                    let seq = me.sync_seq.fetch_add(1, Ordering::Relaxed) as u32;
+                    s.send(Msg::ScreenPing { seq, t0_us: crate::screen::now_us() });
+                }
+                n += 1;
+                sleep(if n < 8 { Duration::from_millis(150) } else { Duration::from_millis(1000) }).await;
+            }
+            me.sync_on.store(false, Ordering::SeqCst);
+        });
+    }
+
+    pub fn screen_clock(&self) -> ScreenClock {
+        match lk(&self.clock).best() {
+            Some((rtt, off)) => ScreenClock { valid: true, offset_us: off, rtt_us: rtt },
+            None => ScreenClock::default(),
+        }
+    }
+
+    /// Mutlak işaretçi: `screen-tune` duyuran PC'ye datagram (kayıp olabilir, kuyrukta beklemez), diğerine kontrol mesajı.
+    pub fn send_screen_pointer_fast(&self, x: f32, y: f32, monitor: u32) -> bool {
+        let Some(s) = self.session() else { return false };
+        if !s.has_cap(proto::CAP_SCREEN) {
+            return false;
+        }
+        if s.has_cap(proto::CAP_SCREEN_TUNE) {
+            let d = Datagram::Abs { x, y, monitor: monitor.min(255) as u8 };
+            return s.conn.send_datagram(proto::encode_datagram(&d).into()).is_ok();
+        }
+        s.send(Msg::ScreenPointer { x, y, monitor });
+        true
+    }
+
     /// PC: paylaşım bitti; video akışı kapatılır (yeni oturum yeni akış açar).
     pub fn end_screen_stream(&self) {
         *lk(&self.screen_out) = None;
@@ -1615,10 +1710,10 @@ impl Inner {
         recv.read_exact(&mut idb).await?;
         let id = u64::from_le_bytes(idb);
         if id == crate::screen::VIDEO_MAGIC {
-            return self.receive_video(recv, false).await;
+            return self.receive_video(s, recv, false).await;
         }
         if id == crate::camera::CAM_MAGIC {
-            return self.receive_video(recv, true).await;
+            return self.receive_video(s, recv, true).await;
         }
         let Some(open) = lk(&self.inc_open).remove(&id) else {
             let _ = recv.stop(RESET_CANCEL.into());
