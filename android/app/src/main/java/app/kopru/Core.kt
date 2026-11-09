@@ -116,7 +116,7 @@ object Core : Host {
     override fun onEvent(event: Event) {
         when (event) {
             is Event.State -> {
-                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
+                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); Suite.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
                 _ui.update { it.copy(conn = event.state, peer = event.peer, peers = node?.peers() ?: it.peers) }
                 main.post { KopruService.onConnState(event.state) }
             }

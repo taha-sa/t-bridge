@@ -131,9 +131,10 @@ object Screen {
                 return
             }
             try {
-                val i = c.dequeueInputBuffer(0)
+                // Kısa bekleme (~10 ms): anlık doluluk anahtar kare fırtınası yaratmasın; yalnız kalıcı dolulukta at.
+                val i = c.dequeueInputBuffer(10_000)
                 if (i < 0) {
-                    // Çözücü dolu: kareyi at, sonraki anahtar kareye kadar P'leri de at (görüntü bozulmasın).
+                    // Çözücü kalıcı dolu: kareyi at, sonraki anahtar kareye kadar P'leri de at (görüntü bozulmasın).
                     needKey = true
                     requestKey(now)
                     return

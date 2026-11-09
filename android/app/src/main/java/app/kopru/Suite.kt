@@ -52,6 +52,9 @@ object Suite {
     private var ramHighSince = 0L
     private var ramLastNotified = 0L
 
+    /** Bağlantı koptu: bayat indirme ilerlemesini temizle (PC bağlanınca SuiteEvent ile yeniden dolar). */
+    fun onDisconnected() = _ui.update { it.copy(downloads = emptyMap()) }
+
     fun init(c: Context) {
         ctx = c.applicationContext
         val p = ctx.getSharedPreferences("eco", Context.MODE_PRIVATE)
