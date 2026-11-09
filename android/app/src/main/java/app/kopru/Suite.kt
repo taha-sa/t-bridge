@@ -86,9 +86,18 @@ object Suite {
         n.sendSuiteCmd(req.toULong(), app, name, json)
     }
 
+    /** "disk_full;free=..;needed=.." gibi makine hatalarını kullanıcı metnine çevirir. */
+    fun friendlyError(error: String?): String? {
+        if (error == null || !error.startsWith("disk_full")) return error
+        val free = Regex("""free=(\d+)""").find(error)?.groupValues?.get(1)?.toLongOrNull()
+        return "Bilgisayarda yer yok" + (if (free != null) " (" + fmtMb(free / 1048576.0) + " boş)" else "")
+    }
+
     fun onReply(req: Long, ok: Boolean, json: String, error: String?) {
         val cb = synchronized(callbacks) { callbacks.remove(req) } ?: return
-        cb(ok, runCatching { JSONObject(json) }.getOrNull(), error)
+        val err = friendlyError(error)
+        if (!ok && error != null && error.startsWith("disk_full")) toast(err ?: "Bilgisayarda yer yok")
+        cb(ok, runCatching { JSONObject(json) }.getOrNull(), err)
     }
 
     fun ramClean(full: Boolean) = send("t-ramcash", "ram.clean", """{"mode":"${if (full) "full" else "smart"}"}""") { ok, r, err ->
@@ -118,6 +127,7 @@ object Suite {
     fun onEvent(app: String, name: String, json: String) {
         val o = runCatching { JSONObject(json) }.getOrDefault(JSONObject())
         when {
+            app == "t-bridge" && name == "file.open" -> ViewerLink.expectOpen(o.optString("name"))
             name == "download.progress" -> _ui.update {
                 val id = o.optString("id")
                 it.copy(downloads = it.downloads + (id to DlItem(id, o.optString("name"), o.optDouble("pct"), o.optDouble("speed"), o.optLong("bytes"), o.optLong("total"), o.optString("state") == "paused")))

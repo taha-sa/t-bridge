@@ -251,15 +251,17 @@ class KopruService : Service() {
     private fun notifyReceived(t: TransferInfo) {
         val path = t.detail ?: return
         val uri = IncomingFiles.findByPath(path)
+        val name = t.name.substringAfterLast('/')
+        val autoOpen = uri != null && ViewerLink.consumeOpen(name)
+        if (autoOpen && uri != null) runCatching { ViewerLink.open(this, uri, name) }   // arka plandaysa Android engelleyebilir: bildirim yedek
         val view = uri?.let {
-            val i = Intent(Intent.ACTION_VIEW).setDataAndType(it, contentResolver.getType(it) ?: "*/*")
+            val i = if (autoOpen) ViewerLink.openIntent(this, it, name) else Intent(Intent.ACTION_VIEW).setDataAndType(it, contentResolver.getType(it) ?: "*/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             PendingIntent.getActivity(this, (t.id % 100000uL).toInt(), i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
-        val name = t.name.substringAfterLast('/')
         val n = Notification.Builder(this, CH_EVENTS)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("Dosya alındı")
+            .setContentTitle(if (autoOpen) "Dosya alındı · dokunarak aç" else "Dosya alındı")
             .setContentText(name)
             .setAutoCancel(true)
             .apply { if (view != null) setContentIntent(view) }

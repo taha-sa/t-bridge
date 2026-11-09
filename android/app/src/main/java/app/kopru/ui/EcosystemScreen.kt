@@ -2,6 +2,7 @@ package app.kopru.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +30,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.kopru.ViewerLink
 import app.kopru.Core
 import app.kopru.DlDone
 import app.kopru.DlItem
@@ -46,6 +53,15 @@ fun EcosystemScreen(ui: UiState) {
     val s by Suite.ui.collectAsStateWithLifecycle()
     val on = ui.conn == ConnState.CONNECTED && Suite.supported()
     fun running(id: String) = s.apps.any { it.id == id && it.running }
+
+    val ctx = LocalContext.current
+    val viewer by ViewerLink.state.collectAsStateWithLifecycle()
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) ViewerLink.refresh(ctx) }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
 
     LaunchedEffect(on, running("t-desktree")) {
         while (on && running("t-desktree")) { Suite.refreshDisks(); delay(60_000) }
@@ -68,6 +84,7 @@ fun EcosystemScreen(ui: UiState) {
         }
 
         if (!on) {
+            if (viewer.installed) TbCard { SectionTitle("Telefondaki uygulamalar"); Spacer8(); ViewerRow(viewer) }
             TbCard {
                 Text(
                     if (ui.conn != ConnState.CONNECTED) "Bilgisayara bağlanınca T-Suite uygulamaları burada görünür." else "Bilgisayardaki T-Bridge sürümü ekosistemi desteklemiyor; güncelle.",
@@ -80,7 +97,7 @@ fun EcosystemScreen(ui: UiState) {
         DownloadsCard(s.downloads.values.toList(), s.completed, running("t-downloader"))
         RamCard(s.ram, running("t-ramcash"))
         DiskCard(s.disks, running("t-desktree"))
-        AppsCard(s)
+        AppsCard(s, viewer)
         s.apps.filter { it.id !in KNOWN }.forEach { a ->
             TbCard {
                 SectionTitle(a.name.ifEmpty { a.id })
@@ -192,7 +209,7 @@ private fun DiskCard(disks: List<app.kopru.DiskRow>, up: Boolean) {
 }
 
 @Composable
-private fun AppsCard(s: app.kopru.SuiteUi) {
+private fun AppsCard(s: app.kopru.SuiteUi, viewer: app.kopru.ViewerState) {
     val c = tb
     TbCard {
         SectionTitle("Uygulamalar")
@@ -206,6 +223,11 @@ private fun AppsCard(s: app.kopru.SuiteUi) {
                 if (a.updateAvailable != null) Box(Modifier.padding(start = 8.dp)) { Pill("güncelleme", "gold") }
             }
         }
+        if (viewer.installed) {
+            Spacer8()
+            Text("Bu telefonda", color = c.muted, style = MaterialTheme.typography.labelLarge)
+            ViewerRow(viewer)
+        }
         val n = s.apps.count { it.updateAvailable != null }
         Spacer8()
         TbButton(if (n > 0) "Hepsini güncelle ($n)" else "Hepsini güncelle", { Suite.updateAll() }, Modifier.fillMaxWidth(), enabled = n > 0)
@@ -214,3 +236,19 @@ private fun AppsCard(s: app.kopru.SuiteUi) {
 
 private fun Double.format1() = String.format(java.util.Locale.getDefault(), "%.1f", this)
 private fun eta(sec: Long) = if (sec >= 3600) "${sec / 3600} sa ${sec % 3600 / 60} dk" else if (sec >= 60) "${sec / 60} dk ${sec % 60} sn" else "$sec sn"
+
+/** T-Desk Viewer satırı: sürüm (PackageManager), "Aç" ve güncelleme varsa altın rozet (viewer'ın güncelleme ekranına derin bağlantı). */
+@Composable
+private fun ViewerRow(v: app.kopru.ViewerState) {
+    val c = tb
+    val ctx = LocalContext.current
+    Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(c.goldHi))
+        Text("T-Desk Viewer", Modifier.padding(start = 10.dp).weight(1f), color = c.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        Text("v${v.version}", color = c.muted, style = MaterialTheme.typography.labelSmall)
+        if (v.update != null) {
+            Box(Modifier.padding(start = 8.dp).clip(RoundedCornerShape(8.dp)).clickable { ViewerLink.openUpdateScreen(ctx) }) { Pill("Güncelleme var", "gold") }
+        }
+        Box(Modifier.padding(start = 8.dp)) { Chip("Aç") { if (!ViewerLink.launchViewer(ctx)) Suite.toast("Uygulama açılamadı") } }
+    }
+}

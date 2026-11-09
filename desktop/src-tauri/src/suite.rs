@@ -204,9 +204,9 @@ impl Hub {
     async fn app_cmd(self: &Arc<Self>, id: &str, name: &str, data: Option<Value>) -> Result<Value, String> {
         if id == "t-bridge" {
             return match name {
-                "suite.update" => Ok(json!({ "started": self.update(None).await })),
+                "suite.update" => Ok(json!({ "started": Box::pin(self.update(None)).await })),
                 "suite.check" => {
-                    self.check_updates().await;
+                    Box::pin(self.check_updates()).await;
                     Ok(json!({}))
                 }
                 _ => self.local_cmd(name, data),
@@ -244,14 +244,26 @@ impl Hub {
     fn local_cmd(&self, name: &str, data: Option<Value>) -> Result<Value, String> {
         let sh = shared(&self.app);
         match name {
+            "file.present" => {
+                // Telefon, sunum dosyasını göndermeden önce adı bildirir; dosya bitince PC tam ekran açar (on_incoming_done).
+                let name = data.as_ref().and_then(|d| d.get("name")).and_then(Value::as_str).ok_or("name gerekli")?;
+                PENDING_PRESENT.lock().unwrap().add(name, Instant::now());
+                Ok(json!({}))
+            }
             "file.send" => {
                 let path = data.as_ref().and_then(|d| d.get("path")).and_then(Value::as_str).ok_or("path gerekli")?;
+                let open = data.as_ref().and_then(|d| d.get("open")).and_then(Value::as_bool).unwrap_or(false);
                 if !std::path::Path::new(path).is_file() {
                     return Err("dosya bulunamadı".into());
                 }
                 let n = sh.node().ok_or("çekirdek yok")?;
                 if n.state() != ConnState::Connected {
                     return Err("telefon bağlı değil".into());
+                }
+                if open {
+                    // Telefona "bu dosya bitince aç" bilgisi (suite olayı; eski telefon yok sayar). Dosyadan ÖNCE gider.
+                    let name = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                    n.send_suite_event("t-bridge".into(), "file.open".into(), json!({ "name": name }).to_string());
                 }
                 let ids = n.send_paths(vec![path.to_string()]).map_err(|e| e.to_string())?;
                 Ok(json!({ "ids": ids }))
@@ -386,6 +398,48 @@ pub fn on_phone_state(connected: bool) {
     }
 }
 
+/// Telefondan gelmesi beklenen sunum dosyaları (ad -> bildirim anı). Saf mantık, birim testli.
+#[derive(Default)]
+pub struct PendingNames {
+    items: Vec<(String, Instant)>,
+}
+
+impl PendingNames {
+    const TTL: Duration = Duration::from_secs(15 * 60);
+
+    pub fn add(&mut self, name: &str, now: Instant) {
+        self.items.retain(|(_, t)| now.duration_since(*t) < Self::TTL);
+        self.items.push((name.to_string(), now));
+    }
+
+    /// Ad (dizin kısmı yok sayılır, büyük/küçük harf duyarsız) bekleniyorsa kaydı düşer ve true döner.
+    pub fn take(&mut self, name: &str, now: Instant) -> bool {
+        let base = name.rsplit(['/', '\\']).next().unwrap_or(name).to_lowercase();
+        self.items.retain(|(_, t)| now.duration_since(*t) < Self::TTL);
+        match self.items.iter().position(|(n, _)| n.to_lowercase() == base) {
+            Some(i) => {
+                self.items.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+static PENDING_PRESENT: Mutex<PendingNames> = Mutex::new(PendingNames { items: Vec::new() });
+
+/// Telefondan bir dosya tamamlandı: sunum için beklenen dosyaysa PC'de tam ekran aç.
+pub fn on_incoming_done(name: &str, path: Option<&str>) {
+    let Some(path) = path else { return };
+    if !PENDING_PRESENT.lock().unwrap().take(name, Instant::now()) {
+        return;
+    }
+    let path = path.to_string();
+    std::thread::spawn(move || {
+        crate::win::system::present_file(&path);
+    });
+}
+
 /// Telefondan SuiteCmd geldi.
 pub fn on_phone_cmd(app: &AppHandle, req: u64, app_id: String, name: String, json_str: String) {
     let Some(h) = HUB.get().cloned() else { return };
@@ -405,6 +459,16 @@ pub fn on_phone_cmd(app: &AppHandle, req: u64, app_id: String, name: String, jso
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_present_matches_once_by_basename() {
+        let mut p = PendingNames::default();
+        let t0 = Instant::now();
+        p.add("Sunum.PDF", t0);
+        assert!(!p.take("baska.pdf", t0));
+        assert!(p.take("klasor/sunum.pdf", t0));
+        assert!(!p.take("sunum.pdf", t0), "bir kez tüketilir");
+    }
 
     #[test]
     fn whitelist_blocks_unknown_prefixes() {

@@ -58,6 +58,15 @@ fn combo(mods: &[VIRTUAL_KEY], vk: VIRTUAL_KEY) {
     send(&v);
 }
 
+/// Sunum tam ekran kısayolları (PDF işleyicisine göre).
+pub fn presentation_fullscreen(kind: &str) {
+    match kind {
+        "ctrl_l" => combo(&[VK_CONTROL], VIRTUAL_KEY(b'L' as u16)),
+        "f11" => tap(VK_F11),
+        _ => tap(VK_F5),
+    }
+}
+
 /// Mutlak imleç konumu: `x`,`y` 0..1, `monitor` indeksli monitörün sınırlarına göre.
 pub fn move_abs(monitor: u32, x: f32, y: f32) {
     use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;

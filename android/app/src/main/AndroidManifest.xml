@@ -20,6 +20,11 @@
     <!-- Kendi kendini güncelleme (GitHub Releases) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- T-Desk Viewer: kurulu mu / Telefonda aç / sunum kumandası -->
+    <queries>
+        <package android:name="com.tdesk.viewer" />
+    </queries>
+
     <application
         android:name=".KopruApp"
         android:allowBackup="false"
@@ -98,6 +103,11 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <!-- T-Desk Viewer kanalı: UID doğrulaması kodda (ViewerBridgeService.callerIsViewer). -->
+        <service
+            android:name=".ViewerBridgeService"
+            android:exported="true" />
 
         <service
             android:name=".CameraService"
