@@ -201,6 +201,10 @@ impl Shared {
                 win::input::exec(cmd);
                 return;
             }
+            Event::Key { key, down } => {
+                win::input::key_event(*key, *down);
+                return;
+            }
             Event::CamFrame { pts_us, key, data } => {
                 if let Some(h) = self.camera.get() {
                     h.push_frame((*pts_us, *key, data.clone()));
@@ -235,6 +239,8 @@ impl Shared {
                     crate::screen_share::on_disconnected(&self.app);
                     // Bağlantı sürükleme sırasında koptuysa sol tuş basılı kalmasın.
                     win::input::exec(&kopru_core::PcCommand::Button { button: kopru_core::MouseButton::Left, down: false });
+                    // Telefon tuş (Ctrl/Alt/Shift/Win) basılı tutarken koptuysa hepsini bırak.
+                    win::input::release_all_keys();
                 }
                 if *state == ConnState::Connected {
                     // Telefon güncel listeyi baştan gönderecek: bağlantı yokken kalkanlar burada kalmasın.

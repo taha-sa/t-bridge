@@ -343,6 +343,8 @@ pub enum Event {
     /// PC'de: fare hareketi (datagram, düşük gecikme).
     PointerMove { dx: i32, dy: i32 },
     Pc { cmd: PcCommand },
+    /// PC'de: telefon bir tuşa bastı/bıraktı (`key-hold`).
+    Key { key: crate::keys::KeyCode, down: bool },
     Phone { cmd: PhoneCommand },
 }
 

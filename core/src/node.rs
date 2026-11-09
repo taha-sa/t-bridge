@@ -939,6 +939,8 @@ impl Inner {
             Msg::AppIcon { package, png } => self.emit(Event::AppIcon { package, png }),
             Msg::NowPlaying(info) => self.emit(Event::NowPlaying { info }),
             Msg::Pc(cmd) => self.emit(Event::Pc { cmd }),
+            Msg::KeyDown { key } => self.emit(Event::Key { key, down: true }),
+            Msg::KeyUp { key } => self.emit(Event::Key { key, down: false }),
             Msg::Phone(cmd) => self.emit(Event::Phone { cmd }),
             Msg::FileOffer { id, name, size } => {
                 if let Err(e) = self.on_offer(s, id, name, size).await {

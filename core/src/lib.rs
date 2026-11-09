@@ -9,6 +9,7 @@ uniffi::setup_scaffolding!();
 pub mod discovery;
 pub mod files;
 pub mod host;
+pub mod keys;
 pub mod node;
 pub mod camera;
 pub mod proto;
@@ -379,6 +380,16 @@ impl Node {
     /// Fare hareketi (datagram; kaybolabilir, gecikmesi en düşük yol).
     pub fn send_pointer(&self, dx: i32, dy: i32) {
         self.inner.send_pointer(dx, dy)
+    }
+
+    /// Eş `key-hold` (KeyDown/KeyUp) duyuruyor mu.
+    pub fn peer_supports_key_hold(&self) -> bool {
+        self.inner.session().is_some_and(|s| s.has_cap(proto::CAP_KEY_HOLD))
+    }
+
+    /// Tuşa bas/bırak (`key-hold` yoksa false; arayüz mevcut Key/combo mesajlarına döner).
+    pub fn send_key(&self, key: keys::KeyCode, down: bool) -> bool {
+        self.peer_supports_key_hold() && self.inner.send_msg(if down { Msg::KeyDown { key } } else { Msg::KeyUp { key } })
     }
 
     pub fn send_pc(&self, cmd: PcCommand) -> bool {

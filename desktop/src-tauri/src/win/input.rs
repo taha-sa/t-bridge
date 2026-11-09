@@ -1,6 +1,7 @@
 //! Uzaktan kumanda: SendInput ile fare/klavye/medya, güç işlemleri.
 use std::mem::size_of;
 
+use kopru_core::keys::{HeldKeys, KeyCode};
 use kopru_core::{MediaAction, MouseButton, PcCommand, SpecialKey, VolumeAction};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
@@ -28,6 +29,44 @@ fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+    }
+}
+
+/// `key-hold` tuş olayı: sanal tuş kodu (düzenden bağımsız kısayollar) + tarama kodu + genişletilmiş bayrak birlikte gider.
+fn key_input(k: KeyCode, up: bool) -> INPUT {
+    let s = k.spec();
+    let mut flags = if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) };
+    if s.extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(s.vk), wScan: s.scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+    }
+}
+
+/// Telefonun basılı tuttuğu tuşlar: bağlantı kopunca / ekrandan çıkınca bırakılır (Ctrl/Alt/Shift/Win takılı kalmasın).
+static HELD: std::sync::Mutex<HeldKeys> = std::sync::Mutex::new(HeldKeys::new());
+
+/// Telefondan gelen KeyDown/KeyUp.
+pub fn key_event(k: KeyCode, down: bool) {
+    {
+        let mut h = HELD.lock().unwrap_or_else(|e| e.into_inner());
+        if down {
+            h.down(k);
+        } else {
+            h.up(k);
+        }
+    }
+    send(&[key_input(k, !down)]);
+}
+
+/// Basılı tüm tuşları bırak (ters sırada).
+pub fn release_all_keys() {
+    let held = HELD.lock().unwrap_or_else(|e| e.into_inner()).release_all();
+    if !held.is_empty() {
+        let v: Vec<INPUT> = held.iter().map(|k| key_input(*k, true)).collect();
+        send(&v);
     }
 }
 
@@ -216,5 +255,25 @@ pub fn exec(cmd: &PcCommand) {
             VolumeAction::Mute => VK_VOLUME_MUTE,
         }),
         PcCommand::Power { action } => super::system::power(*action),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_input_sets_vk_scan_and_extended_flags() {
+        let down = key_input(KeyCode::Right, false);
+        let up = key_input(KeyCode::Right, true);
+        unsafe {
+            let (d, u) = (down.Anonymous.ki, up.Anonymous.ki);
+            assert_eq!((d.wVk.0, d.wScan), (0x27, 0x4D));
+            assert!(d.dwFlags.contains(KEYEVENTF_EXTENDEDKEY) && !d.dwFlags.contains(KEYEVENTF_KEYUP));
+            assert!(u.dwFlags.contains(KEYEVENTF_EXTENDEDKEY) && u.dwFlags.contains(KEYEVENTF_KEYUP));
+            let e = key_input(KeyCode::Enter, false).Anonymous.ki;
+            assert!(!e.dwFlags.contains(KEYEVENTF_EXTENDEDKEY));
+            assert_eq!(e.wScan, 0x1C);
+        }
     }
 }

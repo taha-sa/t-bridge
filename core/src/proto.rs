@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+use crate::keys::KeyCode;
 use crate::types::*;
 
 pub const PROTO_VERSION: u16 = 1;
@@ -19,10 +20,13 @@ pub const CAP_SCREEN_TUNE: &str = "screen-tune";
 pub const CAP_CAMERA: &str = "camera";
 /// Yetenek: T-Suite ekosistem köprüsü (SuiteApps/SuiteEvent/SuiteCmd/SuiteReply). Uygulamaya özgü varyant YOK: yeni uygulamalar otomatik görünür.
 pub const CAP_SUITE: &str = "suite";
+/// Yetenek: tuş tutma (KeyDown / KeyUp). Telefonun yapışkan Ctrl/Alt/Shift/Win ve F1–F12 gibi tuşları; PC bağlantı kopunca
+/// basılı tuşları bırakır. Eski PC duyurmaz: telefon mevcut Key/combo mesajlarına döner.
+pub const CAP_KEY_HOLD: &str = "key-hold";
 
 /// Bu sürümün duyurduğu yetenekler (Hello/Welcome sonuna eklenir; eski eş sondaki baytları yok sayar).
 pub fn local_caps() -> Vec<String> {
-    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string(), CAP_SUITE.to_string(), CAP_SCREEN_TUNE.to_string()];
+    let mut v = vec![CAP_NOTIF_REPLY.to_string(), CAP_SCREEN.to_string(), CAP_SUITE.to_string(), CAP_SCREEN_TUNE.to_string(), CAP_KEY_HOLD.to_string()];
     if crate::camera::camera_cap() {
         v.push(CAP_CAMERA.to_string());
     }
@@ -154,6 +158,11 @@ pub enum Msg {
     ScreenPing { seq: u32, t0_us: u64 },
     /// Saat senkronu yanıtı: `t0_us` aynen geri, `t1_us` = yanıtlayanın saati.
     ScreenPong { seq: u32, t0_us: u64, t1_us: u64 },
+    // ---- yalnızca `key-hold` yeteneğini duyuran eşlere gönderilir (varyant dizini SONA eklenir) ----
+    /// Telefon -> PC: tuşa bas (bırakılana kadar basılı kalır).
+    KeyDown { key: KeyCode },
+    /// Telefon -> PC: tuşu bırak.
+    KeyUp { key: KeyCode },
 }
 
 /// Sürüm 1 el sıkışması (caps alanından önceki biçim): eski eşten gelen Hello/Welcome çözümlemesi için.

@@ -180,6 +180,8 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
             open_consent(app, id);
         }
         ScreenCmd::Stop => {
+            // Ekrandan çıkış: telefonun basılı tuttuğu değiştiriciler PC'de takılı kalmasın.
+            crate::win::input::release_all_keys();
             cancel_consent(app);
             stop(app, "telefon durdurdu")
         }
