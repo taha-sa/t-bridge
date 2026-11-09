@@ -78,6 +78,27 @@
             </intent-filter>
         </activity>
 
+        <!-- "Bilgisayarda indir": paylaşım menüsü + bağlantı seçicisi (varsayılan tarayıcı OLMAZ) -->
+        <activity
+            android:name=".ShareToPcActivity"
+            android:exported="true"
+            android:label="Bilgisayarda indir"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".CameraService"
             android:exported="false"

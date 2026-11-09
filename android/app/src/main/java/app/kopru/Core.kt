@@ -66,6 +66,7 @@ object Core : Host {
 
     fun init(context: Context) {
         ctx = context.applicationContext
+        Suite.init(ctx)
         IncomingFiles.init(ctx)
     }
 
@@ -139,6 +140,10 @@ object Core : Host {
             is Event.ScreenInfo -> Screen.onInfo(event.monitors, event.current.toInt(), event.active, event.error)
             is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.key, event.data)
             is Event.Screen -> Unit
+            is Event.SuiteApps -> Suite.onApps(event.apps)
+            is Event.SuiteEvent -> Suite.onEvent(event.app, event.name, event.json)
+            is Event.SuiteReply -> Suite.onReply(event.req.toLong(), event.ok, event.json, event.error)
+            is Event.SuiteCmd -> Unit
             is Event.Cam -> main.post { CameraService.onCmd(ctx, event.cmd) }
             is Event.CamState, is Event.CamFrame -> Unit
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.

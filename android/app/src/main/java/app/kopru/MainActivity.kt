@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
                                     0 -> HomeScreen(ui, go = { tab = it })
                                     1 -> FilesScreen(ui)
                                     2 -> RemoteScreen(ui)
+                                    3 -> app.kopru.ui.EcosystemScreen(ui)
                                     else -> SettingsScreen(ui)
                                 }
                             }
@@ -161,6 +163,7 @@ private val items = listOf(
     NavItem("Bağlantı", Icons.Outlined.Home),
     NavItem("Dosyalar", Icons.Outlined.Folder),
     NavItem("Kumanda", Icons.Outlined.Mouse),
+    NavItem("Ekosistem", Icons.Outlined.Hub),
     NavItem("Ayarlar", Icons.Outlined.Settings),
 )
 

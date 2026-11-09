@@ -15,6 +15,7 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 kopru-core = { path = "../../core" }
 kopru-camring = { path = "../../camera/ring" }
+tlink = { path = "../../tlink" }
 tauri = { version = "2.12.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"

@@ -214,6 +214,10 @@ impl Shared {
                     }
                 }
             }
+            Event::SuiteCmd { req, app, name, json } => {
+                crate::suite::on_phone_cmd(&self.app, *req, app.clone(), name.clone(), json.clone());
+                return;
+            }
             Event::Screen { cmd } => {
                 crate::screen_share::on_cmd(&self.app, cmd.clone());
                 return;
@@ -224,6 +228,7 @@ impl Shared {
                 }
             }
             Event::State { state, .. } => {
+                crate::suite::on_phone_state(*state == ConnState::Connected);
                 if *state == ConnState::Connected {
                     crate::screen_share::on_connected(&self.app);
                 } else {

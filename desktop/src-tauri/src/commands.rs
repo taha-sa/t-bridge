@@ -189,6 +189,35 @@ pub fn stop_screen_share(s: S<'_>) {
     crate::screen_share::stop(&s.app, "PC kullanıcısı durdurdu");
 }
 
+/// T-Suite uygulama kartları (katalog + kayıtlı uygulamalar).
+#[tauri::command]
+pub fn suite_status() -> Vec<crate::suite::SuiteCard> {
+    crate::suite::hub().map(|h| h.cards()).unwrap_or_default()
+}
+
+/// Uygulamayı aç (kapalıysa başlat; çalışıyorsa öne getir).
+#[tauri::command]
+pub async fn suite_open(id: String) -> Result<(), String> {
+    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    let name = if h.cards().iter().any(|c| c.id == id && c.running) { "app.show" } else { "app.launch" };
+    h.run(&id, name).await
+}
+
+/// Güncelle: `id` verilirse tek uygulama, verilmezse güncellemesi olan hepsi. Dönüş: başlatılan sayısı.
+#[tauri::command]
+pub async fn suite_update(id: Option<String>) -> Result<usize, String> {
+    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    Ok(h.update(id).await)
+}
+
+/// Çalışan uygulamalardan güncelleme sor.
+#[tauri::command]
+pub async fn suite_check() -> Result<(), String> {
+    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    h.check_updates().await;
+    Ok(())
+}
+
 /// Telefon kamerası durumu (arayüz 2 sn'de bir yoklar).
 #[tauri::command]
 pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {

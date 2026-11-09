@@ -160,6 +160,11 @@ impl ReconnectingClient {
         Self { app_id: app_id.into(), current, task }
     }
 
+    /// Geçerli bağlantı (komutu kilit dışında beklemek için).
+    pub fn handle(&self) -> Option<Arc<Client>> {
+        self.current.lock().unwrap().clone().filter(|c| !c.is_closed())
+    }
+
     pub fn is_connected(&self) -> bool {
         self.current.lock().unwrap().as_ref().is_some_and(|c| !c.is_closed())
     }

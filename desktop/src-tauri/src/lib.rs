@@ -1,6 +1,7 @@
 mod app;
 mod commands;
 mod screen_share;
+mod suite;
 mod updater;
 mod win;
 
@@ -153,6 +154,7 @@ fn start_node(shared: &Arc<Shared>, data_dir: PathBuf) {
     match Node::new(cfg, Arc::new(DesktopHost(shared.clone()))) {
         Ok(n) => {
             let _ = shared.node.set(n.clone());
+            suite::start(&shared.app);
             // Yerel pano değişince telefona gönder.
             let sh = shared.clone();
             win::clipboard::spawn_listener(move || {
@@ -197,6 +199,10 @@ pub fn run() {
             commands::open_downloads,
             commands::dismiss_notification,
             commands::stop_screen_share,
+            commands::suite_status,
+            commands::suite_open,
+            commands::suite_update,
+            commands::suite_check,
             commands::camera_status,
             commands::camera_enable,
             commands::camera_disable,
@@ -276,6 +282,7 @@ pub fn run() {
             if let Some(h) = app.state::<Arc<Shared>>().camera.get() {
                 h.disable(); // sanal kamera T-Bridge kapanınca kalkar
             }
+            suite::shutdown();
         }
         // Son pencere kapanınca uygulama tepside kalır; yalnızca "Çıkış" kapatır.
         if let RunEvent::ExitRequested { code: None, api, .. } = event {
