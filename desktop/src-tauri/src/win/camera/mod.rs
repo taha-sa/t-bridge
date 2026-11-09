@@ -11,7 +11,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, Sender, SyncSender},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use windows::{
@@ -124,8 +124,24 @@ pub fn registered_owner_sid() -> Option<String> {
 }
 
 /// Kayıt var ve DLL yerinde VE sahip SID'i bu kullanıcı (başka kullanıcı etkinleştirdiyse yeniden kayıt gerekir).
+/// `is_installed_for_me` sonucu kısa süre (5 sn) önbelleğe alınır; kayıt/kaldırmada geçersiz kılınır.
+static INSTALL_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
 pub fn is_installed_for_me() -> bool {
-    is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid()
+    let cached = *INSTALL_CACHE.lock().unwrap();
+    if let Some((t, v)) = cached {
+        if t.elapsed() < Duration::from_secs(5) {
+            return v;
+        }
+    }
+    let v = is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid();
+    *INSTALL_CACHE.lock().unwrap() = Some((Instant::now(), v));
+    v
+}
+
+/// Kayıt değiştiğinde (kayıt/kaldırma) `is_installed_for_me` önbelleğini geçersiz kılar.
+fn invalidate_install_cache() {
+    *INSTALL_CACHE.lock().unwrap() = None;
 }
 
 /// Derleme zamanında gömülen, paketlenen tbridge_vcam.dll'in SHA-256'sı (build.rs). Boş = yer tutucu DLL (yalnız debug).
@@ -165,7 +181,9 @@ fn bundled_dll() -> Result<PathBuf, String> {
 
 /// Yükseltilmiş süreçte çalışır: paketli DLL'i (karması doğrulanmış) %ProgramFiles%\T-Bridge\camera\ altına yazar ve yalnız o yolu HKLM'ye kaydeder.
 pub fn register_elevated(owner_sid: &str) -> Result<(), String> {
-    register_elevated_from(&bundled_dll()?, EXPECTED_DLL_SHA256, owner_sid)
+    let r = register_elevated_from(&bundled_dll()?, EXPECTED_DLL_SHA256, owner_sid);
+    invalidate_install_cache();
+    r
 }
 
 fn register_elevated_from(src_dll: &Path, expected_sha: &str, owner_sid: &str) -> Result<(), String> {
@@ -195,6 +213,12 @@ fn parse_register_args(args: &[String]) -> Result<String, String> {
 }
 
 pub fn unregister_elevated() -> Result<(), String> {
+    let r = unregister_elevated_inner();
+    invalidate_install_cache();
+    r
+}
+
+fn unregister_elevated_inner() -> Result<(), String> {
     unsafe {
         let key = wide(&clsid_key());
         let r = RegDeleteTreeW(HKEY_LOCAL_MACHINE, PCWSTR(key.as_ptr()));

@@ -155,7 +155,7 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
             Ok(_) => {}
         }
         let Some(e) = Envelope::parse(&buf) else { continue };
-        if e.v < 1 {
+        if e.v < 1 || e.v > crate::PROTOCOL_VERSION {
             continue;
         }
         match e.typ.as_str() {

@@ -71,7 +71,9 @@ fn open_shm() -> Option<Shm> {
         let sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
         let name: Vec<u16> = kopru_camring::SECTION_NAME.encode_utf16().chain(std::iter::once(0)).collect();
         let size = kopru_camring::TOTAL_SIZE as u64;
-        let h = CreateFileMappingW(INVALID_HANDLE_VALUE, Some(&sa), PAGE_READWRITE, (size >> 32) as u32, size as u32, PCWSTR(name.as_ptr())).ok()?;
+        let mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, Some(&sa), PAGE_READWRITE, (size >> 32) as u32, size as u32, PCWSTR(name.as_ptr()));
+        let _ = LocalFree(Some(HLOCAL(sd.0)));
+        let h = mapping.ok()?;
         let existed = GetLastError() == ERROR_ALREADY_EXISTS;
         let view = MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, 0);
         if view.Value.is_null() {

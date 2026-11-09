@@ -64,7 +64,9 @@
 </script>
 
 <div class="page">
-  {#if st && !st.supported}
+  {#if st === null}
+    <div class="skeleton" aria-busy="true"></div>
+  {:else if !st.supported}
     <!-- Windows 10 ve altı: kilitli durum, düğme yok -->
     <section class="card locked" aria-live="polite">
       <div class="lockart"><Icon name="lock" size={28} /></div>
@@ -227,6 +229,12 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  /* Yükleniyor (durum henüz bilinmiyor): titremeyi önlemek için sabit yükseklikli iskelet */
+  .skeleton {
+    height: 180px;
+    border-radius: 16px;
+    background: var(--s1);
   }
   /* Windows 10: kilitli kart */
   .locked {
