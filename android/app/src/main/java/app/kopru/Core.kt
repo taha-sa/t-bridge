@@ -116,7 +116,7 @@ object Core : Host {
     override fun onEvent(event: Event) {
         when (event) {
             is Event.State -> {
-                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); Suite.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
+                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); main.post { app.kopru.ui.KeyPad.resetLocal() }; Suite.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
                 _ui.update { it.copy(conn = event.state, peer = event.peer, peers = node?.peers() ?: it.peers) }
                 main.post { KopruService.onConnState(event.state) }
             }
@@ -142,6 +142,7 @@ object Core : Host {
             is Event.ScreenNotice -> Screen.onSecure(event.secure)
             is Event.ScreenFrame -> Screen.onFrame(event.ptsUs.toLong(), event.recvUs.toLong(), event.key, event.data)
             is Event.Screen -> Unit
+            is Event.Key -> Unit
             is Event.SuiteApps -> Suite.onApps(event.apps)
             is Event.SuiteEvent -> Suite.onEvent(event.app, event.name, event.json)
             is Event.SuiteReply -> Suite.onReply(event.req.toLong(), event.ok, event.json, event.error)

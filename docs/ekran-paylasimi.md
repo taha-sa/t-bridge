@@ -157,3 +157,8 @@ yüksekse telefon.
 - Telefon çözücüsü uyarlanabilir oynatmayı 3840×2160'a kadar kurar; PC bu sınırı aşmaz (dikeyde yükseklik ≤2160).
 - Çizim zamanı `releaseOutputBuffer` çağrısıdır (gerçek v-sync ≤1 kare sonra); uçtan uca değer buna göre ~8-16 ms iyimser olabilir.
 - Ctrl/Alt tek başına tuş olarak gönderilmez (protokolde yok); mevcut kısayol tuşları kullanılabilir. Ctrl+Alt+Del mümkün değildir.
+
+## Ekran sekmesi ve tus tutma (key-hold)
+
+- Telefon arayuzu: Ekran ve Kamera ayri hedefler; alt cubukta 4 birincil sekme + "Daha fazla" sayfasi. Ekran sekmesinde kalici arac cubugu (mod, klavye, tuslar, kalite, tam ekran). PC'ye bildirilen goruntu alani klavyesiz tam boydur; klavye/tus satiri acilinca goruntu yalnizca kucuk gosterilir (yeniden kodlama yok).
+- `key-hold` yetenegi: `KeyDown { key }` / `KeyUp { key }` (KeyCode: Ctrl/Alt/Shift/Win, Esc, Tab, oklar, F1-F12, birkac harf). PC SendInput ile sanal tus + tarama kodu + genisletilmis bayrak gonderir; baglanti kopunca ve telefon ekrandan cikinca (ScreenStop) basili tuslari birakir. Yetenek yoksa telefon eski Key/kisayol mesajlarina doner; Ctrl/Alt/Shift/Win tutma, F tuslari, Geri al ve Win+D pasif kalir.

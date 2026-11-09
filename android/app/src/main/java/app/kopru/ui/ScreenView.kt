@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
@@ -64,6 +66,7 @@ import uniffi.kopru_core.MouseButton
 import uniffi.kopru_core.PcCommand
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Kendi dokunuşunu TÜKETEN küçük yüzey (uzun bas / dokun): alttaki PC-denetim hareket algılayıcısına (tık/sürükle) sızmaz. */
@@ -86,29 +89,116 @@ private fun clickAt(nx: Float, ny: Float, monitor: Int, button: MouseButton) {
     val n = Core.node ?: return
     n.sendScreenPointer(nx, ny, monitor.toUInt())
     n.sendPc(PcCommand.Click(button, false))
+    KeyPad.afterKey() // Ctrl+tık gibi: "sonraki" değiştiriciler tıktan sonra bırakılır
+}
+
+/** Ekran kontrol modu: DOKUNMA = dokunduğun noktaya tıkla (mutlak); TOUCHPAD = imleci göreli sür (video üstünde). */
+enum class ControlMode(val label: String) { TAP("Dokunma"), PAD("Touchpad") }
+
+/**
+ * Touchpad modu hareketleri (video üstünde, göreli imleç): tek parmak sür = imleç (ivmeli), dokun = sol tık,
+ * iki parmakla dokun = sağ tık, iki parmak sürükle = kaydırma, basılı tut + sürükle = sürükle-bırak.
+ */
+private suspend fun PointerInputScope.padGestures(view: android.view.View, sens: Float, onTouch: () -> Unit) {
+    val slop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        val first = awaitFirstDown(requireUnconsumed = true)
+        onTouch()
+        val t0 = SystemClock.uptimeMillis()
+        var moved = 0f
+        var maxPointers = 1
+        var dragging = false
+        var remX = 0f
+        var remY = 0f
+        var scrollRem = 0f
+        var hRem = 0f
+        var lastT = t0
+        first.consume()
+        try {
+            while (true) {
+                val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
+                val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
+                if (ev == null) {
+                    dragging = true
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, true))
+                    continue
+                }
+                val pressed = ev.changes.filter { it.pressed }
+                maxPointers = maxOf(maxPointers, pressed.size)
+                if (pressed.isEmpty()) break
+                val now = SystemClock.uptimeMillis()
+                val dt = (now - lastT).coerceAtLeast(1)
+                lastT = now
+                if (pressed.size == 1 && maxPointers == 1) {
+                    val p = pressed[0]
+                    val d = p.position - p.previousPosition
+                    moved += d.getDistance()
+                    if (moved > slop || dragging) {
+                        val speed = d.getDistance() / dt
+                        val f = sens * (1f + min(speed, 3f) * 0.6f)
+                        val fx = d.x * f + remX
+                        val fy = d.y * f + remY
+                        val ix = fx.toInt()
+                        val iy = fy.toInt()
+                        remX = fx - ix
+                        remY = fy - iy
+                        if (ix != 0 || iy != 0) Core.node?.sendPointer(ix, iy)
+                    }
+                } else if (pressed.size >= 2) {
+                    var ax = 0f
+                    var ay = 0f
+                    pressed.forEach { val d = it.position - it.previousPosition; ax += d.x; ay += d.y }
+                    ax /= pressed.size
+                    ay /= pressed.size
+                    moved += abs(ax) + abs(ay)
+                    scrollRem += -ay * 3f
+                    hRem += -ax * 3f
+                    val sy = scrollRem.roundToInt()
+                    val sx = hRem.roundToInt()
+                    if (abs(sy) >= 8 || abs(sx) >= 8) {
+                        Core.node?.sendPc(PcCommand.Scroll(if (abs(sx) >= 8) sx else 0, if (abs(sy) >= 8) sy else 0))
+                        if (abs(sy) >= 8) scrollRem -= sy
+                        if (abs(sx) >= 8) hRem -= sx
+                    }
+                }
+                ev.changes.forEach { it.consume() }
+            }
+        } finally {
+            if (dragging) {
+                Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, false))
+                KeyPad.afterKey()
+            }
+        }
+        val dur = SystemClock.uptimeMillis() - t0
+        if (!dragging && moved < slop * 2 && dur < 300) {
+            Core.node?.sendPc(PcCommand.Click(if (maxPointers >= 2) MouseButton.RIGHT else MouseButton.LEFT, false))
+            KeyPad.afterKey()
+        }
+    }
 }
 
 /**
- * PC ekranı: SurfaceView (MediaCodec çıktısı) + hareketler + otomatik gizlenen üst çubuk.
- * Dokun = sol tık (mutlak konum) · iki parmakla dokun = sağ tık · iki parmak kaydır = kaydırma · çimdik = yakınlaştır ·
- * yakınken tek parmak = kaydır(pan) · basılı tut + sürükle = sürükle-bırak.
+ * PC ekranı: SurfaceView (MediaCodec çıktısı) + hareketler + otomatik gizlenen küçük durum şeridi (monitör, mod, fps, kapat).
+ * DOKUNMA modu: dokun = sol tık (mutlak konum) · iki parmakla dokun = sağ tık · iki parmak kaydır = kaydırma · çimdik =
+ * yakınlaştır · yakınken tek parmak = kaydır(pan) · basılı tut + sürükle = sürükle-bırak. TOUCHPAD modu: [padGestures].
+ * Görüntü alanının boyutunu PC'ye bildirmek çağıranın işidir (klavye açılınca görüntü küçülür ama yeniden kodlanmaz).
  */
 @Composable
 fun ScreenViewer(
     ui: ScreenUi,
-    fullscreen: Boolean,
-    onToggleFullscreen: () -> Unit,
+    mode: ControlMode,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val c = tb
     val view = LocalView.current
+    val sens = remember { view.context.getSharedPreferences("remote", android.content.Context.MODE_PRIVATE).getFloat("sens", 1.6f) }
     var scale by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var box by remember { mutableStateOf(IntSize.Zero) }
     var bump by remember { mutableIntStateOf(0) }
     var barVisible by remember { mutableStateOf(true) }
-    var kb by remember { mutableStateOf(false) }
     var monMenu by remember { mutableStateOf(false) }
     var diagOn by remember { mutableStateOf(false) }
     val diag by Screen.diag.collectAsState()
@@ -121,11 +211,13 @@ fun ScreenViewer(
     }
     // Yakınlaştırma düzeyi PC'ye bildirilir: yakınlaştırınca daha yüksek çözünürlük istenir (metin keskin kalır).
     LaunchedEffect(scale) { Screen.setZoom(scale) }
-    LaunchedEffect(bump, kb, monMenu) {
+    LaunchedEffect(bump, monMenu) {
         barVisible = true
-        delay(3000)
-        if (!kb && !monMenu) barVisible = false
+        delay(3500)
+        if (!monMenu) barVisible = false
     }
+    // Touchpad modunda yakınlaştırma yok.
+    LaunchedEffect(mode) { if (mode == ControlMode.PAD) { scale = 1f; pan = Offset.Zero } }
 
     val ar = if (ui.videoW > 0 && ui.videoH > 0) ui.videoW.toFloat() / ui.videoH else 16f / 9f
     val monitor = ui.current
@@ -158,8 +250,12 @@ fun ScreenViewer(
     Box(
         modifier
             .background(Color.Black)
-            .onSizeChanged { box = it; Screen.setViewport(it.width, it.height) }
-            .pointerInput(ar, monitor) {
+            .onSizeChanged { box = it }
+            .pointerInput(ar, monitor, mode, sens) {
+                if (mode == ControlMode.PAD) {
+                    padGestures(view, sens) { bump++ }
+                    return@pointerInput
+                }
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val first = awaitFirstDown(requireUnconsumed = true)
@@ -298,50 +394,42 @@ fun ScreenViewer(
             }
         }
 
-        // Üst çubuk (3 sn sonra gizlenir, dokununca geri gelir)
+        // Durum şeridi (3,5 sn sonra gizlenir, dokununca geri gelir): monitör · mod · fps/gecikme (uzun bas: teşhis) · kapat
         AnimatedVisibility(
             barVisible,
             Modifier.align(Alignment.TopCenter),
             enter = fadeIn(), exit = fadeOut(),
         ) {
             val shape = RoundedCornerShape(14.dp)
-            Column(Modifier.then(if (fullscreen) Modifier.statusBarsPadding() else Modifier).padding(8.dp)) {
-                Row(
-                    Modifier.clip(shape).background(Color(0xCC111113)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    if (ui.monitors.size > 1) {
-                        Box {
-                            TextButton({ monMenu = true }) { Text("Monitör ${monitor + 1} ▾", color = c.goldHi) }
-                            DropdownMenu(monMenu, { monMenu = false }) {
-                                ui.monitors.forEach { m ->
-                                    DropdownMenuItem(
-                                        { Text("${m.index.toInt() + 1}: ${m.width}×${m.height}${if (m.primary) " · ana" else ""}") },
-                                        { monMenu = false; Screen.setMonitor(m.index.toInt()) },
-                                    )
-                                }
+            Row(
+                Modifier.statusBarsPadding().padding(8.dp).clip(shape).background(Color(0xCC111113)).padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (ui.monitors.size > 1) {
+                    Box {
+                        TextButton({ monMenu = true }, Modifier.height(48.dp)) { Text("Monitör ${monitor + 1} ▾", color = c.goldHi) }
+                        DropdownMenu(monMenu, { monMenu = false }) {
+                            ui.monitors.forEach { m ->
+                                DropdownMenuItem(
+                                    { Text("${m.index.toInt() + 1}: ${m.width}×${m.height}${if (m.primary) " · ana" else ""}") },
+                                    { monMenu = false; Screen.setMonitor(m.index.toInt()) },
+                                )
                             }
                         }
                     }
-                    ScreenPreset.entries.forEach { p ->
-                        TextButton({ Screen.setPreset(p); bump++ }) {
-                            Text(p.label, color = if (ui.preset == p) c.goldHi else c.muted, style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
-                    // Uzun bas: gizli teşhis katmanı (yakalama/kodlama/ağ/çözme/uçtan uca ölçümler).
-                    Text(
-                        if (ui.fps > 0) "${ui.fps} fps · ${ui.latencyMs} ms" else "…",
-                        color = c.muted,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier
-                            .padding(horizontal = 6.dp)
-                            .ownGestures(onLong = { diagOn = !diagOn; bump++ }),
-                    )
-                    TextButton({ kb = !kb }) { Text("⌨", modifier = Modifier.semantics { contentDescription = "Klavye" }, color = if (kb) c.goldHi else c.muted) }
-                    TextButton({ scale = 1f; pan = Offset.Zero; onToggleFullscreen() }) { Text(if (fullscreen) "⤡" else "⛶", modifier = Modifier.semantics { contentDescription = if (fullscreen) "Tam ekrandan çık" else "Tam ekran" }, color = c.text) }
-                    TextButton({ onClose() }) { Text("✕", modifier = Modifier.semantics { contentDescription = "Kapat" }, color = c.text) }
                 }
+                Text(mode.label, color = c.goldHi, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp))
+                // Uzun bas: gizli teşhis katmanı (yakalama/kodlama/ağ/çözme/uçtan uca ölçümler).
+                Text(
+                    if (ui.fps > 0) "${ui.fps} fps · ${ui.latencyMs} ms" else "…",
+                    color = Color(0xFFD6D3CB),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .padding(horizontal = 6.dp)
+                        .ownGestures(onLong = { diagOn = !diagOn; bump++ }),
+                )
+                TextButton({ onClose() }, Modifier.height(48.dp)) { Text("✕", modifier = Modifier.semantics { contentDescription = "Ekran paylaşımını durdur" }, color = Color.White) }
             }
         }
 
@@ -359,19 +447,6 @@ fun ScreenViewer(
                 Text("TEŞHİS", color = c.goldHi, style = MaterialTheme.typography.labelSmall)
                 if (diag.lines.isEmpty()) Text("ölçüm bekleniyor…", color = c.muted, style = MaterialTheme.typography.labelSmall)
                 diag.lines.forEach { Text(it, color = Color.White, style = MaterialTheme.typography.labelSmall) }
-            }
-        }
-
-        // Klavye paneli (tam ekranda da kullanılabilir)
-        if (kb) {
-            Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xE6111113)).padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LiveKeyboard()
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    KeyChips()
-                }
             }
         }
     }

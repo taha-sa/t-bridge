@@ -87,6 +87,29 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.kopru.Core
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Slideshow
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.Power
+import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.defaultMinSize
+import uniffi.kopru_core.KeyCode
 import app.kopru.UiState
 import uniffi.kopru_core.ConnState
 import uniffi.kopru_core.MediaAction
@@ -105,50 +128,95 @@ private fun pc(cmd: PcCommand) {
 
 private fun key(k: SpecialKey) = pc(PcCommand.Key(k))
 
+/** Kumanda sayfaları (üstteki segmentli seçici). */
+private enum class Page(val label: String, val icon: ImageVector) {
+    PAD("Touchpad", Icons.Outlined.TouchApp),
+    KEYS("Klavye", Icons.Outlined.Keyboard),
+    MEDIA("Medya", Icons.Outlined.MusicNote),
+    SLIDES("Sunum", Icons.Outlined.Slideshow),
+    POWER("Güç", Icons.Outlined.PowerSettingsNew),
+}
+
+/**
+ * Kumanda: üstte segmentli seçici, altta tek odaklı sayfa (büyük hedefler). Son seçilen sayfa hatırlanır; varsayılan Touchpad.
+ * Ekran görüntüleme ve kamera artık kendi sekmelerinde (Ekran, Kamera).
+ */
 @Composable
 fun RemoteScreen(ui: UiState) {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("remote", Context.MODE_PRIVATE) }
-    var sens by remember { mutableFloatStateOf(prefs.getFloat("sens", 1.6f)) }
-    var confirm by remember { mutableStateOf<PowerAction?>(null) }
+    var page by rememberSaveable { mutableStateOf(Page.entries.firstOrNull { it.name == prefs.getString("page", null) } ?: Page.PAD) }
     val on = ui.conn == ConnState.CONNECTED
-
     val c = tb
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(Modifier.padding(top = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+
+    // Klavye sayfasından çıkınca/sekmeden ayrılınca yapışkan değiştiriciler bırakılır.
+    DisposableEffect(page) { onDispose { if (page == Page.KEYS) KeyPad.releaseAll() } }
+    DisposableEffect(Unit) { onDispose { KeyPad.releaseAll() } }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Kumanda", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
             Pill(if (on) "canlı" else "bağlı değil", if (on) "violet" else "muted")
         }
-
-        val scr by Screen.ui.collectAsStateWithLifecycle()
-        var full by rememberSaveable { mutableStateOf(false) }
-        ScreenLifecycle()
-        ScreenToggle(scr, on)
-        if (scr.viewing) {
-            val ar = if (scr.videoW > 0 && scr.videoH > 0) scr.videoW.toFloat() / scr.videoH else 16f / 9f
-            if (!full) {
-                ScreenViewer(
-                    scr, false,
-                    onToggleFullscreen = { full = true },
-                    onClose = { Screen.stopViewing() },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(ar).clip(RoundedCornerShape(16.dp)),
-                )
-            } else {
-                FullscreenViewer(scr, onExit = { full = false }, onClose = { full = false; Screen.stopViewing() })
+        Segments(page) { page = it; prefs.edit().putString("page", it.name).apply() }
+        if (!on) {
+            Text("Bağlı değil: kumanda için telefonu bilgisayara bağla.", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (page) {
+                Page.PAD -> PadPage(prefs)
+                Page.KEYS -> KeysPage()
+                Page.MEDIA -> MediaPage()
+                Page.SLIDES -> SlidesPage()
+                Page.POWER -> PowerPage()
             }
-        } else {
-            Touchpad(sens)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TbButton("Sol tık", { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f))
-            TbButton("Orta", { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f))
-            TbButton("Sağ tık", { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f))
+    }
+}
+
+/** Segmentli seçici: 56 dp yüksek, ikon + etiket, seçili segment altın. */
+@Composable
+private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
+    val c = tb
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(c.s2).border(1.dp, c.line, shape).padding(4.dp).selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Page.entries.forEach { p ->
+            val sel = p == selected
+            Column(
+                Modifier
+                    .weight(1f)
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (sel) c.goldSoft else Color.Transparent)
+                    .then(if (sel) Modifier.border(1.dp, c.goldLine, RoundedCornerShape(12.dp)) else Modifier)
+                    .selectable(sel, role = Role.Tab, onClick = { onSelect(p) })
+                    .semantics { contentDescription = p.label },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(p.icon, null, tint = if (sel) c.goldHi else c.muted, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.height(2.dp))
+                Text(p.label, color = if (sel) c.goldHi else c.text2, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
         }
-        Text(
-            "Tek parmak: imleç · dokun: tık · iki parmakla dokun: sağ tık · iki parmak kaydır: kaydırma · basılı tut + sürükle: sürükle-bırak",
-            color = c.faint,
-            style = MaterialTheme.typography.bodySmall,
-        )
+    }
+}
+
+/** Touchpad sayfası: sayfayı dolduran büyük pad + tık düğmeleri + hız. */
+@Composable
+private fun PadPage(prefs: android.content.SharedPreferences) {
+    val c = tb
+    var sens by remember { mutableFloatStateOf(prefs.getFloat("sens", 1.6f)) }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Touchpad(sens, Modifier.weight(1f).heightIn(min = 200.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TbButton("Sol tık", { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f), height = 56.dp)
+            TbButton("Orta", { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f), height = 56.dp)
+            TbButton("Sağ tık", { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f), height = 56.dp)
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Hız", Modifier.width(44.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
             Slider(
@@ -159,54 +227,73 @@ fun RemoteScreen(ui: UiState) {
                 colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
             )
         }
+        Text(
+            "Sür: imleç · dokun: tık · iki parmakla dokun: sağ tık · iki parmak kaydır: kaydırma · basılı tut + sürükle: sürükle-bırak",
+            color = c.faint,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
 
-        CameraSection(on)
+@Composable
+private fun KeysPage() {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LiveKeyboard()
+        TbCard(padding = PaddingValues(0.dp)) { SpecialKeysPanel(maxHeightFraction = 1f) }
+    }
+}
 
-        Section("Klavye") {
-            LiveKeyboard()
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                KeyChips()
+@Composable
+private fun MediaPage() {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        TbCard {
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(Icons.Outlined.SkipPrevious, "Önceki", { pc(PcCommand.Media(MediaAction.PREVIOUS)) }, size = 64.dp)
+                RoundIcon(Icons.Outlined.PlayArrow, "Oynat/Duraklat", { pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }, size = 88.dp, primary = true)
+                RoundIcon(Icons.Outlined.SkipNext, "Sonraki", { pc(PcCommand.Media(MediaAction.NEXT)) }, size = 64.dp)
             }
         }
-
-        Section("Medya ve ses") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(Icons.Outlined.SkipPrevious, "Önceki", { pc(PcCommand.Media(MediaAction.PREVIOUS)) })
-                Spacer(Modifier.width(16.dp))
-                RoundIcon(Icons.Outlined.PlayArrow, "Oynat/Duraklat", { pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }, size = 62.dp, primary = true)
-                Spacer(Modifier.width(16.dp))
-                RoundIcon(Icons.Outlined.SkipNext, "Sonraki", { pc(PcCommand.Media(MediaAction.NEXT)) })
-            }
+        TbCard {
+            SectionTitle("Ses")
+            Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TbButton("Kıs", { pc(PcCommand.Volume(VolumeAction.DOWN)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeDown, height = 44.dp)
-                TbButton("Sessiz", { pc(PcCommand.Volume(VolumeAction.MUTE)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeOff, height = 44.dp)
-                TbButton("Aç", { pc(PcCommand.Volume(VolumeAction.UP)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeUp, height = 44.dp)
-            }
-        }
-
-        Section("Sunum") {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TbButton("Geri", { key(SpecialKey.LEFT) }, Modifier.weight(1f), icon = Icons.Outlined.ChevronLeft, height = 64.dp)
-                TbButton("İleri", { key(SpecialKey.RIGHT) }, Modifier.weight(1f), icon = Icons.Outlined.ChevronRight, height = 64.dp)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TbButton("Başlat (F5)", { key(SpecialKey.F5) }, Modifier.weight(1f), height = 44.dp)
-                TbButton("Bitir (Esc)", { key(SpecialKey.ESCAPE) }, Modifier.weight(1f), height = 44.dp)
-            }
-        }
-
-        Section("Güç") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TbButton("Kilitle", { pc(PcCommand.Power(PowerAction.LOCK)) }, Modifier.weight(1f), height = 44.dp)
-                TbButton("Uyku", { confirm = PowerAction.SLEEP }, Modifier.weight(1f), height = 44.dp)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TbButton("Yeniden başlat", { confirm = PowerAction.RESTART }, Modifier.weight(1f), danger = true, height = 44.dp)
-                TbButton("Kapat", { confirm = PowerAction.SHUTDOWN }, Modifier.weight(1f), danger = true, height = 44.dp)
+                TbButton("Kıs", { pc(PcCommand.Volume(VolumeAction.DOWN)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeDown, height = 64.dp)
+                TbButton("Sessiz", { pc(PcCommand.Volume(VolumeAction.MUTE)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeOff, height = 64.dp)
+                TbButton("Aç", { pc(PcCommand.Volume(VolumeAction.UP)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeUp, height = 64.dp)
             }
         }
     }
+}
 
+@Composable
+private fun SlidesPage() {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TbButton("Geri", { key(SpecialKey.LEFT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronLeft, height = 96.dp)
+            TbButton("İleri", { key(SpecialKey.RIGHT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronRight, height = 96.dp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TbButton("Başlat (F5)", { key(SpecialKey.F5) }, Modifier.weight(1f), height = 64.dp)
+            TbButton("Bitir (Esc)", { key(SpecialKey.ESCAPE) }, Modifier.weight(1f), height = 64.dp)
+        }
+    }
+}
+
+@Composable
+private fun PowerPage() {
+    val c = tb
+    var confirm by remember { mutableStateOf<PowerAction?>(null) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Her güç eylemi onay ister.", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PowerTile("Kilitle", Icons.Outlined.Lock, false, Modifier.weight(1f)) { confirm = PowerAction.LOCK }
+            PowerTile("Uyku", Icons.Outlined.Bedtime, false, Modifier.weight(1f)) { confirm = PowerAction.SLEEP }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PowerTile("Yeniden başlat", Icons.Outlined.RestartAlt, true, Modifier.weight(1f)) { confirm = PowerAction.RESTART }
+            PowerTile("Kapat", Icons.Outlined.PowerSettingsNew, true, Modifier.weight(1f)) { confirm = PowerAction.SHUTDOWN }
+        }
+    }
     confirm?.let { a ->
         val name = when (a) {
             PowerAction.SLEEP -> "uyku moduna alınsın"
@@ -218,93 +305,56 @@ fun RemoteScreen(ui: UiState) {
             onDismissRequest = { confirm = null },
             containerColor = c.s2,
             title = { Text("Bilgisayar $name mı?") },
-            text = { Text("Kaydedilmemiş işler kaybolabilir.", color = c.text2) },
-            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }) { Text("Evet", color = c.bad) } },
-            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç", color = c.text2) } },
+            text = { Text(if (a == PowerAction.LOCK) "Oturum kilitlenir." else "Kaydedilmemiş işler kaybolabilir.", color = c.text2) },
+            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }, Modifier.heightIn(min = 48.dp)) { Text("Evet", color = if (a == PowerAction.LOCK) c.goldHi else c.bad) } },
+            dismissButton = { TextButton({ confirm = null }, Modifier.heightIn(min = 48.dp)) { Text("Vazgeç", color = c.text2) } },
         )
     }
 }
 
 @Composable
-internal fun KeyChips() {
-    Chip("Esc") { key(SpecialKey.ESCAPE) }
-    Chip("Tab") { key(SpecialKey.TAB) }
-    Chip("⌫") { key(SpecialKey.BACKSPACE) }
-    Chip("Del") { key(SpecialKey.DELETE) }
-    Chip("Enter") { key(SpecialKey.ENTER) }
-    Chip("←") { key(SpecialKey.LEFT) }
-    Chip("↑") { key(SpecialKey.UP) }
-    Chip("↓") { key(SpecialKey.DOWN) }
-    Chip("→") { key(SpecialKey.RIGHT) }
-    Chip("Home") { key(SpecialKey.HOME) }
-    Chip("End") { key(SpecialKey.END) }
-    Chip("PgUp") { key(SpecialKey.PAGE_UP) }
-    Chip("PgDn") { key(SpecialKey.PAGE_DOWN) }
-    Chip("Win") { key(SpecialKey.WIN) }
-    Chip("Alt+Tab") { key(SpecialKey.ALT_TAB) }
-    Chip("Kopyala") { key(SpecialKey.COPY_SHORTCUT) }
-    Chip("Yapıştır") { key(SpecialKey.PASTE_SHORTCUT) }
-}
-
-@Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    TbCard {
-        SectionTitle(title)
-        Spacer(Modifier.height(12.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+private fun PowerTile(label: String, icon: ImageVector, danger: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = tb
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier
+            .heightIn(min = 112.dp)
+            .clip(shape)
+            .background(if (danger) c.badSoft else c.s2)
+            .border(1.dp, if (danger) c.bad.copy(alpha = 0.3f) else c.line2, shape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = label }
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, null, tint = if (danger) c.bad else c.goldHi, modifier = Modifier.size(32.dp))
+        Spacer(Modifier.height(8.dp))
+        Text(label, color = if (danger) c.bad else c.text, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
 internal fun Chip(label: String, onClick: () -> Unit) {
     val c = tb
-    val shape = RoundedCornerShape(10.dp)
-    Text(
-        label,
+    val shape = RoundedCornerShape(12.dp)
+    Box(
         Modifier
+            .heightIn(min = 48.dp)
             .clip(shape)
             .background(c.s3)
             .border(1.dp, c.line2, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        color = c.text,
-        style = MaterialTheme.typography.labelMedium,
-    )
-}
-
-/** Yazılan metin anında PC'ye gider: eklenen karakterler metin olarak, silinenler Backspace olarak. */
-@Composable
-internal fun LiveKeyboard() {
-    var text by remember { mutableStateOf("") }
-    OutlinedTextField(
-        value = text,
-        onValueChange = { new ->
-            val old = text
-            var p = 0
-            val max = min(old.length, new.length)
-            while (p < max && old[p] == new[p]) p++
-            // Vekil çiftin ortasında bölme.
-            if (p > 0 && p < old.length && Character.isLowSurrogate(old[p])) p--
-            val deleted = old.codePointCount(p, old.length)
-            repeat(deleted) { key(SpecialKey.BACKSPACE) }
-            val added = new.substring(p)
-            if (added.isNotEmpty()) pc(PcCommand.Text(added))
-            // Uzun tamponu kısa tut (diff ucuz kalsın).
-            text = if (new.length > 200) "" else new
-        },
-        modifier = Modifier.fillMaxWidth(),
-        placeholder = { Text("Buraya yaz, anında bilgisayara gider", color = tb.faint) },
-        shape = RoundedCornerShape(14.dp),
-        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = tb.gold, unfocusedBorderColor = tb.line2, cursorColor = tb.goldHi),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-        keyboardActions = KeyboardActions(onSend = { key(SpecialKey.ENTER); text = "" }),
-        singleLine = true,
-    )
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = c.text, style = MaterialTheme.typography.labelMedium)
+    }
 }
 
 /** Touchpad: göreli hareket (ivmeli), dokun/çift parmak tık, iki parmak kaydırma, basılı tut-sürükle. */
 @Composable
-private fun Touchpad(sens: Float) {
+private fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
     val view = LocalView.current
     val c = tb
     val shape = RoundedCornerShape(24.dp)
@@ -312,9 +362,8 @@ private fun Touchpad(sens: Float) {
     val ripple = remember { Animatable(1f) }
     var rippleAt by remember { mutableStateOf(Offset.Zero) }
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .height(300.dp)
             .clip(shape)
             .background(c.cardBrush)
             .border(1.dp, c.goldEdge, shape)
@@ -416,142 +465,5 @@ private fun Touchpad(sens: Float) {
             }
         }
         Text("TOUCHPAD", color = c.faint, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-/** Uygulama arka plana gidince çözmeyi durdur (pil), dönünce sürdür; sekmeden çıkınca paylaşımı kapat. */
-@Composable
-private fun ScreenLifecycle() {
-    val owner = LocalLifecycleOwner.current
-    DisposableEffect(owner) {
-        val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_STOP) Screen.pause()
-            if (e == Lifecycle.Event.ON_START) Screen.resume()
-        }
-        owner.lifecycle.addObserver(obs)
-        onDispose {
-            owner.lifecycle.removeObserver(obs)
-            Screen.stopViewing()
-        }
-    }
-}
-
-@Composable
-private fun ScreenToggle(scr: app.kopru.ScreenUi, connected: Boolean) {
-    val c = tb
-    val supported = connected && Screen.supported()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Ekranı göster", color = c.text, style = MaterialTheme.typography.titleSmall)
-            Text(
-                when {
-                    !connected -> "Bağlanınca bilgisayar ekranını burada görürsün"
-                    !supported -> "Bilgisayardaki T-Bridge sürümü ekran paylaşımını desteklemiyor"
-                    scr.error != null -> scr.error
-                    else -> "Bilgisayar ekranı canlı; dokunarak kontrol et"
-                },
-                color = if (scr.error != null) Color(0xFFF87171) else c.faint,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Switch(
-            checked = scr.viewing,
-            onCheckedChange = { if (it) Screen.startViewing() else Screen.stopViewing() },
-            enabled = supported,
-            colors = SwitchDefaults.colors(checkedTrackColor = c.gold, checkedThumbColor = c.onGold),
-        )
-    }
-}
-
-@Composable
-private fun FullscreenViewer(scr: app.kopru.ScreenUi, onExit: () -> Unit, onClose: () -> Unit) {
-    // Yön kilidi YOK: dikeyde tüm PC ekranı genişliğe sığar (letterbox), yatayda tam ekran. Döndürme görüntü alanını PC'ye
-    // yeniden bildirir (oturum kesilmez; manifestte configChanges ile Activity yeniden yaratılmaz).
-    Dialog(onDismissRequest = onExit, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val v = LocalView.current
-        val w = (v.parent as? DialogWindowProvider)?.window
-        SideEffect {
-            w?.let {
-                WindowCompat.setDecorFitsSystemWindows(it, false)
-                WindowInsetsControllerCompat(it, it.decorView).apply {
-                    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    hide(WindowInsetsCompat.Type.systemBars())
-                }
-            }
-        }
-        ScreenViewer(scr, true, onToggleFullscreen = onExit, onClose = onClose, modifier = Modifier.fillMaxSize())
-    }
-}
-
-/** "Telefonu web kamerası yap": yalnızca PC `camera` yeteneğini duyuruyorsa (Windows 11) kullanılabilir. */
-@Composable
-private fun CameraSection(connected: Boolean) {
-    val c = tb
-    val ctx = LocalContext.current
-    val cam by CameraService.ui.collectAsStateWithLifecycle()
-    var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        granted = ok
-        if (ok) CameraService.start(ctx)
-    }
-    val supported = connected && CameraService.supported()
-
-    Section("Kamera") {
-        if (!supported) {
-            // Kilitli durum: Windows 10 veya eski PC sürümü
-            Text(
-                if (connected) "Bu özellik yalnızca Windows 11 için tasarlanmıştır." else "Bağlanınca telefonu bilgisayarda web kamerası olarak kullanabilirsin.",
-                color = c.faint,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            return@Section
-        }
-        Text(
-            "Telefonunu bilgisayarın web kamerası yap. Görüntü yalnızca bilgisayarına, şifreli bağlantıyla gider. Kamera izni gerekir; yayın sürerken bildirim görünür.",
-            color = c.muted,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        if (cam.error != null) Text(cam.error!!, color = Color(0xFFF87171), style = MaterialTheme.typography.bodySmall)
-        TbButton(
-            if (cam.streaming) "Yayını durdur" else "Yayını başlat",
-            {
-                if (cam.streaming) CameraService.stop(ctx)
-                else if (granted) CameraService.start(ctx)
-                else ask.launch(Manifest.permission.CAMERA)
-            },
-            Modifier.fillMaxWidth(),
-        )
-        if (cam.streaming) Text("Yayında · ${cam.w}×${cam.h}", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(if (cam.front) "Ön kamera ✓" else "Ön kamera") { CameraService.setFront(true) }
-            Chip(if (!cam.front) "Arka kamera ✓" else "Arka kamera") { CameraService.setFront(false) }
-            Chip(if (cam.res == 720) "720p ✓" else "720p") { CameraService.setRes(720) }
-            Chip(if (cam.res == 1080) "1080p ✓" else "1080p") { CameraService.setRes(1080) }
-            Chip(if (cam.mirror) "Ayna ✓" else "Ayna") { CameraService.setMirror(!cam.mirror) }
-            Chip(if (cam.torch) "Fener ✓" else "Fener") { CameraService.setTorch(!cam.torch) }
-        }
-        if (cam.exposureRange.last > cam.exposureRange.first) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Pozlama", Modifier.width(76.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
-                Slider(
-                    cam.exposure.toFloat(),
-                    { CameraService.setExposure(it.roundToInt()) },
-                    valueRange = cam.exposureRange.first.toFloat()..cam.exposureRange.last.toFloat(),
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
-                )
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Yakınlık", Modifier.width(76.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
-            Slider(
-                cam.zoom,
-                { CameraService.setZoom(it) },
-                valueRange = 0f..1f,
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
-            )
-        }
-        Text("Telefonu dikey ya da yatay tutabilirsin; bilgisayara her zaman dik görüntü gider.", color = c.faint, style = MaterialTheme.typography.bodySmall)
     }
 }

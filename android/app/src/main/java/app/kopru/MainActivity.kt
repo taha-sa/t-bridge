@@ -35,12 +35,34 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cast
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected as selectedState
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,11 +82,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.ui.FilesScreen
 import app.kopru.ui.HomeScreen
+import app.kopru.ui.CameraTab
+import app.kopru.ui.Chrome
 import app.kopru.ui.RemoteScreen
+import app.kopru.ui.ScreenTab
 import app.kopru.ui.SettingsScreen
 import app.kopru.ui.TBridgeTheme
 import app.kopru.ui.tb
 
+@OptIn(ExperimentalLayoutApi::class)
 class MainActivity : ComponentActivity() {
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { sendClipIfNew() }
 
@@ -82,6 +108,19 @@ class MainActivity : ComponentActivity() {
                 val ui by Core.ui.collectAsStateWithLifecycle()
                 var tab by rememberSaveable { mutableIntStateOf(0) }
                 val c = tb
+                val imeUp = WindowInsets.isImeVisible
+                // Tam ekran (Ekran sekmesi): sistem çubukları gizlenir, alt gezinme kalkar. Sekmeden çıkınca kapanır.
+                LaunchedEffect(tab) { if (tab != TAB_SCREEN) Chrome.immersive = false }
+                LaunchedEffect(Chrome.immersive) {
+                    val ctl = WindowCompat.getInsetsController(window, window.decorView)
+                    if (Chrome.immersive) {
+                        ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        ctl.hide(WindowInsetsCompat.Type.systemBars())
+                    } else {
+                        ctl.show(WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+                BackHandler(Chrome.immersive) { Chrome.immersive = false }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -94,8 +133,10 @@ class MainActivity : ComponentActivity() {
                             ),
                         ),
                 ) {
-                    Column(Modifier.fillMaxSize()) {
-                        Box(Modifier.weight(1f).statusBarsPadding()) {
+                    // imePadding: yazı alanı açılınca içerik klavyenin üstünde kalır (Ekran'da görüntü küçülür, durmaz).
+                    Column(Modifier.fillMaxSize().imePadding()) {
+                        // Ekran sekmesi tam taşar (görüntü durum çubuğunun altına da uzanır, kendi boşluğunu yönetir).
+                        Box(Modifier.weight(1f).then(if (tab == TAB_SCREEN) Modifier else Modifier.statusBarsPadding())) {
                             AnimatedContent(
                                 tab,
                                 transitionSpec = {
@@ -106,13 +147,17 @@ class MainActivity : ComponentActivity() {
                                 when (t) {
                                     0 -> HomeScreen(ui, go = { tab = it })
                                     1 -> FilesScreen(ui)
-                                    2 -> RemoteScreen(ui)
-                                    3 -> app.kopru.ui.EcosystemScreen(ui)
+                                    TAB_SCREEN -> ScreenTab(ui)
+                                    3 -> RemoteScreen(ui)
+                                    4 -> CameraTab(ui)
+                                    5 -> app.kopru.ui.EcosystemScreen(ui)
                                     else -> SettingsScreen(ui)
                                 }
                             }
                         }
-                        NavBar(tab, active = ui.transfers.values.count { it.state == uniffi.kopru_core.TransferState.ACTIVE }) { tab = it }
+                        if (!Chrome.immersive && !imeUp) {
+                            NavBar(tab, active = ui.transfers.values.count { it.state == uniffi.kopru_core.TransferState.ACTIVE }) { tab = it }
+                        }
                     }
                 }
             }
@@ -157,20 +202,35 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class NavItem(val label: String, val icon: ImageVector)
+private const val TAB_SCREEN = 2
 
-private val items = listOf(
-    NavItem("Bağlantı", Icons.Outlined.Home),
-    NavItem("Dosyalar", Icons.Outlined.Folder),
-    NavItem("Kumanda", Icons.Outlined.Mouse),
-    NavItem("Ekosistem", Icons.Outlined.Hub),
-    NavItem("Ayarlar", Icons.Outlined.Settings),
+private data class NavItem(val tab: Int, val label: String, val desc: String, val icon: ImageVector)
+
+/*
+ * Alt gezinme düzeni: 7 hedef var ama telefon genişliğinde (360 dp) 7 sekme ancak ~51 dp/sekme olur; "Ekosistem" gibi
+ * etiketler sığmaz ve 48 dp dokunma hedefi korunamaz. Bu yüzden 5 yuva: Ana · Dosyalar · Ekran · Kumanda birincil (en sık
+ * kullanılan, telefondan PC denetimi öncelikli), 5. yuva "Daha fazla" alt sayfası (Kamera · Ekosistem · Ayarlar: seyrek,
+ * bir kez kurulan şeyler). Kamera/Ekran/Kumanda ayrı hedeflerdir; "Daha fazla" içindeki bir hedefteyken yuva seçili görünür.
+ */
+private val primary = listOf(
+    NavItem(0, "Ana", "Ana sayfa, bağlantı", Icons.Outlined.Home),
+    NavItem(1, "Dosyalar", "Dosya aktarımı", Icons.Outlined.Folder),
+    NavItem(TAB_SCREEN, "Ekran", "Bilgisayar ekranı", Icons.Outlined.Cast),
+    NavItem(3, "Kumanda", "Uzaktan kumanda", Icons.Outlined.Mouse),
+)
+private val more = listOf(
+    NavItem(4, "Kamera", "Telefonu bilgisayarda web kamerası yap", Icons.Outlined.Videocam),
+    NavItem(5, "Ekosistem", "T-Suite uygulamaları ve ortak özellikler", Icons.Outlined.Hub),
+    NavItem(6, "Ayarlar", "Bağlantı, görünüm ve güncelleme", Icons.Outlined.Settings),
 )
 
 /** Alt gezinme: seçili sekmede altın gösterge. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
     val c = tb
+    var sheet by remember { mutableStateOf(false) }
+    val slots = primary + NavItem(-1, "Daha fazla", "Kamera, Ekosistem, Ayarlar", Icons.Outlined.MoreHoriz)
     Column(
         Modifier
             .fillMaxWidth()
@@ -178,15 +238,21 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
             .windowInsetsPadding(WindowInsets.navigationBars),
     ) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            items.forEachIndexed { i, it ->
-                val sel = i == selected
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
+            slots.forEach { it ->
+                val sel = if (it.tab < 0) selected >= 4 else it.tab == selected
                 val w by animateDpAsState(if (sel) 22.dp else 0.dp, tween(260), label = "ind")
                 Column(
                     Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable(remember { MutableInteractionSource() }, indication = null) { onSelect(i) }
+                        .semantics(mergeDescendants = true) {
+                            role = Role.Tab
+                            selectedState = sel
+                            contentDescription = it.label + ", " + it.desc
+                        }
+                        .clickable(remember { MutableInteractionSource() }, indication = null) { if (it.tab < 0) sheet = true else onSelect(it.tab) }
+                        .heightIn(min = 48.dp)
                         .padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -197,16 +263,44 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
                                 .background(if (sel) c.goldSoft else Color.Transparent)
                                 .padding(horizontal = 16.dp, vertical = 5.dp),
                         ) {
-                            Icon(it.icon, it.label, tint = if (sel) c.goldHi else c.muted, modifier = Modifier.size(22.dp))
+                            Icon(it.icon, null, tint = if (sel) c.goldHi else c.muted, modifier = Modifier.size(22.dp))
                         }
-                        if (i == 1 && active > 0) {
+                        if (it.tab == 1 && active > 0) {
                             Box(Modifier.padding(top = 2.dp, end = 10.dp).size(8.dp).clip(RoundedCornerShape(4.dp)).background(c.goldHi))
                         }
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text(it.label, color = if (sel) c.text else c.muted, style = MaterialTheme.typography.labelMedium)
+                    Text(it.label, color = if (sel) c.text else c.muted, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     Spacer(Modifier.height(3.dp))
                     Box(Modifier.width(w).height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.goldBrush))
+                }
+            }
+        }
+    }
+    if (sheet) {
+        ModalBottomSheet(onDismissRequest = { sheet = false }, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Daha fazla", color = c.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+                more.forEach { m ->
+                    val sel = m.tab == selected
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (sel) c.goldSoft else c.s2)
+                            .clickable { sheet = false; onSelect(m.tab) }
+                            .heightIn(min = 64.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(m.icon, null, tint = if (sel) c.goldHi else c.text2, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(m.label, color = c.text, style = MaterialTheme.typography.titleSmall)
+                            Text(m.desc, color = c.muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (sel) Icon(Icons.Outlined.Check, "Seçili", tint = c.goldHi, modifier = Modifier.size(22.dp))
+                    }
                 }
             }
         }
