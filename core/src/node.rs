@@ -33,6 +33,10 @@ use crate::{
 const CHUNK: usize = 256 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const PAIR_CODE_TTL: Duration = Duration::from_secs(300);
+/// Bir kod bu kadar yanlış denemeden sonra geçersiz kılınır (PC yeni kod gösterir).
+const PAIR_MAX_WRONG: u32 = 3;
+const PAIR_BACKOFF_BASE: Duration = Duration::from_secs(30);
+const PAIR_BACKOFF_CAP: Duration = Duration::from_secs(600);
 /// mDNS tarama penceresi: tetiklenince bu süre açık kalır, sonra daemon kapanır (pil).
 const SCAN_WINDOW: Duration = Duration::from_secs(25);
 /// Sessiz doğrudan denemeler (tarama/mDNS yok, arayüz durumu değişmez): artan aralık, üst sınır 2 dk.
@@ -125,6 +129,7 @@ pub(crate) struct Inner {
     session: Mutex<Option<Arc<Session>>>,
     state: Mutex<ConnState>,
     pair_code: Mutex<Option<(String, Instant)>>,
+    pair_guard: Mutex<PairGuard>,
     pending_pair: Mutex<Option<(ServerInfo, String)>>,
     discovered: Mutex<Vec<ServerInfo>>,
     browser: Mutex<Option<Browser>>,
@@ -199,6 +204,7 @@ impl Inner {
             session: Mutex::new(None),
             state: Mutex::new(ConnState::Disconnected),
             pair_code: Mutex::new(None),
+            pair_guard: Mutex::new(PairGuard::default()),
             pending_pair: Mutex::new(None),
             discovered: Mutex::new(Vec::new()),
             browser: Mutex::new(None),
@@ -405,16 +411,13 @@ impl Inner {
         let known = lk(&self.peers).iter().any(|p| p.fingerprint == fp);
         let mut paired_now = false;
         if !known {
-            let ok = {
-                let g = lk(&self.pair_code);
-                match (&*g, &pair_code) {
-                    (Some((code, exp)), Some(given)) => Instant::now() < *exp && constant_eq(code, given),
-                    _ => false,
-                }
-            };
+            let ip = conn.remote_address().ip();
+            let (ok, why, rotated) = self.check_pair_attempt(ip, pair_code.as_deref(), Instant::now());
+            if rotated {
+                self.emit(Event::PairCodeRotated);
+            }
             if !ok {
-                let why = if pair_code.is_some() { "eşleştirme kodu hatalı veya süresi dolmuş" } else { "eşleşmemiş cihaz" };
-                send.write_all(&reject(why)?).await?;
+                send.write_all(&reject(&why)?).await?;
                 let _ = send.finish();
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 conn.close(1u32.into(), b"rejected");
@@ -437,6 +440,48 @@ impl Inner {
         }
         self.start_session(peer, conn, send, recv, peer_caps);
         Ok(())
+    }
+
+    /// Eşleştirme denemesini denetler: (kabul, ret nedeni, kod yenilendi mi). Sayaçlar tek kilit altında tutulur
+    /// (eşzamanlı el sıkışmalar sayaçtan kaçamaz).
+    fn check_pair_attempt(&self, ip: std::net::IpAddr, given: Option<&str>, now: Instant) -> (bool, String, bool) {
+        let mut guard = lk(&self.pair_guard);
+        if let Some(left) = guard.locked_for(ip, now) {
+            log::warn!("eşleştirme: {ip} bekleme süresinde ({}s kaldı), deneme yok sayıldı", left.as_secs());
+            return (false, format!("çok fazla hatalı deneme, {} sn sonra tekrar deneyin", left.as_secs().max(1)), false);
+        }
+        let Some(given) = given else {
+            return (false, "eşleşmemiş cihaz".into(), false);
+        };
+        let mut code = lk(&self.pair_code);
+        let matched = match &*code {
+            Some((c, exp)) => {
+                let eq = constant_eq(c, given);
+                now < *exp && eq
+            }
+            None => false,
+        };
+        if matched {
+            guard.on_success(ip);
+            log::info!("eşleştirme: {ip} doğru kod ile eşleşti");
+            return (true, String::new(), false);
+        }
+        let backoff = guard.on_failure(ip, now);
+        guard.wrong += 1;
+        log::warn!("eşleştirme: {ip} yanlış/süresi dolmuş kod (kod için {}. hata, bu IP için {}. hata)", guard.wrong, guard.strikes(ip));
+        let mut rotated = false;
+        if guard.wrong >= PAIR_MAX_WRONG && code.is_some() {
+            // Kodu geçersiz kıl ve yenisini üret: arayüz PairCodeRotated ile yeniden okur.
+            *code = Some((format!("{:06}", rand::random_range(0..1_000_000u32)), now + PAIR_CODE_TTL));
+            guard.wrong = 0;
+            rotated = true;
+            log::warn!("eşleştirme: {PAIR_MAX_WRONG} yanlış deneme, kod yenilendi");
+        }
+        let why = match backoff {
+            Some(d) => format!("eşleştirme kodu hatalı; {} sn beklemeniz gerekiyor", d.as_secs()),
+            None => "eşleştirme kodu hatalı veya süresi dolmuş".to_string(),
+        };
+        (false, why, rotated)
     }
 
     fn start_client(self: &Arc<Self>) -> Result<()> {
@@ -928,6 +973,7 @@ impl Inner {
     pub fn pairing_info(&self) -> PairingInfo {
         let code = format!("{:06}", rand::random_range(0..1_000_000u32));
         *lk(&self.pair_code) = Some((code.clone(), Instant::now() + PAIR_CODE_TTL));
+        lk(&self.pair_guard).wrong = 0;
         let port = self.port();
         let addrs: Vec<String> = discovery::local_ipv4s().into_iter().map(|ip| format!("{ip}:{port}")).collect();
         let uri = format!(
@@ -1702,6 +1748,42 @@ fn inc_key(peer: &str, id: u64) -> String {
     format!("{peer}-{id:016x}")
 }
 
+/// Eşleştirme kaba kuvvet koruması: IP başına hata sayacı + üstel bekleme; koda ait toplam yanlış sayısı.
+#[derive(Default)]
+struct PairGuard {
+    wrong: u32,
+    ips: HashMap<std::net::IpAddr, (u32, Option<Instant>)>,
+}
+
+impl PairGuard {
+    fn strikes(&self, ip: std::net::IpAddr) -> u32 {
+        self.ips.get(&ip).map(|e| e.0).unwrap_or(0)
+    }
+    fn locked_for(&self, ip: std::net::IpAddr, now: Instant) -> Option<Duration> {
+        let until = self.ips.get(&ip)?.1?;
+        (until > now).then(|| until - now)
+    }
+    /// Hata kaydeder; 2. hatadan sonra bekleme başlar (30 sn, 60, 120 ... en çok 10 dk).
+    fn on_failure(&mut self, ip: std::net::IpAddr, now: Instant) -> Option<Duration> {
+        if self.ips.len() > 512 {
+            self.ips.retain(|_, e| e.1.is_some_and(|u| u > now));
+        }
+        let e = self.ips.entry(ip).or_insert((0, None));
+        e.0 += 1;
+        if e.0 >= 2 {
+            let d = (PAIR_BACKOFF_BASE * 2u32.saturating_pow(e.0 - 2)).min(PAIR_BACKOFF_CAP);
+            e.1 = Some(now + d);
+            Some(d)
+        } else {
+            None
+        }
+    }
+    fn on_success(&mut self, ip: std::net::IpAddr) {
+        self.ips.remove(&ip);
+        self.wrong = 0;
+    }
+}
+
 fn constant_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.trim().as_bytes());
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
@@ -1750,9 +1832,31 @@ mod tests {
         assert_eq!(pct_decode(&pct_encode(n)), n);
         assert!(constant_eq("123456", " 123456 "));
         assert!(!constant_eq("123456", "123457"));
+        assert!(!constant_eq("123456", "12345"));
         // Bozuk/kötü niyetli girdi panik yaratmamalı.
         assert_eq!(pct_decode("%ğ1%"), "%ğ1%");
         assert_eq!(pct_decode("a%2"), "a%2");
         assert_eq!(pct_decode("%41"), "A");
+    }
+
+    #[test]
+    fn pair_guard_backoff_doubles_and_caps() {
+        let ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
+        let t0 = Instant::now();
+        let mut g = PairGuard::default();
+        assert_eq!(g.on_failure(ip, t0), None);
+        assert_eq!(g.locked_for(ip, t0), None);
+        assert_eq!(g.on_failure(ip, t0), Some(Duration::from_secs(30)));
+        assert!(g.locked_for(ip, t0 + Duration::from_secs(10)).is_some());
+        assert!(g.locked_for(ip, t0 + Duration::from_secs(31)).is_none());
+        assert_eq!(g.on_failure(ip, t0), Some(Duration::from_secs(60)));
+        for _ in 0..20 {
+            g.on_failure(ip, t0);
+        }
+        assert_eq!(g.on_failure(ip, t0), Some(PAIR_BACKOFF_CAP));
+        let other: std::net::IpAddr = "10.0.0.6".parse().unwrap();
+        assert!(g.locked_for(other, t0).is_none());
+        g.on_success(ip);
+        assert!(g.locked_for(ip, t0).is_none());
     }
 }

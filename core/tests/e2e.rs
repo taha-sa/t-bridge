@@ -203,6 +203,36 @@ fn wrong_code_rejected() {
 }
 
 #[test]
+fn repeated_wrong_codes_trigger_backoff_even_with_correct_code() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pch = Arc::new(TestHost::default());
+    let pc = node(&tmp.path().join("pc"), "PC", Role::Server, Platform::Desktop, pch);
+    let info = pc.pairing_info();
+    let hh = Arc::new(TestHost::default());
+    let intruder = node(&tmp.path().join("x"), "Yabancı", Role::Client, Platform::Android, hh.clone());
+    let wrong = |c: &str| loopback_uri(&info, pc.port()).replace(&format!("c={}", info.code), &format!("c={c}"));
+    let mut last = String::new();
+    for _ in 0..2 {
+        hh.clear();
+        intruder.pair_uri(wrong("000000x")).unwrap();
+        last = hh.wait("ret", 15, |e| match e {
+            Event::PairFailed { reason } => Some(reason.clone()),
+            _ => None,
+        });
+    }
+    assert!(last.contains("reddedildi"), "{last}");
+    // Bekleme süresinde DOĞRU kod bile kabul edilmemeli (kaba kuvvet koruması).
+    hh.clear();
+    intruder.pair_uri(loopback_uri(&info, pc.port())).unwrap();
+    let reason = hh.wait("ret", 15, |e| match e {
+        Event::PairFailed { reason } => Some(reason.clone()),
+        _ => None,
+    });
+    assert!(reason.contains("reddedildi"), "{reason}");
+    assert!(pc.peers().is_empty());
+}
+
+#[test]
 fn wrong_fingerprint_rejected() {
     let tmp = tempfile::tempdir().unwrap();
     let pc = node(&tmp.path().join("pc"), "PC", Role::Server, Platform::Desktop, Arc::new(TestHost::default()));

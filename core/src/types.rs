@@ -252,6 +252,8 @@ pub enum Event {
     State { state: ConnState, peer: Option<PeerInfo> },
     Paired { peer: PeerInfo },
     PairFailed { reason: String },
+    /// PC'de: yanlış denemeler yüzünden eşleştirme kodu geçersiz kılındı; arayüz yeni kodu okumalı.
+    PairCodeRotated,
     Discovered { servers: Vec<ServerInfo> },
     /// İstemci: sınırlı mDNS tarama penceresi açıldı/kapandı (Android MulticastLock buna bağlı).
     Scanning { on: bool },
