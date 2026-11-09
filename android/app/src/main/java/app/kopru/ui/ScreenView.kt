@@ -145,66 +145,69 @@ fun ScreenViewer(
                     var hRem = 0f
                     var lastSend = 0L
                     first.consume()
-                    while (true) {
-                        val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
-                        val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
-                        if (ev == null) {
-                            // Basılı tut: sürükle-bırak başlat (imleç o noktaya, sol tuş basılı).
-                            dragging = true
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            val n = toNorm(first.position)
-                            Core.node?.sendScreenPointer(n.x, n.y, monitor.toUInt())
-                            Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, true))
-                            continue
-                        }
-                        val pressed = ev.changes.filter { it.pressed }
-                        maxPointers = maxOf(maxPointers, pressed.size)
-                        if (pressed.isEmpty()) break
-                        if (pressed.size == 1 && maxPointers == 1) {
-                            val p = pressed[0]
-                            val d = p.position - p.previousPosition
-                            moved += d.getDistance()
-                            if (dragging) {
-                                val now = SystemClock.uptimeMillis()
-                                if (now - lastSend >= 8) {
-                                    lastSend = now
-                                    val n = toNorm(p.position)
-                                    Core.node?.sendScreenPointer(n.x, n.y, monitor.toUInt())
-                                }
-                            } else if (scale > 1.01f && moved > slop) {
-                                pan = clampPan(pan + d) // yakınken tek parmak: kaydır (pan)
+                    try {
+                        while (true) {
+                            val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
+                            val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
+                            if (ev == null) {
+                                // Basılı tut: sürükle-bırak başlat (imleç o noktaya, sol tuş basılı).
+                                dragging = true
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                val n = toNorm(first.position)
+                                Core.node?.sendScreenPointer(n.x, n.y, monitor.toUInt())
+                                Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, true))
+                                continue
                             }
-                        } else if (pressed.size >= 2) {
-                            val a = pressed[0]
-                            val b = pressed[1]
-                            val dist = hypot(a.position.x - b.position.x, a.position.y - b.position.y)
-                            val pdist = hypot(a.previousPosition.x - b.previousPosition.x, a.previousPosition.y - b.previousPosition.y)
-                            val centroidD = ((a.position - a.previousPosition) + (b.position - b.previousPosition)) / 2f
-                            moved += abs(centroidD.x) + abs(centroidD.y)
-                            if (pdist > 0f && abs(dist - pdist) > 1.5f) {
-                                // Çimdik: yakınlaştır (+ merkez kaydırması)
-                                scale = (scale * dist / pdist).coerceIn(1f, 5f)
-                                pan = clampPan(pan + centroidD)
-                                moved += 100f // çimdik tık sayılmaz
-                            } else {
-                                // İki parmak sürükle: kaydırma (doğal yön, Touchpad ile aynı)
-                                scrollRem += -centroidD.y * 3f
-                                hRem += -centroidD.x * 3f
-                                val sy = scrollRem.roundToInt()
-                                val sx = hRem.roundToInt()
-                                if (abs(sy) >= 8 || abs(sx) >= 8) {
-                                    Core.node?.sendPc(PcCommand.Scroll(if (abs(sx) >= 8) sx else 0, if (abs(sy) >= 8) sy else 0))
-                                    if (abs(sy) >= 8) scrollRem -= sy
-                                    if (abs(sx) >= 8) hRem -= sx
+                            val pressed = ev.changes.filter { it.pressed }
+                            maxPointers = maxOf(maxPointers, pressed.size)
+                            if (pressed.isEmpty()) break
+                            if (pressed.size == 1 && maxPointers == 1) {
+                                val p = pressed[0]
+                                val d = p.position - p.previousPosition
+                                moved += d.getDistance()
+                                if (dragging) {
+                                    val now = SystemClock.uptimeMillis()
+                                    if (now - lastSend >= 8) {
+                                        lastSend = now
+                                        val n = toNorm(p.position)
+                                        Core.node?.sendScreenPointer(n.x, n.y, monitor.toUInt())
+                                    }
+                                } else if (scale > 1.01f && moved > slop) {
+                                    pan = clampPan(pan + d) // yakınken tek parmak: kaydır (pan)
+                                }
+                            } else if (pressed.size >= 2) {
+                                val a = pressed[0]
+                                val b = pressed[1]
+                                val dist = hypot(a.position.x - b.position.x, a.position.y - b.position.y)
+                                val pdist = hypot(a.previousPosition.x - b.previousPosition.x, a.previousPosition.y - b.previousPosition.y)
+                                val centroidD = ((a.position - a.previousPosition) + (b.position - b.previousPosition)) / 2f
+                                moved += abs(centroidD.x) + abs(centroidD.y)
+                                if (pdist > 0f && abs(dist - pdist) > 1.5f) {
+                                    // Çimdik: yakınlaştır (+ merkez kaydırması)
+                                    scale = (scale * dist / pdist).coerceIn(1f, 5f)
+                                    pan = clampPan(pan + centroidD)
+                                    moved += 100f // çimdik tık sayılmaz
+                                } else {
+                                    // İki parmak sürükle: kaydırma (doğal yön, Touchpad ile aynı)
+                                    scrollRem += -centroidD.y * 3f
+                                    hRem += -centroidD.x * 3f
+                                    val sy = scrollRem.roundToInt()
+                                    val sx = hRem.roundToInt()
+                                    if (abs(sy) >= 8 || abs(sx) >= 8) {
+                                        Core.node?.sendPc(PcCommand.Scroll(if (abs(sx) >= 8) sx else 0, if (abs(sy) >= 8) sy else 0))
+                                        if (abs(sy) >= 8) scrollRem -= sy
+                                        if (abs(sx) >= 8) hRem -= sx
+                                    }
                                 }
                             }
+                            ev.changes.forEach { it.consume() }
                         }
-                        ev.changes.forEach { it.consume() }
+                    } finally {
+                        // İptal/kopma/istisna dahil: sol tuş PC'de basılı kalmasın.
+                        if (dragging) Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, false))
                     }
                     val dur = SystemClock.uptimeMillis() - t0
-                    if (dragging) {
-                        Core.node?.sendPc(PcCommand.Button(MouseButton.LEFT, false))
-                    } else if (moved < slop * 2 && dur < 300) {
+                    if (!dragging && moved < slop * 2 && dur < 300) {
                         val n = toNorm(first.position)
                         clickAt(n.x, n.y, monitor, if (maxPointers >= 2) MouseButton.RIGHT else MouseButton.LEFT)
                     }

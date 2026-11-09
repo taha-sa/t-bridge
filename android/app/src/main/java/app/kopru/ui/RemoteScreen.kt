@@ -340,63 +340,66 @@ private fun Touchpad(sens: Float) {
                         ripple.snapTo(0f)
                         ripple.animateTo(1f, tween(520))
                     }
-                    while (true) {
-                        val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
-                        val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
-                        if (ev == null) {
-                            // Basılı tutuldu: sürükleme başlat.
-                            dragging = true
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            pc(PcCommand.Button(MouseButton.LEFT, true))
-                            continue
-                        }
-                        val pressed = ev.changes.filter { it.pressed }
-                        maxPointers = maxOf(maxPointers, pressed.size)
-                        if (pressed.isEmpty()) break
-                        val now = SystemClock.uptimeMillis()
-                        val dt = (now - lastT).coerceAtLeast(1)
-                        lastT = now
-                        if (pressed.size == 1 && maxPointers == 1) {
-                            val c = pressed[0]
-                            val d: Offset = c.position - c.previousPosition
-                            moved += d.getDistance()
-                            if (moved > slop || dragging) {
-                                // İvme: hızlı hareket daha uzağa gider.
-                                val speed = d.getDistance() / dt
-                                val f = sens * (1f + min(speed, 3f) * 0.6f)
-                                val fx = d.x * f + remX
-                                val fy = d.y * f + remY
-                                val ix = fx.toInt()
-                                val iy = fy.toInt()
-                                remX = fx - ix
-                                remY = fy - iy
-                                if (ix != 0 || iy != 0) Core.node?.sendPointer(ix, iy)
+                    try {
+                        while (true) {
+                            val wait = if (!dragging && maxPointers == 1 && moved < slop) (450 - (SystemClock.uptimeMillis() - t0)).coerceAtLeast(1) else Long.MAX_VALUE
+                            val ev = withTimeoutOrNull(wait) { awaitPointerEvent() }
+                            if (ev == null) {
+                                // Basılı tutuldu: sürükleme başlat.
+                                dragging = true
+                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                pc(PcCommand.Button(MouseButton.LEFT, true))
+                                continue
                             }
-                        } else if (pressed.size >= 2) {
-                            var ax = 0f
-                            var ay = 0f
-                            pressed.forEach { val d = it.position - it.previousPosition; ax += d.x; ay += d.y }
-                            ax /= pressed.size
-                            ay /= pressed.size
-                            moved += abs(ax) + abs(ay)
-                            // Doğal kaydırma (telefondaki gibi): parmak yukarı → aşağıdaki içerik gelir (tekerlek aşağı).
-                            // PC tarafı: tekerlek = -dy, yatay tekerlek = dx.
-                            scrollRem += -ay * 3f
-                            hScrollRem += -ax * 3f
-                            val sy = scrollRem.roundToInt()
-                            val sx = hScrollRem.roundToInt()
-                            if (abs(sy) >= 8 || abs(sx) >= 8) {
-                                pc(PcCommand.Scroll(if (abs(sx) >= 8) sx else 0, if (abs(sy) >= 8) sy else 0))
-                                if (abs(sy) >= 8) scrollRem -= sy
-                                if (abs(sx) >= 8) hScrollRem -= sx
+                            val pressed = ev.changes.filter { it.pressed }
+                            maxPointers = maxOf(maxPointers, pressed.size)
+                            if (pressed.isEmpty()) break
+                            val now = SystemClock.uptimeMillis()
+                            val dt = (now - lastT).coerceAtLeast(1)
+                            lastT = now
+                            if (pressed.size == 1 && maxPointers == 1) {
+                                val c = pressed[0]
+                                val d: Offset = c.position - c.previousPosition
+                                moved += d.getDistance()
+                                if (moved > slop || dragging) {
+                                    // İvme: hızlı hareket daha uzağa gider.
+                                    val speed = d.getDistance() / dt
+                                    val f = sens * (1f + min(speed, 3f) * 0.6f)
+                                    val fx = d.x * f + remX
+                                    val fy = d.y * f + remY
+                                    val ix = fx.toInt()
+                                    val iy = fy.toInt()
+                                    remX = fx - ix
+                                    remY = fy - iy
+                                    if (ix != 0 || iy != 0) Core.node?.sendPointer(ix, iy)
+                                }
+                            } else if (pressed.size >= 2) {
+                                var ax = 0f
+                                var ay = 0f
+                                pressed.forEach { val d = it.position - it.previousPosition; ax += d.x; ay += d.y }
+                                ax /= pressed.size
+                                ay /= pressed.size
+                                moved += abs(ax) + abs(ay)
+                                // Doğal kaydırma (telefondaki gibi): parmak yukarı → aşağıdaki içerik gelir (tekerlek aşağı).
+                                // PC tarafı: tekerlek = -dy, yatay tekerlek = dx.
+                                scrollRem += -ay * 3f
+                                hScrollRem += -ax * 3f
+                                val sy = scrollRem.roundToInt()
+                                val sx = hScrollRem.roundToInt()
+                                if (abs(sy) >= 8 || abs(sx) >= 8) {
+                                    pc(PcCommand.Scroll(if (abs(sx) >= 8) sx else 0, if (abs(sy) >= 8) sy else 0))
+                                    if (abs(sy) >= 8) scrollRem -= sy
+                                    if (abs(sx) >= 8) hScrollRem -= sx
+                                }
                             }
+                            ev.changes.forEach { it.consume() }
                         }
-                        ev.changes.forEach { it.consume() }
+                    } finally {
+                        // İptal/kopma/istisna dahil: sol tuş PC'de basılı kalmasın.
+                        if (dragging) pc(PcCommand.Button(MouseButton.LEFT, false))
                     }
                     val dur = SystemClock.uptimeMillis() - t0
-                    if (dragging) {
-                        pc(PcCommand.Button(MouseButton.LEFT, false))
-                    } else if (moved < slop * 2 && dur < 300) {
+                    if (!dragging && moved < slop * 2 && dur < 300) {
                         pc(PcCommand.Click(if (maxPointers >= 2) MouseButton.RIGHT else MouseButton.LEFT, false))
                     }
                 }
