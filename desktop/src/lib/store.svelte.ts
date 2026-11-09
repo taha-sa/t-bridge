@@ -30,6 +30,7 @@ const empty: Snapshot = {
     screenShare: true,
     screenAllowed: [],
     cameraEnabled: false,
+    autoEcosystem: true,
   },
   downloadDir: '',
   error: null,

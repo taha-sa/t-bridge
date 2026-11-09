@@ -82,6 +82,7 @@ pub struct Hub {
     last_sent: Mutex<Vec<SuiteApp>>,
     throttle: Mutex<Throttle>,
     ev_tx: mpsc::UnboundedSender<(String, Envelope)>,
+    auto: Mutex<AutoState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,12 +101,81 @@ fn shared(app: &AppHandle) -> Arc<Shared> {
     app.state::<Arc<Shared>>().inner().clone()
 }
 
-/// Kapalıyken başlatma argümanları: manifest `launchArgs`; yoksa argümansız (eski T-Downloader kaydı için `--background`).
+/// Kapalıyken başlatma argümanları: manifest `launchArgs`; yoksa bilinen uygulama bayrakları (arka planda/tepside açılır).
 fn launch_args(m: &registry::Manifest) -> Vec<String> {
-    if m.launch_args.is_none() && m.id == "t-downloader" {
-        return vec!["--background".into()];
+    if m.launch_args.is_none() {
+        match m.id.as_str() {
+            "t-downloader" | "t-desktree" => return vec!["--background".into()],
+            "t-ramcash" => return vec!["--tray".into()],
+            _ => {}
+        }
     }
     m.effective_launch_args()
+}
+
+/// Otomatik başlatma adayı (saf veri; karar `AutoState::pick` içinde).
+#[derive(Debug, Clone)]
+pub struct AutoCand {
+    pub id: String,
+    /// Var olan çalıştırılabilir dosya; kurulu değilse `None`.
+    pub exe: Option<std::path::PathBuf>,
+    pub running: bool,
+    pub args: Vec<String>,
+}
+
+const AUTO_BASE_DELAY: Duration = Duration::from_secs(30);
+const AUTO_MAX_DELAY: Duration = Duration::from_secs(300);
+const AUTO_MAX_TRIES: u32 = 5;
+
+/// Otomatik başlatma durumu: uygulama başına deneme sayısı ve son deneme anı (hız sınırı).
+#[derive(Default)]
+pub struct AutoState {
+    tries: HashMap<String, (u32, Instant)>,
+}
+
+impl AutoState {
+    /// Yeni telefon oturumu: sayaçlar sıfırlanır.
+    pub fn reset(&mut self) {
+        self.tries.clear();
+    }
+
+    /// Şimdi başlatılacak adayları seçer ve denemeyi kaydeder. Kurulu + kapalı + argümanı bilinen olanlar;
+    /// önceki denemeden beri üstel bekleme (30 sn, 60 sn, ... en çok 5 dk) geçmiş ve en çok 5 deneme.
+    pub fn pick(&mut self, cands: &[AutoCand], now: Instant) -> Vec<AutoCand> {
+        let mut out = Vec::new();
+        for c in cands {
+            if c.running {
+                self.tries.remove(&c.id);
+                continue;
+            }
+            // Argümansız başlatma pencere açıp odağı çalar: bilinmeyen uygulamalar otomatik açılmaz.
+            if c.exe.is_none() || c.args.is_empty() {
+                continue;
+            }
+            if let Some((n, at)) = self.tries.get(&c.id) {
+                let wait = AUTO_BASE_DELAY.saturating_mul(1u32 << (*n - 1).min(8)).min(AUTO_MAX_DELAY);
+                if *n >= AUTO_MAX_TRIES || now.duration_since(*at) < wait {
+                    continue;
+                }
+            }
+            let n = self.tries.get(&c.id).map_or(0, |t| t.0);
+            self.tries.insert(c.id.clone(), (n + 1, now));
+            out.push(c.clone());
+        }
+        out
+    }
+
+    /// Deneme hakkı tükendi mi (telefonda elle "Aç" yedeği gösterilir).
+    pub fn failed(&self, id: &str) -> bool {
+        self.tries.get(id).is_some_and(|t| t.0 >= AUTO_MAX_TRIES)
+    }
+}
+
+/// Yükleyicinin düzeni: `%LOCALAPPDATA%\Programs\T-Suite\<Ad>\<Ad>.exe` (manifest yoksa yedek yol).
+fn installer_exe(display: &str) -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?;
+    let p = base.join("Programs").join("T-Suite").join(display).join(format!("{display}.exe"));
+    p.exists().then_some(p)
 }
 
 impl Hub {
@@ -222,6 +292,61 @@ impl Hub {
     }
 
     // ---------------------------------------------------------------- komutlar
+
+    fn auto_candidates(&self) -> Vec<AutoCand> {
+        let g = self.apps.lock().unwrap();
+        let mut out: Vec<AutoCand> = Vec::new();
+        for (id, name) in CATALOG {
+            let (exe, running, args) = match g.get(*id) {
+                Some(e) => (
+                    Some(std::path::PathBuf::from(&e.m.exe_path)).filter(|p| p.exists()).or_else(|| installer_exe(name)),
+                    e.running,
+                    launch_args(&e.m),
+                ),
+                None => (installer_exe(name), false, launch_args(&registry::Manifest { id: (*id).into(), ..Default::default() })),
+            };
+            out.push(AutoCand { id: (*id).into(), exe, running, args });
+        }
+        for e in g.values().filter(|e| e.m.id != "t-bridge" && !CATALOG.iter().any(|(id, _)| *id == e.m.id)) {
+            out.push(AutoCand {
+                id: e.m.id.clone(),
+                exe: Some(std::path::PathBuf::from(&e.m.exe_path)).filter(|p| p.exists()),
+                running: e.running,
+                args: launch_args(&e.m),
+            });
+        }
+        out
+    }
+
+    /// Ekosistemi otomatik başlat: telefon bağlıysa ve ayar açıksa, kurulu ama kapalı uygulamaları arka planda açar.
+    /// Odak çalmaz (uygulamanın kendi `--tray`/`--background` bayrağı); hız sınırlı; hatalar günlüğe yazılır.
+    pub fn auto_start(self: &Arc<Self>) {
+        let sh = shared(&self.app);
+        if !crate::app::lk(&sh.settings).auto_ecosystem {
+            return;
+        }
+        if !sh.node().is_some_and(|n| n.state() == ConnState::Connected) {
+            return;
+        }
+        let picks = self.auto.lock().unwrap().pick(&self.auto_candidates(), Instant::now());
+        for c in picks {
+            let Some(exe) = c.exe else { continue };
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.args(&c.args);
+            if let Some(d) = exe.parent() {
+                cmd.current_dir(d);
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            }
+            match cmd.spawn() {
+                Ok(_) => log::info!("ekosistem: {} arka planda başlatıldı", c.id),
+                Err(e) => log::warn!("ekosistem: {} başlatılamadı: {e}", c.id),
+            }
+        }
+    }
 
     fn launch(&self, id: &str, extra: &[String]) -> Result<(), String> {
         let exe = {
@@ -386,6 +511,7 @@ pub fn start(app: &AppHandle) {
         last_sent: Mutex::new(Vec::new()),
         throttle: Mutex::new(Throttle::default()),
         ev_tx: tx,
+        auto: Mutex::new(AutoState::default()),
     });
     for cmd in ["file.send", "phone.status", "app.show", "app.version"] {
         let h = hub.clone();
@@ -421,6 +547,8 @@ pub fn start(app: &AppHandle) {
         });
         loop {
             h2.refresh_async().await;
+            let h4 = h2.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || h4.auto_start()).await;
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
@@ -438,7 +566,12 @@ pub fn on_phone_state(connected: bool) {
     h.server.publish(if connected { "phone.connected" } else { "phone.disconnected" }, Some(json!({})));
     if connected {
         *h.last_sent.lock().unwrap() = Vec::new(); // yeni oturum: listeyi baştan gönder
-        { let h = h.clone(); tauri::async_runtime::spawn_blocking(move || h.refresh()); }
+        h.auto.lock().unwrap().reset();
+        let h = h.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            h.refresh();
+            h.auto_start();
+        });
     }
 }
 
@@ -670,6 +803,63 @@ mod tests {
         m.launch_args = Some(vec!["--tray".into()]);
         assert_eq!(launch_args(&m), vec!["--tray".to_string()]);
         assert_eq!(launch_args(&registry::Manifest { id: "t-downloader".into(), ..Default::default() }), vec!["--background".to_string()]);
+        assert_eq!(launch_args(&registry::Manifest { id: "t-ramcash".into(), ..Default::default() }), vec!["--tray".to_string()]);
+        assert_eq!(launch_args(&registry::Manifest { id: "t-desktree".into(), ..Default::default() }), vec!["--background".to_string()]);
+    }
+
+    fn cand(id: &str, installed: bool, running: bool, args: &[&str]) -> AutoCand {
+        AutoCand {
+            id: id.into(),
+            exe: installed.then(|| std::path::PathBuf::from("x.exe")),
+            running,
+            args: args.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn auto_start_picks_only_installed_stopped_with_args() {
+        let mut st = AutoState::default();
+        let now = Instant::now();
+        let got = st.pick(&[cand("a", true, false, &["--tray"]), cand("b", false, false, &["--x"]), cand("c", true, true, &["--x"]), cand("d", true, false, &[])], now);
+        assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
+    }
+
+    #[test]
+    fn auto_start_never_twice_and_rate_limited() {
+        let mut st = AutoState::default();
+        let t0 = Instant::now();
+        let a = [cand("a", true, false, &["--tray"])];
+        assert_eq!(st.pick(&a, t0).len(), 1);
+        assert!(st.pick(&a, t0 + Duration::from_secs(5)).is_empty());
+        assert_eq!(st.pick(&a, t0 + Duration::from_secs(31)).len(), 1);
+        assert!(st.pick(&a, t0 + Duration::from_secs(31 + 59)).is_empty());
+        assert_eq!(st.pick(&a, t0 + Duration::from_secs(31 + 61)).len(), 1);
+    }
+
+    #[test]
+    fn auto_start_gives_up_after_max_tries_until_reset() {
+        let mut st = AutoState::default();
+        let mut t = Instant::now();
+        let a = [cand("a", true, false, &["--tray"])];
+        let mut n = 0;
+        for _ in 0..20 {
+            n += st.pick(&a, t).len();
+            t += Duration::from_secs(400);
+        }
+        assert_eq!(n, AUTO_MAX_TRIES as usize);
+        assert!(st.failed("a"));
+        st.reset();
+        assert!(!st.failed("a"));
+        assert_eq!(st.pick(&a, t).len(), 1);
+    }
+
+    #[test]
+    fn auto_start_running_clears_counter() {
+        let mut st = AutoState::default();
+        let t = Instant::now();
+        assert_eq!(st.pick(&[cand("a", true, false, &["--tray"])], t).len(), 1);
+        assert!(st.pick(&[cand("a", true, true, &["--tray"])], t).is_empty());
+        assert_eq!(st.pick(&[cand("a", true, false, &["--tray"])], t).len(), 1);
     }
 
     #[test]

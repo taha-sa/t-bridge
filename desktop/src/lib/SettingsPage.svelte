@@ -119,6 +119,7 @@
         </div>
       </div>
     {/if}
+    {@render item('Ekosistemi otomatik başlat', 'Telefon bağlanınca kurulu T-Suite uygulamaları (T-RamCash, T-Downloader…) arka planda kendiliğinden açılır.', 'autoEcosystem')}
     {@render item('Pano eşitleme', 'Kopyaladığın metin telefonda da kopyalanmış olur.', 'clipboardSync')}
     {@render item('Telefon bildirimlerini göster', 'Kapatırsan telefon bildirimleri hiç alınmaz; ses ve uyarı da durur.', 'notifMirror')}
     {#if s.settings.notifMirror}

@@ -45,6 +45,8 @@ pub struct Settings {
     pub screen_allowed: Vec<String>,
     /// Telefon kamerası etkin (sanal kamera uygulama açılışında başlatılır). Yalnızca Windows 11.
     pub camera_enabled: bool,
+    /// Telefon bağlanınca kurulu T-Suite uygulamalarını arka planda başlat.
+    pub auto_ecosystem: bool,
     /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
     #[serde(default = "legacy_version")]
     pub settings_version: u32,
@@ -88,6 +90,7 @@ impl Default for Settings {
             screen_share: true,
             screen_allowed: Vec::new(),
             camera_enabled: false,
+            auto_ecosystem: true,
             settings_version: SETTINGS_VERSION,
         }
     }

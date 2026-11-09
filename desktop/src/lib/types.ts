@@ -61,6 +61,7 @@ export interface Settings {
   screenShare: boolean
   screenAllowed: string[]
   cameraEnabled: boolean
+  autoEcosystem: boolean
 }
 
 export type Theme = 'dark' | 'system' | 'light'
