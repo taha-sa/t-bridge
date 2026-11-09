@@ -26,7 +26,8 @@ pub const MAX_CONCURRENT_COMMANDS: usize = 8;
 struct QEvent {
     name: String,
     id: Option<String>,
-    line: Vec<u8>,
+    /// Aboneler arasında paylaşılır (abone başına kopya yok).
+    line: Arc<[u8]>,
 }
 
 /// Olay kuyruğu (saf mantık, birim testli): en eski atılır + coalesce + terminal olay progress'i siler.
@@ -36,7 +37,7 @@ struct EventQueue {
 }
 
 impl EventQueue {
-    fn push(&mut self, name: &str, id: Option<String>, line: Vec<u8>) {
+    fn push(&mut self, name: &str, id: Option<String>, line: Arc<[u8]>) {
         let coalesce = name.ends_with(".progress") || name == "ram.status";
         if coalesce {
             self.q.retain(|e| !(e.name == name && e.id == id));
@@ -116,10 +117,10 @@ impl Server {
         e.name = Some(name.into());
         e.data = data;
         let id = e.data.as_ref().and_then(|d| d.get("id")).and_then(Value::as_str).map(String::from);
-        let line = e.to_line();
+        let line: Arc<[u8]> = e.to_line().into();
         for s in self.inner.sessions.lock().unwrap().iter() {
             if s.prefixes.lock().unwrap().iter().any(|p| name.starts_with(p.as_str())) {
-                s.events.lock().unwrap().push(name, id.clone(), line.clone());
+                s.events.lock().unwrap().push(name, id.clone(), Arc::clone(&line));
                 s.notify.notify_one();
             }
         }
@@ -186,8 +187,8 @@ async fn session(inner: Arc<Inner>, pipe: tokio::net::windows::named_pipe::Named
     let writer = tokio::spawn(async move {
         loop {
             // Yanıtlar önceliklidir ve düşmez; olaylar ayrı kuyruktan.
-            let next = match rx.try_recv() {
-                Ok(b) => Some(b),
+            let next: Option<Arc<[u8]>> = match rx.try_recv() {
+                Ok(b) => Some(b.into()),
                 Err(_) => wme.events.lock().unwrap().q.pop_front().map(|e| e.line),
             };
             match next {
@@ -296,7 +297,7 @@ mod tests {
     use super::*;
 
     fn ev(q: &mut EventQueue, name: &str, id: &str) {
-        q.push(name, Some(id.into()), format!("{name}|{id}").into_bytes());
+        q.push(name, Some(id.into()), format!("{name}|{id}").into_bytes().into());
     }
 
     #[test]
