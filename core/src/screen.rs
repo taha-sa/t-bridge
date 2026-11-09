@@ -59,6 +59,11 @@ impl Gate {
         Self::default()
     }
 
+    /// Yazıcı çöktükten sonra yeniden açılan akış için: ilk anahtar kareye dek P kareleri atar ve anahtar kare ister.
+    pub fn awaiting_key() -> Self {
+        Self { waiting_key: true, want_key: true, ..Self::default() }
+    }
+
     /// Kuyruktaki en eski ile en yeni kare arasındaki fark (ms).
     pub fn backlog_ms(&self, newest_pts_us: u64) -> u64 {
         self.queue.front().map(|f| newest_pts_us.saturating_sub(*f) / 1000).unwrap_or(0)

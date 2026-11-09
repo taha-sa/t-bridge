@@ -85,6 +85,35 @@ pub(crate) struct ScreenOut {
     gate: Arc<Mutex<crate::screen::Gate>>,
 }
 
+/// Yazıcı alıcısı kapandıysa yuvayı boşaltır; true = az önce zehirliydi.
+fn reset_if_dead(slot: &mut Option<ScreenOut>) -> bool {
+    if slot.as_ref().is_some_and(|o| o.tx.is_closed()) {
+        *slot = None;
+        return true;
+    }
+    false
+}
+
+#[cfg(test)]
+mod video_slot_tests {
+    use super::*;
+    use crate::screen::{Gate, Offer};
+
+    #[test]
+    fn dead_writer_slot_is_reset_and_key_requested() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut slot = Some(ScreenOut { tx, gate: Arc::new(Mutex::new(Gate::new())) });
+        assert!(!reset_if_dead(&mut slot)); // canlı
+        drop(rx); // yazıcı görevi öldü
+        assert!(reset_if_dead(&mut slot));
+        assert!(slot.is_none());
+        let mut g = Gate::awaiting_key();
+        assert_eq!(g.offer(0, false), Offer::Drop); // P kare atılır
+        assert!(g.take_want_key()); // anahtar kare istenir
+        assert_eq!(g.offer(1, true), Offer::Accept);
+    }
+}
+
 /// Alıcı tarafında kalıcı küçük durum: tamamlanmış ve iptal edilmiş aktarım anahtarları.
 #[derive(Default, Serialize, Deserialize)]
 struct IncPersist {
@@ -1516,9 +1545,11 @@ impl Inner {
             return false;
         }
         let mut g = lk(slot);
+        // Yazıcı görevi öldüyse (yazım hatası) yuva zehirli kalmasın: sıfırla, yeni akış + anahtar kare.
+        let recovering = reset_if_dead(&mut g);
         if g.is_none() {
             let (tx, mut rx) = mpsc::unbounded_channel::<(FrameHeader, Vec<u8>)>();
-            let gate = Arc::new(Mutex::new(crate::screen::Gate::new()));
+            let gate = Arc::new(Mutex::new(if recovering { crate::screen::Gate::awaiting_key() } else { crate::screen::Gate::new() }));
             let (gate2, conn) = (gate.clone(), s.conn.clone());
             self.rt.spawn(async move {
                 let Ok(mut stream) = conn.open_uni().await else { return };
@@ -1541,7 +1572,11 @@ impl Inner {
         if offer == Offer::Drop {
             return false;
         }
-        out.tx.send((FrameHeader { pts_us, key, len: data.len() as u32 }, data)).is_ok()
+        if out.tx.send((FrameHeader { pts_us, key, len: data.len() as u32 }, data)).is_err() {
+            *g = None; // sonraki kare yeni akış açar
+            return false;
+        }
+        true
     }
 
     /// Telefon: (anahtar kare isteniyor mu, gönderim kuyruğu gecikmesi ms).
