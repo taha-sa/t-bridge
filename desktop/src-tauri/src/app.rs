@@ -47,6 +47,8 @@ pub struct Settings {
     pub camera_enabled: bool,
     /// Telefon bağlanınca kurulu T-Suite uygulamalarını arka planda başlat.
     pub auto_ecosystem: bool,
+    /// Arayüz dili: "system" | "tr" | "en" | "de".
+    pub language: String,
     /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
     #[serde(default = "legacy_version")]
     pub settings_version: u32,
@@ -91,6 +93,7 @@ impl Default for Settings {
             screen_allowed: Vec::new(),
             camera_enabled: false,
             auto_ecosystem: true,
+            language: "system".into(),
             settings_version: SETTINGS_VERSION,
         }
     }
@@ -155,13 +158,13 @@ impl Shared {
         let state = node.map(|n| n.state()).unwrap_or(ConnState::Disconnected);
         let peer = node.and_then(|n| n.current_peer());
         let mut tip = match (state, peer) {
-            (ConnState::Connected, Some(p)) => format!("T-Bridge — {} bağlı", p.name),
-            (ConnState::Connecting, _) => "T-Bridge — bağlanıyor…".to_string(),
-            _ => "T-Bridge — telefon bağlı değil".to_string(),
+            (ConnState::Connected, Some(p)) => crate::i18n::tf("tip.connected", &[("name", &p.name)]),
+            (ConnState::Connecting, _) => crate::i18n::t("tip.connecting"),
+            _ => crate::i18n::t("tip.idle"),
         };
         if state == ConnState::Connected
             && let Some(b) = *lk(&self.battery) {
-                tip.push_str(&format!("\nPil: %{}{}", b.level, if b.charging { " ⚡" } else { "" }));
+                tip.push_str(&format!("\n{}{}", crate::i18n::tf("tip.battery", &[("level", &b.level.to_string())]), if b.charging { " ⚡" } else { "" }));
             }
         let _ = tray.set_tooltip(Some(tip));
     }
@@ -270,7 +273,7 @@ impl Shared {
                     }
                 };
                 if warn && lk(&self.settings).low_battery_warn {
-                    self.toast("Telefonun şarjı azaldı", &format!("Pil %{}", level));
+                    self.toast(&crate::i18n::t("toast.lowbat.title"), &crate::i18n::tf("toast.lowbat.body", &[("level", &level.to_string())]));
                 }
                 self.update_tray();
             }
@@ -325,7 +328,7 @@ impl Shared {
                     && !self.window_visible()
                 => {
                     let name = info.name.rsplit('/').next().unwrap_or(&info.name);
-                    self.toast("Dosya alındı", name);
+                    self.toast(&crate::i18n::t("toast.filein"), name);
                 }
             _ => {}
         }

@@ -352,10 +352,10 @@ impl Hub {
     fn launch(&self, id: &str, extra: &[String]) -> Result<(), String> {
         let exe = {
             let g = self.apps.lock().unwrap();
-            g.get(id).map(|e| e.m.exe_path.clone()).ok_or_else(|| "uygulama kurulu değil".to_string())?
+            g.get(id).map(|e| e.m.exe_path.clone()).ok_or_else(|| crate::i18n::t("err.app.missing"))?
         };
         if !std::path::Path::new(&exe).exists() {
-            return Err("uygulama dosyası bulunamadı".into());
+            return Err(crate::i18n::t("err.app.nofile"));
         }
         let mut c = std::process::Command::new(&exe);
         c.args(extra);
@@ -392,7 +392,7 @@ impl Hub {
                     break;
                 }
                 if Instant::now() > deadline {
-                    return Err("uygulama açılamadı veya yanıt vermedi".into());
+                    return Err(crate::i18n::t("err.app.noresp"));
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
@@ -402,7 +402,7 @@ impl Hub {
             let g = self.apps.lock().unwrap();
             g.get(id).and_then(|e| e.client.as_ref()).and_then(|c| c.handle())
         }
-        .ok_or("bağlı değil")?;
+        .ok_or_else(|| crate::i18n::t("err.app.disc"))?;
         c.cmd(name, data, Duration::from_secs(8)).await
     }
 
@@ -422,11 +422,11 @@ impl Hub {
                 let path = data.as_ref().and_then(|d| d.get("path")).and_then(Value::as_str).ok_or("path gerekli")?;
                 let open = data.as_ref().and_then(|d| d.get("open")).and_then(Value::as_bool).unwrap_or(false);
                 if !std::path::Path::new(path).is_file() {
-                    return Err("dosya bulunamadı".into());
+                    return Err(crate::i18n::t("err.file.missing"));
                 }
                 let n = sh.node().ok_or("çekirdek yok")?;
                 if n.state() != ConnState::Connected {
-                    return Err("telefon bağlı değil".into());
+                    return Err(crate::i18n::t("err.phone.off"));
                 }
                 if open {
                     // Telefona "bu dosya bitince aç" bilgisi (suite olayı; eski telefon yok sayar). Dosyadan ÖNCE gider.

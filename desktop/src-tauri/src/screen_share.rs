@@ -167,7 +167,7 @@ pub fn on_cmd(app: &AppHandle, cmd: ScreenCmd) {
         ScreenCmd::Start { monitor, max_w, max_h, fps, bitrate_kbps } => {
             let p = clamp_params(monitor, max_w, max_h, fps, bitrate_kbps);
             if !lk(&sh.settings).screen_share {
-                send_info(&sh, &node, false, Some("Bu bilgisayarda uzaktan ekran görüntüleme kapalı".into()));
+                send_info(&sh, &node, false, Some(crate::i18n::t("screen.off")));
                 return;
             }
             let Some(peer) = node.current_peer() else { return };
@@ -248,7 +248,7 @@ pub fn resolve_consent(app: &AppHandle, id: u64, choice: Choice) {
         Outcome::Ignore => log::info!("ekran paylaşımı onayı bayat, yok sayıldı"),
         Outcome::Reject => {
             if let Some(n) = sh.node() {
-                send_info(&sh, n, false, Some("Bilgisayar kullanıcısı reddetti".into()));
+                send_info(&sh, n, false, Some(crate::i18n::t("screen.denied")));
             }
         }
         Outcome::Start { params, remember } => {
@@ -278,7 +278,7 @@ fn open_consent(app: &AppHandle, id: u64) {
             let _ = old.close();
         }
         let built = WebviewWindowBuilder::new(&app2, CONSENT, WebviewUrl::App("index.html#consent".into()))
-            .title("T-Bridge · Ekran paylaşımı isteği")
+            .title(crate::i18n::t("win.consent"))
             .inner_size(464.0, 270.0)
             .center()
             .decorations(false)
@@ -342,7 +342,7 @@ fn start_pipeline(app: &AppHandle, p: Params) {
                 }
                 Err(e) => {
                     log::warn!("ekran paylaşımı başlatılamadı: {e}");
-                    send_info(&sh, &n3, false, Some(format!("Ekran yakalanamadı: {e}")));
+                    send_info(&sh, &n3, false, Some(crate::i18n::tf("screen.capfail", &[("err", &e.to_string())])));
                     // Pipeline henüz kaydedilmediyse start_pipeline `failed` işaretini görüp kaydetmez.
                     if lk(&sh.screen).report_failure(sid) {
                         let app4 = app3.clone();
@@ -439,7 +439,7 @@ fn set_indicator(app: &AppHandle, on: bool) {
                 })
                 .unwrap_or(400.0);
             let built = WebviewWindowBuilder::new(&app2, PILL, WebviewUrl::App("index.html#pill".into()))
-                .title("T-Bridge · Ekran paylaşılıyor")
+                .title(crate::i18n::t("win.pill"))
                 .inner_size(w, h)
                 .position(x, 12.0)
                 .decorations(false)
@@ -485,7 +485,7 @@ fn set_indicator(app: &AppHandle, on: bool) {
 
 /// Hap için paylaşılan monitör etiketi ("Monitör 2").
 pub fn pill_label(app: &AppHandle) -> String {
-    format!("Monitör {}", lk(&shared(app).screen).monitor + 1)
+    crate::i18n::tf("screen.monitor", &[("n", &(lk(&shared(app).screen).monitor + 1).to_string())])
 }
 
 #[cfg(test)]

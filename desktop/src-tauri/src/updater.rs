@@ -150,7 +150,7 @@ async fn install_when_idle(sh: Arc<Shared>) {
 
 /// İndirilmiş paketi hemen kurar. Başarılı olursa süreç çıkar ve kurulum sonrası yeniden açılır.
 pub fn install_now(sh: &Shared) -> Result<(), String> {
-    let Some((update, bytes)) = lk(&sh.updater.ready).take() else { return Err("hazır güncelleme yok".into()) };
+    let Some((update, bytes)) = lk(&sh.updater.ready).take() else { return Err(crate::i18n::t("err.update.none")) };
     set(sh, |s| s.phase = "installing");
     // Windows'ta install() kurulum dosyasını başlatıp süreci sonlandırır.
     update.install(&bytes).map_err(|e| {

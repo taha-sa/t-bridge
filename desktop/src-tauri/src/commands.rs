@@ -14,7 +14,7 @@ use crate::{
 type S<'a> = State<'a, Arc<Shared>>;
 
 fn node<'a>(s: &'a S<'_>) -> Result<&'a Arc<Node>, String> {
-    s.node().ok_or_else(|| "çekirdek başlatılamadı".to_string())
+    s.node().ok_or_else(|| crate::i18n::t("err.core"))
 }
 
 #[derive(Serialize)]
@@ -127,7 +127,7 @@ pub fn send_paths(s: S<'_>, paths: Vec<String>) -> Result<usize, String> {
 
 #[tauri::command]
 pub async fn pick_and_send(s: S<'_>, folder: bool) -> Result<usize, String> {
-    let d = s.app.dialog().file().set_title(if folder { "Gönderilecek klasör" } else { "Gönderilecek dosyalar" });
+    let d = s.app.dialog().file().set_title(if folder { crate::i18n::t("dlg.sendfolder") } else { crate::i18n::t("dlg.sendfiles") });
     let paths: Vec<String> = if folder {
         d.blocking_pick_folder().into_iter().filter_map(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into()).collect()
     } else {
@@ -191,16 +191,16 @@ pub fn dismiss_notification(s: S<'_>, key: String) -> Result<(), String> {
 pub fn reply_notification(s: S<'_>, key: String, text: String) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() || text.len() > 4000 {
-        return Err("Yanıt boş veya çok uzun".into());
+        return Err(crate::i18n::t("err.reply.len"));
     }
     let n = node(&s)?;
     if !n.peer_supports_notif_reply() {
-        return Err("Telefondaki T-Bridge sürümü yanıtı desteklemiyor; telefonu güncelle".into());
+        return Err(crate::i18n::t("err.reply.old"));
     }
     if n.send_notification_reply(key, text) {
         Ok(())
     } else {
-        Err("Telefona gönderilemedi (bağlı değil)".into())
+        Err(crate::i18n::t("err.reply.fail"))
     }
 }
 
@@ -237,7 +237,7 @@ pub fn suite_status() -> Vec<crate::suite::SuiteCard> {
 /// Uygulamayı aç (kapalıysa başlat; çalışıyorsa öne getir).
 #[tauri::command]
 pub async fn suite_open(id: String) -> Result<(), String> {
-    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    let h = crate::suite::hub().ok_or_else(|| crate::i18n::t("err.suite"))?.clone();
     let name = if h.cards().iter().any(|c| c.id == id && c.running) { "app.show" } else { "app.launch" };
     h.run(&id, name).await
 }
@@ -245,14 +245,14 @@ pub async fn suite_open(id: String) -> Result<(), String> {
 /// Güncelle: `id` verilirse tek uygulama, verilmezse güncellemesi olan hepsi. Dönüş: başlatılan sayısı.
 #[tauri::command]
 pub async fn suite_update(id: Option<String>) -> Result<usize, String> {
-    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    let h = crate::suite::hub().ok_or_else(|| crate::i18n::t("err.suite"))?.clone();
     Ok(h.update(id).await)
 }
 
 /// Çalışan uygulamalardan güncelleme sor.
 #[tauri::command]
 pub async fn suite_check() -> Result<(), String> {
-    let h = crate::suite::hub().ok_or("T-Suite henüz hazır değil")?.clone();
+    let h = crate::suite::hub().ok_or_else(|| crate::i18n::t("err.suite"))?.clone();
     h.check_updates().await;
     Ok(())
 }
@@ -279,24 +279,24 @@ pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {
 #[tauri::command]
 pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
     if !win::camera::camera_allowed_now() {
-        return Err("Bu özellik yalnızca Windows 11 için tasarlanmıştır.".into());
+        return Err(crate::i18n::t("err.win11"));
     }
     let sh = s.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         if !win::camera::is_installed_for_me() {
-            let sid = win::camera::current_user_sid().ok_or("kullanıcı SID'i okunamadı")?;
+            let sid = win::camera::current_user_sid().ok_or_else(|| crate::i18n::t("err.cam.sid"))?;
             let code = match win::camera::run_elevated(&format!("--camera-register \"{sid}\"")) {
                 Ok(c) => c,
                 Err(e) if e == win::camera::UAC_CANCELLED => {
-                    return Err("Yönetici izni verilmedi, kamera kurulumu iptal edildi. Tekrar denemek için Etkinleştir'e basıp açılan izin penceresini onaylayın.".into());
+                    return Err(crate::i18n::t("err.cam.uac"));
                 }
                 Err(e) => return Err(e),
             };
             if code != 0 || !win::camera::is_installed_for_me() {
-                return Err("Kamera kaydı tamamlanamadı (yönetici izni verilmedi veya DLL kopyalanamadı).".into());
+                return Err(crate::i18n::t("err.cam.reg"));
             }
         }
-        sh.camera.get().ok_or("kamera merkezi yok")?.enable()?;
+        sh.camera.get().ok_or_else(|| crate::i18n::t("err.cam.hub"))?.enable()?;
         lk(&sh.settings).camera_enabled = true;
         sh.save_settings();
         Ok(())
@@ -333,7 +333,7 @@ pub async fn camera_uninstall(s: S<'_>) -> Result<(), String> {
         if win::camera::is_installed() {
             let code = win::camera::run_elevated("--camera-unregister")?;
             if code != 0 {
-                return Err("Kamera kaydı kaldırılamadı.".into());
+                return Err(crate::i18n::t("err.cam.unreg"));
             }
         }
         Ok(())
@@ -389,8 +389,11 @@ pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
     if settings.autostart != win::system::autostart_enabled() {
         win::system::set_autostart(settings.autostart);
     }
+    crate::i18n::apply(&settings.language);
     *lk(&s.settings) = settings;
     s.save_settings();
+    crate::refresh_tray_menu(&s.app);
+    s.update_tray();
     Ok(restart_needed)
 }
 
@@ -405,7 +408,7 @@ pub async fn pick_download_dir(s: S<'_>) -> Result<Option<String>, String> {
     Ok(s.app
         .dialog()
         .file()
-        .set_title("İndirme klasörü")
+        .set_title(crate::i18n::t("dlg.downloaddir"))
         .blocking_pick_folder()
         .and_then(|p| p.into_path().ok())
         .map(|p| p.to_string_lossy().into()))
@@ -442,4 +445,9 @@ pub async fn check_update(s: S<'_>) -> Result<bool, String> {
 #[tauri::command]
 pub fn install_update(s: S<'_>) -> Result<(), String> {
     crate::updater::install_now(&s)
+}
+
+#[tauri::command]
+pub fn ui_lang(s: S<'_>) -> String {
+    crate::i18n::resolve(&lk(&s.settings).language).to_string()
 }

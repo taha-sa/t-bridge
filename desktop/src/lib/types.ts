@@ -62,6 +62,7 @@ export interface Settings {
   screenAllowed: string[]
   cameraEnabled: boolean
   autoEcosystem: boolean
+  language: 'system' | 'tr' | 'en' | 'de'
 }
 
 export type Theme = 'dark' | 'system' | 'light'

@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod i18n;
 mod screen_share;
 mod suite;
 mod updater;
@@ -60,13 +61,24 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "T-Bridge'i aç", true, None::<&str>)?;
-    let ring = MenuItem::with_id(app, "ring", "Telefonu çaldır", true, None::<&str>)?;
-    let send = MenuItem::with_id(app, "send", "Dosya gönder…", true, None::<&str>)?;
+fn build_tray_menu<M: Manager<tauri::Wry>>(app: &M) -> tauri::Result<Menu<tauri::Wry>> {
+    let open = MenuItem::with_id(app, "open", i18n::t("tray.open"), true, None::<&str>)?;
+    let ring = MenuItem::with_id(app, "ring", i18n::t("tray.ring"), true, None::<&str>)?;
+    let send = MenuItem::with_id(app, "send", i18n::t("tray.send"), true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &send, &ring, &sep, &quit])?;
+    let quit = MenuItem::with_id(app, "quit", i18n::t("tray.quit"), true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &send, &ring, &sep, &quit])
+}
+
+/// Dil değişince tepsi menüsünü yeni dille yeniden kurar.
+pub fn refresh_tray_menu(app: &AppHandle) {
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id("tray"), build_tray_menu(app)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    let menu = build_tray_menu(app)?;
     TrayIconBuilder::with_id("tray")
         .icon(app.default_window_icon().cloned().expect("uygulama ikonu yok"))
         .tooltip("T-Bridge")
@@ -221,6 +233,7 @@ pub fn run() {
             commands::mute_app,
             commands::phone_cmd,
             commands::set_settings,
+            commands::ui_lang,
             commands::test_notification_sound,
             commands::pick_download_dir,
             commands::restart_app,
@@ -240,6 +253,7 @@ pub fn run() {
                 .unwrap_or_default();
             // Eski sürümden kalan ayarları bir kez yükselt (ör. Windows bildirimi varsayılanı kapalı).
             let migrated = settings.migrate();
+            i18n::apply(&settings.language);
             let shared = Arc::new(Shared {
                 app: app.handle().clone(),
                 settings_path,
