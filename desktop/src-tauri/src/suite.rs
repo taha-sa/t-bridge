@@ -172,10 +172,22 @@ impl AutoState {
     }
 }
 
-/// Yükleyicinin düzeni: `%LOCALAPPDATA%\Programs\T-Suite\<Ad>\<Ad>.exe` (manifest yoksa yedek yol).
+/// Yükleyicinin kurduğu uygulamaların exe adları (klasör = görünen ad). Manifest yoksa yedek yol için.
+const INSTALLER_EXE: &[(&str, &str)] = &[
+    ("T-RamCash", "T-RamCash.exe"),
+    ("T-Downloader", "TDownloader.exe"),
+    ("T-DeskTree", "T-DeskTree.exe"),
+];
+
+fn installer_exe_name(display: &str) -> Option<&'static str> {
+    INSTALLER_EXE.iter().find(|(n, _)| *n == display).map(|(_, exe)| *exe)
+}
+
+/// Yükleyicinin düzeni: `%LOCALAPPDATA%\Programs\T-Suite\<Ad>\<exe>` (manifest yoksa yedek yol).
 fn installer_exe(display: &str) -> Option<std::path::PathBuf> {
+    let exe = installer_exe_name(display)?;
     let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)?;
-    let p = base.join("Programs").join("T-Suite").join(display).join(format!("{display}.exe"));
+    let p = base.join("Programs").join("T-Suite").join(display).join(exe);
     p.exists().then_some(p)
 }
 
@@ -806,6 +818,17 @@ mod tests {
         assert_eq!(launch_args(&registry::Manifest { id: "t-downloader".into(), ..Default::default() }), vec!["--background".to_string()]);
         assert_eq!(launch_args(&registry::Manifest { id: "t-ramcash".into(), ..Default::default() }), vec!["--tray".to_string()]);
         assert_eq!(launch_args(&registry::Manifest { id: "t-desktree".into(), ..Default::default() }), vec!["--background".to_string()]);
+    }
+
+    #[test]
+    fn installer_exe_names_per_app() {
+        assert_eq!(installer_exe_name("T-RamCash"), Some("T-RamCash.exe"));
+        assert_eq!(installer_exe_name("T-Downloader"), Some("TDownloader.exe"));
+        assert_eq!(installer_exe_name("T-DeskTree"), Some("T-DeskTree.exe"));
+        assert_eq!(installer_exe_name("T-Unknown"), None);
+        for (_, name) in CATALOG {
+            assert!(installer_exe_name(name).is_some(), "exe adı eksik: {name}");
+        }
     }
 
     fn cand(id: &str, installed: bool, running: bool, args: &[&str]) -> AutoCand {
