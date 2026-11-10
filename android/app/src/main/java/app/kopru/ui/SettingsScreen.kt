@@ -1,6 +1,9 @@
 package app.kopru.ui
 
 import android.app.Activity
+import app.kopru.Lang
+import app.kopru.R
+import androidx.compose.ui.res.stringResource
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -65,8 +68,9 @@ fun SettingsScreen(@Suppress("UNUSED_PARAMETER") ui: UiState) {
         Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Ayarlar", color = c.text, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
+        Text(stringResource(R.string.set_title), color = c.text, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
         ThemeCard()
+        LanguageCard()
         UpdateCard()
         SecurityCard()
         CrashCard()
@@ -75,7 +79,7 @@ fun SettingsScreen(@Suppress("UNUSED_PARAMETER") ui: UiState) {
             val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/_u/tdesk.studio")).setPackage("com.instagram.android")
             val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/tdesk.studio"))
             runCatching { ctx.startActivity(app) }.recoverCatching { ctx.startActivity(web) }
-                .onFailure { Toast.makeText(ctx, "Bağlantı açılamadı", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(ctx, ctx.getString(R.string.set_link_failed), Toast.LENGTH_SHORT).show() }
         }
     }
 }
@@ -85,17 +89,17 @@ private fun ThemeCard() {
     val c = tb
     val mode = ThemePref.mode.value
     TbCard {
-        SectionTitle("Görünüm")
+        SectionTitle(stringResource(R.string.set_appearance))
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Tema", color = c.text, style = MaterialTheme.typography.titleSmall)
-                Text("Koyu tema T-Bridge için tasarlandı.", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.set_theme), color = c.text, style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.set_theme_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
             }
             Spacer(Modifier.width(10.dp))
             val shape = RoundedCornerShape(12.dp)
             Row(Modifier.clip(shape).background(c.s3).border(1.dp, c.line, shape).padding(3.dp)) {
-                listOf("dark" to "Koyu", "system" to "Sistem").forEach { (id, label) ->
+                listOf("dark" to stringResource(R.string.set_theme_dark), "system" to stringResource(R.string.set_theme_system)).forEach { (id, label) ->
                     val sel = mode == id
                     Text(
                         label,
@@ -114,6 +118,45 @@ private fun ThemeCard() {
 }
 
 @Composable
+private fun LanguageCard() {
+    val c = tb
+    val ctx = LocalContext.current
+    var cur by remember { mutableStateOf(Lang.pref(ctx)) }
+    val names = mapOf(Lang.SYSTEM to stringResource(R.string.set_lang_system), "tr" to "Türkçe", "en" to "English", "de" to "Deutsch")
+    TbCard {
+        SectionTitle(stringResource(R.string.set_language))
+        Spacer(Modifier.height(4.dp))
+        Text(stringResource(R.string.set_language_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(10.dp))
+        val shape = RoundedCornerShape(12.dp)
+        Row(Modifier.fillMaxWidth().clip(shape).background(c.s3).border(1.dp, c.line, shape).padding(3.dp)) {
+            Lang.CODES.forEach { code ->
+                val sel = cur == code
+                Text(
+                    names.getValue(code),
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (sel) c.goldSoft else Color.Transparent)
+                        .clickable {
+                            if (cur != code) {
+                                cur = code
+                                Lang.set(ctx, code)
+                                ctx.activity()?.recreate()
+                            }
+                        }
+                        .padding(vertical = 8.dp),
+                    color = if (sel) c.goldHi else c.muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun UpdateCard() {
     val c = tb
     val ctx = LocalContext.current
@@ -125,17 +168,17 @@ private fun UpdateCard() {
     val canInstall = Updater.canInstall()
 
     val text = when (val s = st) {
-        Updater.State.Idle -> "Güncellemeler günde bir, Wi‑Fi'dayken denetlenir."
-        Updater.State.Checking -> "Denetleniyor…"
-        Updater.State.Latest -> "En güncel sürümü kullanıyorsun."
-        is Updater.State.Downloading -> "${s.info.versionName} indiriliyor… %${(s.progress * 100).toInt()}"
-        is Updater.State.Ready -> "${s.info.versionName} hazır. Tek onayla yüklenir; eşleşme ve ayarlar korunur."
-        Updater.State.Installing -> "Yükleniyor…"
-        is Updater.State.Error -> "Denetlenemedi: ${s.message}"
+        Updater.State.Idle -> stringResource(R.string.set_upd_idle)
+        Updater.State.Checking -> stringResource(R.string.set_upd_checking)
+        Updater.State.Latest -> stringResource(R.string.set_upd_latest)
+        is Updater.State.Downloading -> stringResource(R.string.set_upd_downloading, s.info.versionName, (s.progress * 100).toInt())
+        is Updater.State.Ready -> stringResource(R.string.set_upd_ready, s.info.versionName)
+        Updater.State.Installing -> stringResource(R.string.set_upd_installing)
+        is Updater.State.Error -> stringResource(R.string.set_upd_error, s.message)
     }
 
     TbCard(gold = true) {
-        SectionTitle("Güncelleme", color = c.gold)
+        SectionTitle(stringResource(R.string.set_update), color = c.gold)
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconTile(Icons.Outlined.SystemUpdate, size = 42.dp)
@@ -158,7 +201,7 @@ private fun UpdateCard() {
         }
         Spacer(Modifier.height(14.dp))
         if (st is Updater.State.Ready) {
-            GoldButton("Şimdi yükle", {
+            GoldButton(stringResource(R.string.set_install_now), {
                 ctx.activity()?.let { a ->
                     Updater.rememberReady()
                     Updater.install(a)
@@ -166,18 +209,18 @@ private fun UpdateCard() {
             }, Modifier.fillMaxWidth(), icon = Icons.Outlined.SystemUpdate)
         } else {
             val busy = st is Updater.State.Checking || st is Updater.State.Downloading || st is Updater.State.Installing
-            TbButton("Şimdi denetle", { Updater.check(manual = true) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Refresh, enabled = !busy)
+            TbButton(stringResource(R.string.set_check_now), { Updater.check(manual = true) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Refresh, enabled = !busy)
         }
         Spacer(Modifier.height(6.dp))
         if (!canInstall) {
-            CheckRow("Yükleme izni", "Güncellemeyi kurabilmek için T-Bridge'e bir kez izin ver.", false) {
+            CheckRow(stringResource(R.string.set_perm_title), stringResource(R.string.set_perm_desc), false) {
                 ctx.activity()?.let(Updater::openInstallPermission)
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Otomatik denetle", color = c.text, style = MaterialTheme.typography.titleSmall)
-                Text("Yeni sürüm arka planda iner, hazır olunca haber verir.", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.set_auto), color = c.text, style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.set_auto_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
             }
             Spacer(Modifier.width(10.dp))
             TbSwitch(auto) {
@@ -192,10 +235,10 @@ private fun UpdateCard() {
 private fun SecurityCard() {
     val c = tb
     TbCard {
-        SectionTitle("Güvenlik")
+        SectionTitle(stringResource(R.string.set_security))
         Spacer(Modifier.height(12.dp))
-        Text("Bağlantın şifreli", color = c.text, style = MaterialTheme.typography.titleSmall)
-        Text("Yalnızca eşleştirdiğin cihazlar bağlanabilir.", color = c.muted, style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.set_encrypted), color = c.text, style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.set_encrypted_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -207,16 +250,16 @@ private fun CrashCard() {
     var log by remember { mutableStateOf(CrashLog.read()) }
     val text = log ?: return
     TbCard {
-        SectionTitle("Hata kaydı")
+        SectionTitle(stringResource(R.string.set_crash))
         Spacer(Modifier.height(10.dp))
-        Text("Uygulama son açılışlardan birinde beklenmedik şekilde kapandı.", color = c.text2, style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.set_crash_desc), color = c.text2, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TbButton("Kaydı kopyala", {
-                ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("T-Bridge hata kaydı", text))
-                Toast.makeText(ctx, "Hata kaydı kopyalandı", Toast.LENGTH_SHORT).show()
+            TbButton(stringResource(R.string.set_crash_copy), {
+                ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(ctx.getString(R.string.set_crash_clip), text))
+                Toast.makeText(ctx, ctx.getString(R.string.set_crash_copied), Toast.LENGTH_SHORT).show()
             }, Modifier.weight(1f), height = 44.dp)
-            TbButton("Sil", {
+            TbButton(stringResource(R.string.set_crash_delete), {
                 CrashLog.clear()
                 log = null
             }, Modifier.weight(1f), height = 44.dp)
@@ -231,6 +274,6 @@ private fun About() {
         Logo(46.dp)
         Spacer(Modifier.height(8.dp))
         Text("T-Bridge", color = c.text, style = MaterialTheme.typography.titleLarge)
-        Text("Telefon ile bilgisayar arasında köprü · ${BuildConfig.VERSION_NAME}", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.set_tagline, BuildConfig.VERSION_NAME), color = c.faint, style = MaterialTheme.typography.bodySmall)
     }
 }

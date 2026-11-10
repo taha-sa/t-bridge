@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="svc_ring_title">Telefon çalıyor</string>
+    <string name="svc_ring_text">Bilgisayarınızdan çaldırıldı. Durdurmak için dokunun.</string>
+    <string name="svc_ring_stop">Durdur</string>
+    <string name="svc_ch_status">Bağlantı durumu</string>
+    <string name="svc_ch_files">Alınan dosyalar</string>
+    <string name="svc_ch_ring">Telefonu bul</string>
+    <string name="svc_notif_default_pc">Bilgisayar</string>
+    <string name="svc_notif_connected">%1$s bağlı</string>
+    <string name="svc_notif_connecting">Bağlanıyor…</string>
+    <string name="svc_notif_no_pairs">Eşleşmiş bilgisayar yok</string>
+    <string name="svc_notif_waiting">Bilgisayar bekleniyor</string>
+    <string name="svc_notif_send_clip">Panoyu PC\'ye gönder</string>
+    <string name="svc_file_received">Dosya alındı</string>
+    <string name="svc_file_received_open">Dosya alındı · dokunarak açın</string>
+    <string name="clip_empty">Panoda metin yok</string>
+    <string name="clip_not_connected">Bilgisayar bağlı değil</string>
+    <string name="clip_sent">Panoya gönderildi</string>
+    <string name="clip_already_sent">Zaten gönderildi</string>
+    <string name="share_failed">Gönderilemedi. Eşleşmiş bir bilgisayar var mı?</string>
+    <string name="share_nothing">Paylaşılacak bir şey yok</string>
+    <string name="share_text_sent">Metin PC panosuna gönderildi</string>
+    <string name="core_err_open_in">Gelen dosya açılamadı</string>
+    <string name="core_err_read_out">Giden dosya okunamadı</string>
+    <string name="upd_channel">Güncellemeler</string>
+    <string name="upd_ready_title">T-Bridge %1$s hazır</string>
+    <string name="upd_ready_text">Yüklemek için dokunun. Eşleşme ve ayarlarınız korunur.</string>
+    <string name="upd_install">Yükle</string>
+    <string name="upd_none_ready">Hazır güncelleme yok</string>
+    <string name="upd_allow_source">T-Bridge\'in bu kaynaktan yüklemesine izin verin, sonra tekrar deneyin.</string>
+    <string name="upd_err_no_release">Henüz yayınlanmış sürüm yok</string>
+    <string name="upd_err_server">Sunucu yanıtı: %1$d</string>
+    <string name="upd_err_insecure">Güvensiz adres</string>
+    <string name="upd_err_download">İndirme başarısız, yanıt: %1$d</string>
+    <string name="upd_err_verify">İndirilen dosya doğrulanamadı</string>
+    <string name="upd_err_move">Dosya taşınamadı</string>
+    <string name="upd_err_installer">Yükleyici açılamadı: %1$s</string>
+    <plurals name="share_sending">
+        <item quantity="one">%1$d dosya gönderiliyor</item>
+        <item quantity="other">%1$d dosya gönderiliyor</item>
+    </plurals>
+    <plurals name="share_queued">
+        <item quantity="one">%1$d dosya sıraya alındı; bilgisayar bağlanınca gönderilecek</item>
+        <item quantity="other">%1$d dosya sıraya alındı; bilgisayar bağlanınca gönderilecek</item>
+    </plurals>
+</resources>

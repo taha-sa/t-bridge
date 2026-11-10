@@ -1,5 +1,8 @@
 package app.kopru.ui
 
+import androidx.annotation.StringRes
+import app.kopru.R
+import androidx.compose.ui.res.stringResource
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceHolder
@@ -93,7 +96,7 @@ private fun clickAt(nx: Float, ny: Float, monitor: Int, button: MouseButton) {
 }
 
 /** Ekran kontrol modu: DOKUNMA = dokunduğun noktaya tıkla (mutlak); TOUCHPAD = imleci göreli sür (video üstünde). */
-enum class ControlMode(val label: String) { TAP("Dokunma"), PAD("Touchpad") }
+enum class ControlMode(@StringRes val label: Int) { TAP(R.string.scr_mode_tap), PAD(R.string.scr_mode_pad) }
 
 /**
  * Touchpad modu hareketleri (video üstünde, göreli imleç): tek parmak sür = imleç (ivmeli), dokun = sol tık,
@@ -362,9 +365,9 @@ fun ScreenViewer(
 
         if (ui.fps == 0) {
             Text(
-                ui.error ?: if (ui.viewing) "Bağlanıyor… (bilgisayarda onay gerekebilir)" else "",
+                if (ui.errorRes != 0) stringResource(ui.errorRes) else ui.error ?: if (ui.viewing) stringResource(R.string.scr_connecting) else "",
                 Modifier.padding(24.dp),
-                color = if (ui.error != null) Color(0xFFF87171) else c.muted,
+                color = if (ui.error != null || ui.errorRes != 0) Color(0xFFF87171) else c.muted,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -385,12 +388,12 @@ fun ScreenViewer(
             ) {
                 Text("🔒", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Bilgisayarda güvenlik ekranı açık (UAC / kilit) — görüntü geçici olarak durdu",
+                    stringResource(R.string.scr_secure_title),
                     color = c.goldHi,
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                Text("Ekran kapanınca görüntü kendiliğinden devam eder.", color = c.muted, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.scr_secure_resume), color = c.muted, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall)
             }
         }
 
@@ -401,6 +404,7 @@ fun ScreenViewer(
             enter = fadeIn(), exit = fadeOut(),
         ) {
             val shape = RoundedCornerShape(14.dp)
+            val stopDesc = stringResource(R.string.scr_stop_sharing)
             Row(
                 Modifier.statusBarsPadding().padding(8.dp).clip(shape).background(Color(0xCC111113)).padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -408,18 +412,18 @@ fun ScreenViewer(
             ) {
                 if (ui.monitors.size > 1) {
                     Box {
-                        TextButton({ monMenu = true }, Modifier.height(48.dp)) { Text("Monitör ${monitor + 1} ▾", color = c.goldHi) }
+                        TextButton({ monMenu = true }, Modifier.height(48.dp)) { Text(stringResource(R.string.scr_monitor, monitor + 1), color = c.goldHi) }
                         DropdownMenu(monMenu, { monMenu = false }) {
                             ui.monitors.forEach { m ->
                                 DropdownMenuItem(
-                                    { Text("${m.index.toInt() + 1}: ${m.width}×${m.height}${if (m.primary) " · ana" else ""}") },
+                                    { Text(stringResource(if (m.primary) R.string.scr_monitor_item_primary else R.string.scr_monitor_item, m.index.toInt() + 1, m.width, m.height)) },
                                     { monMenu = false; Screen.setMonitor(m.index.toInt()) },
                                 )
                             }
                         }
                     }
                 }
-                Text(mode.label, color = c.goldHi, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp))
+                Text(stringResource(mode.label), color = c.goldHi, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp))
                 // Uzun bas: gizli teşhis katmanı (yakalama/kodlama/ağ/çözme/uçtan uca ölçümler).
                 Text(
                     if (ui.fps > 0) "${ui.fps} fps · ${ui.latencyMs} ms" else "…",
@@ -429,7 +433,7 @@ fun ScreenViewer(
                         .padding(horizontal = 6.dp)
                         .ownGestures(onLong = { diagOn = !diagOn; bump++ }),
                 )
-                TextButton({ onClose() }, Modifier.height(48.dp)) { Text("✕", modifier = Modifier.semantics { contentDescription = "Ekran paylaşımını durdur" }, color = Color.White) }
+                TextButton({ onClose() }, Modifier.height(48.dp)) { Text("✕", modifier = Modifier.semantics { contentDescription = stopDesc }, color = Color.White) }
             }
         }
 
@@ -444,8 +448,8 @@ fun ScreenViewer(
                     .ownGestures(onTap = { diagOn = false })
                     .padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
-                Text("TEŞHİS", color = c.goldHi, style = MaterialTheme.typography.labelSmall)
-                if (diag.lines.isEmpty()) Text("ölçüm bekleniyor…", color = c.muted, style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.scr_diag_title), color = c.goldHi, style = MaterialTheme.typography.labelSmall)
+                if (diag.lines.isEmpty()) Text(stringResource(R.string.scr_diag_waiting), color = c.muted, style = MaterialTheme.typography.labelSmall)
                 diag.lines.forEach { Text(it, color = Color.White, style = MaterialTheme.typography.labelSmall) }
             }
         }

@@ -60,7 +60,7 @@ object Suite {
         val p = ctx.getSharedPreferences("eco", Context.MODE_PRIVATE)
         _ui.update { it.copy(notify = p.getBoolean("notify", true)) }
         ctx.getSystemService(NotificationManager::class.java)
-            .createNotificationChannel(NotificationChannel(CH, "Ekosistem", NotificationManager.IMPORTANCE_DEFAULT))
+            .createNotificationChannel(NotificationChannel(CH, ctx.getString(R.string.nav_eco), NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     fun setNotify(on: Boolean) {
@@ -70,6 +70,11 @@ object Suite {
 
     fun supported() = Core.node?.peerSupportsSuite() == true
 
+    fun appCtx(): Context = ctx
+
+    /** PC uygulama listesi geldi ve [id] yok mu? (liste henüz gelmediyse false: bilinmiyor) */
+    fun pcMissing(id: String): Boolean = _ui.value.apps.let { it.isNotEmpty() && it.none { a -> a.id == id } }
+
     fun clearMessage() = _ui.update { it.copy(message = null) }
 
     // ---------------------------------------------------------------- komutlar (telefon -> PC -> uygulama)
@@ -77,13 +82,13 @@ object Suite {
     /** Genel komut: sonuç [cb]'ye (ok, result, hata) döner; 15 sn içinde yanıt gelmezse zaman aşımı. */
     fun send(app: String, name: String, json: String = "{}", cb: ((Boolean, JSONObject?, String?) -> Unit)? = null) {
         val n = Core.node
-        if (n == null || !n.peerSupportsSuite()) { cb?.invoke(false, null, "PC bağlı değil veya sürüm eski"); return }
+        if (n == null || !n.peerSupportsSuite()) { cb?.invoke(false, null, appCtx().getString(R.string.suite_err_offline)); return }
         val req = reqSeq.getAndIncrement()
         if (cb != null) {
             synchronized(callbacks) { callbacks[req] = cb }
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 val c = synchronized(callbacks) { callbacks.remove(req) }
-                c?.invoke(false, null, "Zaman aşımı")
+                c?.invoke(false, null, appCtx().getString(R.string.suite_err_timeout))
             }, 15_000)
         }
         n.sendSuiteCmd(req.toULong(), app, name, json)
@@ -93,19 +98,19 @@ object Suite {
     fun friendlyError(error: String?): String? {
         if (error == null || !error.startsWith("disk_full")) return error
         val free = Regex("""free=(\d+)""").find(error)?.groupValues?.get(1)?.toLongOrNull()
-        return "Bilgisayarda yer yok" + (if (free != null) " (" + fmtMb(free / 1048576.0) + " boş)" else "")
+        return if (free != null) ctx.getString(R.string.suite_err_disk_free, fmtMb(free / 1048576.0)) else ctx.getString(R.string.suite_err_disk)
     }
 
     fun onReply(req: Long, ok: Boolean, json: String, error: String?) {
         val cb = synchronized(callbacks) { callbacks.remove(req) } ?: return
         val err = friendlyError(error)
-        if (!ok && error != null && error.startsWith("disk_full")) toast(err ?: "Bilgisayarda yer yok")
+        if (!ok && error != null && error.startsWith("disk_full")) toast(err ?: ctx.getString(R.string.suite_err_disk))
         cb(ok, runCatching { JSONObject(json) }.getOrNull(), err)
     }
 
     fun ramClean(full: Boolean) = send("t-ramcash", "ram.clean", """{"mode":"${if (full) "full" else "smart"}"}""") { ok, r, err ->
         val mb = r?.optDouble("freedMb", 0.0) ?: 0.0
-        toast(if (ok) "+${fmtMb(mb)} boşaltıldı · ${if (full) "Tam" else "Akıllı"}" else (err ?: "Temizlenemedi"))
+        toast(if (ok) ctx.getString(R.string.suite_ram_cleaned, fmtMb(mb), ctx.getString(if (full) R.string.eco_full else R.string.eco_smart)) else (err ?: ctx.getString(R.string.suite_clean_failed)))
     }
 
     fun refreshDisks() = send("t-desktree", "disk.status") { ok, r, _ ->
@@ -116,10 +121,10 @@ object Suite {
     }
 
     fun updateAll() = send("t-bridge", "suite.update") { ok, r, err ->
-        toast(if (ok) "${r?.optInt("started", 0) ?: 0} uygulama güncelleniyor" else (err ?: "Güncellenemedi"))
+        toast(if (ok) (r?.optInt("started", 0) ?: 0).let { ctx.resources.getQuantityString(R.plurals.suite_updating, it, it) } else (err ?: ctx.getString(R.string.suite_update_failed)))
     }
 
-    fun launch(app: String) = send(app, "app.launch") { ok, _, err -> if (!ok) toast(err ?: "Açılamadı") }
+    fun launch(app: String) = send(app, "app.launch") { ok, _, err -> if (!ok) toast(err ?: ctx.getString(R.string.suite_launch_failed)) }
 
     fun toast(m: String) = _ui.update { it.copy(message = m) }
 
@@ -139,22 +144,22 @@ object Suite {
             name == "download.completed" -> {
                 val d = DlDone(o.optString("id"), o.optString("fileName"), o.optString("path"), o.optLong("size"))
                 _ui.update { it.copy(downloads = it.downloads - d.id, completed = (listOf(d) + it.completed.filter { x -> x.id != d.id }).take(10)) }
-                notify("İndirme tamamlandı", d.name, 1001)
+                notify(ctx.getString(R.string.suite_dl_done), d.name, 1001)
             }
             name == "download.failed" -> {
                 _ui.update { it.copy(downloads = it.downloads - o.optString("id")) }
-                notify("İndirme başarısız", "${o.optString("name")} · ${o.optString("error")}", 1002)
+                notify(ctx.getString(R.string.suite_dl_failed), "${o.optString("name")} · ${o.optString("error")}", 1002)
             }
             name == "ram.status" -> {
                 val r = RamInfo(o.optInt("usedPct"), o.optLong("usedMb"), o.optLong("totalMb"))
                 _ui.update { it.copy(ram = r) }
                 trackRam(r.usedPct)
             }
-            name == "ram.cleaned" -> toast("+${fmtMb(o.optDouble("freedMb"))} boşaltıldı · ${if (o.optString("mode") == "full") "Tam" else "Akıllı"}")
+            name == "ram.cleaned" -> toast(ctx.getString(R.string.suite_ram_cleaned, fmtMb(o.optDouble("freedMb")), ctx.getString(if (o.optString("mode") == "full") R.string.eco_full else R.string.eco_smart)))
             name == "disk.low" -> {
                 val row = DiskRow(o.optString("drive"), o.optLong("freeBytes"), o.optLong("totalBytes"))
                 _ui.update { it.copy(disks = it.disks.filter { d -> d.drive != row.drive } + row) }
-                notify("Disk dolmak üzere", "${row.drive} · ${fmtMb(row.freeBytes / 1048576.0)} boş", 1003)
+                notify(ctx.getString(R.string.suite_disk_low), ctx.getString(R.string.suite_disk_low_text, row.drive, fmtMb(row.freeBytes / 1048576.0)), 1003)
             }
             app !in KNOWN -> _ui.update {
                 val line = "$name ${json.take(80)}"
@@ -170,7 +175,7 @@ object Suite {
         if (ramHighSince == 0L) ramHighSince = now
         if (now - ramHighSince > 120_000 && (ramLastNotified == 0L || now - ramLastNotified > 30 * 60_000)) {
             ramLastNotified = now
-            notify("Bilgisayar belleği dolu", "RAM %$pct kullanımda. Ekosistem sekmesinden temizleyebilirsin.", 1004)
+            notify(ctx.getString(R.string.suite_ram_full), ctx.getString(R.string.suite_ram_full_text, pct), 1004)
         }
     }
 

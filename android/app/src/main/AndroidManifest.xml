@@ -27,6 +27,7 @@
 
     <application
         android:name=".KopruApp"
+        android:localeConfig="@xml/locales_config"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -64,6 +65,14 @@
             android:taskAffinity="app.kopru.clip"
             android:theme="@style/Theme.Kopru.Transparent" />
 
+        <!-- "Telefonda aç": T-Desk Viewer yoksa sistem seçicisinden önce bir kez gösterilen davet. -->
+        <activity
+            android:name=".ViewerInviteActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@style/Theme.Kopru.Transparent" />
+
         <!-- Paylaş menüsü: dosyalar ve metin. -->
         <activity
             android:name=".ShareActivity"
@@ -88,7 +97,7 @@
         <activity
             android:name=".ShareToPcActivity"
             android:exported="true"
-            android:label="Bilgisayarda indir"
+            android:label="@string/share_pc_label"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>

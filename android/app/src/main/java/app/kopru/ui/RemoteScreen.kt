@@ -1,5 +1,8 @@
 package app.kopru.ui
 
+import androidx.annotation.StringRes
+import app.kopru.R
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
@@ -129,12 +132,12 @@ private fun pc(cmd: PcCommand) {
 private fun key(k: SpecialKey) = pc(PcCommand.Key(k))
 
 /** Kumanda sayfaları (üstteki segmentli seçici). */
-private enum class Page(val label: String, val icon: ImageVector) {
-    PAD("Touchpad", Icons.Outlined.TouchApp),
-    KEYS("Klavye", Icons.Outlined.Keyboard),
-    MEDIA("Medya", Icons.Outlined.MusicNote),
-    SLIDES("Sunum", Icons.Outlined.Slideshow),
-    POWER("Güç", Icons.Outlined.PowerSettingsNew),
+private enum class Page(@StringRes val label: Int, val icon: ImageVector) {
+    PAD(R.string.remote_page_pad, Icons.Outlined.TouchApp),
+    KEYS(R.string.remote_page_keys, Icons.Outlined.Keyboard),
+    MEDIA(R.string.remote_page_media, Icons.Outlined.MusicNote),
+    SLIDES(R.string.remote_page_slides, Icons.Outlined.Slideshow),
+    POWER(R.string.remote_page_power, Icons.Outlined.PowerSettingsNew),
 }
 
 /**
@@ -155,12 +158,12 @@ fun RemoteScreen(ui: UiState) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Kumanda", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
-            Pill(if (on) "canlı" else "bağlı değil", if (on) "violet" else "muted")
+            Text(stringResource(R.string.remote_title), Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
+            Pill(if (on) stringResource(R.string.remote_pill_live) else stringResource(R.string.remote_pill_offline), if (on) "violet" else "muted")
         }
         Segments(page) { page = it; prefs.edit().putString("page", it.name).apply() }
         if (!on) {
-            Text("Bağlı değil: kumanda için telefonu bilgisayara bağla.", color = c.faint, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.remote_offline_hint), color = c.faint, style = MaterialTheme.typography.bodySmall)
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (page) {
@@ -185,6 +188,7 @@ private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
     ) {
         Page.entries.forEach { p ->
             val sel = p == selected
+            val pLabel = stringResource(p.label)
             Column(
                 Modifier
                     .weight(1f)
@@ -193,13 +197,13 @@ private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
                     .background(if (sel) c.goldSoft else Color.Transparent)
                     .then(if (sel) Modifier.border(1.dp, c.goldLine, RoundedCornerShape(12.dp)) else Modifier)
                     .selectable(sel, role = Role.Tab, onClick = { onSelect(p) })
-                    .semantics { contentDescription = p.label },
+                    .semantics { contentDescription = pLabel },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(p.icon, null, tint = if (sel) c.goldHi else c.muted, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.height(2.dp))
-                Text(p.label, color = if (sel) c.goldHi else c.text2, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                Text(pLabel, color = if (sel) c.goldHi else c.text2, style = MaterialTheme.typography.labelSmall, maxLines = 1)
             }
         }
     }
@@ -213,12 +217,12 @@ private fun PadPage(prefs: android.content.SharedPreferences) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Touchpad(sens, Modifier.weight(1f).heightIn(min = 200.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TbButton("Sol tık", { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f), height = 56.dp)
-            TbButton("Orta", { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f), height = 56.dp)
-            TbButton("Sağ tık", { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f), height = 56.dp)
+            TbButton(stringResource(R.string.remote_left_click), { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f), height = 56.dp)
+            TbButton(stringResource(R.string.remote_middle), { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f), height = 56.dp)
+            TbButton(stringResource(R.string.remote_right_click), { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f), height = 56.dp)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Hız", Modifier.width(44.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.remote_speed), Modifier.width(44.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
             Slider(
                 sens,
                 { sens = it; prefs.edit().putFloat("sens", it).apply() },
@@ -228,7 +232,7 @@ private fun PadPage(prefs: android.content.SharedPreferences) {
             )
         }
         Text(
-            "Sür: imleç · dokun: tık · iki parmakla dokun: sağ tık · iki parmak kaydır: kaydırma · basılı tut + sürükle: sürükle-bırak",
+            stringResource(R.string.remote_pad_help),
             color = c.faint,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -248,18 +252,18 @@ private fun MediaPage() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
         TbCard {
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(Icons.Outlined.SkipPrevious, "Önceki", { pc(PcCommand.Media(MediaAction.PREVIOUS)) }, size = 64.dp)
-                RoundIcon(Icons.Outlined.PlayArrow, "Oynat/Duraklat", { pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }, size = 88.dp, primary = true)
-                RoundIcon(Icons.Outlined.SkipNext, "Sonraki", { pc(PcCommand.Media(MediaAction.NEXT)) }, size = 64.dp)
+                RoundIcon(Icons.Outlined.SkipPrevious, stringResource(R.string.remote_prev), { pc(PcCommand.Media(MediaAction.PREVIOUS)) }, size = 64.dp)
+                RoundIcon(Icons.Outlined.PlayArrow, stringResource(R.string.remote_play_pause), { pc(PcCommand.Media(MediaAction.PLAY_PAUSE)) }, size = 88.dp, primary = true)
+                RoundIcon(Icons.Outlined.SkipNext, stringResource(R.string.remote_next), { pc(PcCommand.Media(MediaAction.NEXT)) }, size = 64.dp)
             }
         }
         TbCard {
-            SectionTitle("Ses")
+            SectionTitle(stringResource(R.string.remote_volume))
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TbButton("Kıs", { pc(PcCommand.Volume(VolumeAction.DOWN)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeDown, height = 64.dp)
-                TbButton("Sessiz", { pc(PcCommand.Volume(VolumeAction.MUTE)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeOff, height = 64.dp)
-                TbButton("Aç", { pc(PcCommand.Volume(VolumeAction.UP)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeUp, height = 64.dp)
+                TbButton(stringResource(R.string.remote_vol_down), { pc(PcCommand.Volume(VolumeAction.DOWN)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeDown, height = 64.dp)
+                TbButton(stringResource(R.string.remote_mute), { pc(PcCommand.Volume(VolumeAction.MUTE)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeOff, height = 64.dp)
+                TbButton(stringResource(R.string.remote_vol_up), { pc(PcCommand.Volume(VolumeAction.UP)) }, Modifier.weight(1f), icon = Icons.AutoMirrored.Outlined.VolumeUp, height = 64.dp)
             }
         }
     }
@@ -269,12 +273,12 @@ private fun MediaPage() {
 private fun SlidesPage() {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TbButton("Geri", { key(SpecialKey.LEFT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronLeft, height = 96.dp)
-            TbButton("İleri", { key(SpecialKey.RIGHT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronRight, height = 96.dp)
+            TbButton(stringResource(R.string.remote_slide_back), { key(SpecialKey.LEFT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronLeft, height = 96.dp)
+            TbButton(stringResource(R.string.remote_slide_next), { key(SpecialKey.RIGHT) }, Modifier.weight(1f).fillMaxHeight().heightIn(min = 96.dp), icon = Icons.Outlined.ChevronRight, height = 96.dp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TbButton("Başlat (F5)", { key(SpecialKey.F5) }, Modifier.weight(1f), height = 64.dp)
-            TbButton("Bitir (Esc)", { key(SpecialKey.ESCAPE) }, Modifier.weight(1f), height = 64.dp)
+            TbButton(stringResource(R.string.remote_slide_start), { key(SpecialKey.F5) }, Modifier.weight(1f), height = 64.dp)
+            TbButton(stringResource(R.string.remote_slide_end), { key(SpecialKey.ESCAPE) }, Modifier.weight(1f), height = 64.dp)
         }
     }
 }
@@ -284,30 +288,32 @@ private fun PowerPage() {
     val c = tb
     var confirm by remember { mutableStateOf<PowerAction?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Her güç eylemi onay ister.", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.remote_power_note), color = c.faint, style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PowerTile("Kilitle", Icons.Outlined.Lock, false, Modifier.weight(1f)) { confirm = PowerAction.LOCK }
-            PowerTile("Uyku", Icons.Outlined.Bedtime, false, Modifier.weight(1f)) { confirm = PowerAction.SLEEP }
+            PowerTile(stringResource(R.string.remote_lock), Icons.Outlined.Lock, false, Modifier.weight(1f)) { confirm = PowerAction.LOCK }
+            PowerTile(stringResource(R.string.remote_sleep), Icons.Outlined.Bedtime, false, Modifier.weight(1f)) { confirm = PowerAction.SLEEP }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PowerTile("Yeniden başlat", Icons.Outlined.RestartAlt, true, Modifier.weight(1f)) { confirm = PowerAction.RESTART }
-            PowerTile("Kapat", Icons.Outlined.PowerSettingsNew, true, Modifier.weight(1f)) { confirm = PowerAction.SHUTDOWN }
+            PowerTile(stringResource(R.string.remote_restart), Icons.Outlined.RestartAlt, true, Modifier.weight(1f)) { confirm = PowerAction.RESTART }
+            PowerTile(stringResource(R.string.remote_shutdown), Icons.Outlined.PowerSettingsNew, true, Modifier.weight(1f)) { confirm = PowerAction.SHUTDOWN }
         }
     }
     confirm?.let { a ->
-        val name = when (a) {
-            PowerAction.SLEEP -> "uyku moduna alınsın"
-            PowerAction.RESTART -> "yeniden başlatılsın"
-            PowerAction.SHUTDOWN -> "kapatılsın"
-            PowerAction.LOCK -> "kilitlensin"
-        }
+        val title = stringResource(
+            when (a) {
+                PowerAction.SLEEP -> R.string.remote_confirm_sleep
+                PowerAction.RESTART -> R.string.remote_confirm_restart
+                PowerAction.SHUTDOWN -> R.string.remote_confirm_shutdown
+                PowerAction.LOCK -> R.string.remote_confirm_lock
+            },
+        )
         AlertDialog(
             onDismissRequest = { confirm = null },
             containerColor = c.s2,
-            title = { Text("Bilgisayar $name mı?") },
-            text = { Text(if (a == PowerAction.LOCK) "Oturum kilitlenir." else "Kaydedilmemiş işler kaybolabilir.", color = c.text2) },
-            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }, Modifier.heightIn(min = 48.dp)) { Text("Evet", color = if (a == PowerAction.LOCK) c.goldHi else c.bad) } },
-            dismissButton = { TextButton({ confirm = null }, Modifier.heightIn(min = 48.dp)) { Text("Vazgeç", color = c.text2) } },
+            title = { Text(title) },
+            text = { Text(stringResource(if (a == PowerAction.LOCK) R.string.remote_confirm_lock_text else R.string.remote_confirm_loss_text), color = c.text2) },
+            confirmButton = { TextButton({ pc(PcCommand.Power(a)); confirm = null }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.remote_yes), color = if (a == PowerAction.LOCK) c.goldHi else c.bad) } },
+            dismissButton = { TextButton({ confirm = null }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.remote_cancel), color = c.text2) } },
         )
     }
 }
@@ -464,6 +470,6 @@ private fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
                 )
             }
         }
-        Text("TOUCHPAD", color = c.faint, style = MaterialTheme.typography.labelSmall)
+        Text(stringResource(R.string.remote_page_pad).uppercase(), color = c.faint, style = MaterialTheme.typography.labelSmall)
     }
 }

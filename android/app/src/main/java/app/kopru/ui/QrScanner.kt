@@ -1,5 +1,7 @@
 package app.kopru.ui
 
+import androidx.compose.ui.res.stringResource
+import app.kopru.R
 import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
@@ -119,7 +121,7 @@ fun QrScanner(onClose: () -> Unit, onResult: (String) -> Unit) {
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    if (denied) "Kamera izni verilmedi" else "Bilgisayardaki QR kodu çerçeveye getir",
+                    if (denied) stringResource(R.string.qr_denied_title) else stringResource(R.string.qr_aim),
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     textAlign = TextAlign.Center,
@@ -127,7 +129,7 @@ fun QrScanner(onClose: () -> Unit, onResult: (String) -> Unit) {
                 Column(Modifier.fillMaxWidth()) {
                     if (denied) {
                         Text(
-                            "QR okutmak için kameraya izin ver ya da listeden bilgisayarı seçip 6 haneli kodu gir.",
+                            stringResource(R.string.qr_denied_body),
                             Modifier.fillMaxWidth(),
                             color = Color(0xFFC9C6BD),
                             style = MaterialTheme.typography.bodyMedium,
@@ -135,7 +137,7 @@ fun QrScanner(onClose: () -> Unit, onResult: (String) -> Unit) {
                         )
                         Spacer(Modifier.height(16.dp))
                     }
-                    TbButton("Vazgeç", onClose, Modifier.fillMaxWidth())
+                    TbButton(stringResource(R.string.qr_cancel), onClose, Modifier.fillMaxWidth())
                 }
             }
         }
@@ -186,7 +188,7 @@ private fun CameraPreview(onClose: () -> Unit, onResult: (String) -> Unit) {
                 provider.unbindAll()
                 provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (_: Exception) {
-                Toast.makeText(ctx, "Kamera açılamadı. Listeden bilgisayarı seçip kodu gir.", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.qr_toast_camera_failed), Toast.LENGTH_LONG).show()
                 close()
             }
         }, main)

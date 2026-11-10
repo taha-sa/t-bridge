@@ -1,6 +1,10 @@
 package app.kopru.ui
 
 import androidx.compose.foundation.Canvas
+import app.kopru.R
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -84,8 +88,8 @@ fun EcosystemScreen(ui: UiState) {
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Ekosistem", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
-            Text("Bildirimler", color = c.muted, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))
+            Text(stringResource(R.string.eco_title), Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(R.string.eco_notifications), color = c.muted, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(end = 8.dp))
             Switch(s.notify, { Suite.setNotify(it) }, colors = SwitchDefaults.colors(checkedTrackColor = c.gold, checkedThumbColor = c.onGold))
         }
 
@@ -93,10 +97,10 @@ fun EcosystemScreen(ui: UiState) {
         StatusRow(
             ok = on,
             text = when {
-                on && active > 0 -> "Bilgisayara bağlı · $active uygulama etkin"
-                on -> "Bilgisayara bağlı · uygulamalar başlatılıyor"
-                ui.conn == ConnState.CONNECTED -> "Bilgisayara bağlı · T-Bridge sürümü eski"
-                else -> "Bilgisayara bağlı değil"
+                on && active > 0 -> pluralStringResource(R.plurals.eco_status_active, active, active)
+                on -> stringResource(R.string.eco_status_starting)
+                ui.conn == ConnState.CONNECTED -> stringResource(R.string.eco_status_old)
+                else -> stringResource(R.string.eco_status_off)
             },
         )
 
@@ -107,10 +111,10 @@ fun EcosystemScreen(ui: UiState) {
         }
 
         if (!on) {
-            if (viewer.installed) TbCard { SectionTitle("Telefondaki uygulamalar"); Spacer8(); ViewerRow(viewer) }
+            if (viewer.installed) TbCard { SectionTitle(stringResource(R.string.eco_phone_apps)); Spacer8(); ViewerRow(viewer) }
             TbCard {
                 Text(
-                    if (ui.conn != ConnState.CONNECTED) "Bilgisayara bağlanınca T-Suite uygulamaları burada görünür." else "Bilgisayardaki T-Bridge sürümü ekosistemi desteklemiyor; güncelle.",
+                    if (ui.conn != ConnState.CONNECTED) stringResource(R.string.eco_wait_pc) else stringResource(R.string.eco_pc_old),
                     color = c.muted, style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -126,7 +130,7 @@ fun EcosystemScreen(ui: UiState) {
                 SectionTitle(a.name.ifEmpty { a.id })
                 Spacer8()
                 val ev = s.events[a.id].orEmpty()
-                if (ev.isEmpty()) Text(if (a.running) "Henüz olay yok" else "Kapalı", color = c.faint, style = MaterialTheme.typography.bodySmall)
+                if (ev.isEmpty()) Text(if (a.running) stringResource(R.string.eco_no_events) else stringResource(R.string.eco_closed), color = c.faint, style = MaterialTheme.typography.bodySmall)
                 ev.forEach { Text(it, color = c.muted, style = MaterialTheme.typography.bodySmall, maxLines = 1) }
             }
         }
@@ -161,12 +165,19 @@ private fun StatusRow(ok: Boolean, text: String) {
 private fun OffState(name: String, id: String, st: AppState) {
     val c = tb
     when (st) {
-        AppState.MISSING -> Text("$name bu bilgisayarda kurulu değil", color = c.faint, style = MaterialTheme.typography.bodyMedium)
-        AppState.STARTING -> Text("$name arka planda başlatılıyor…", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+        AppState.MISSING -> {
+            // Kart yerinde kalır; × yalnızca bu daveti kapatır (kalıcı gizleme yok).
+            var closed by remember { mutableStateOf(false) }
+            val ctx = LocalContext.current
+            val inv = inviteFor(id)
+            if (closed || inv == null) Text(stringResource(R.string.eco_not_installed, name), color = c.faint, style = MaterialTheme.typography.bodyMedium)
+            else InviteCard(inv.app, stringResource(inv.title), stringResource(inv.body), stringResource(R.string.inv_pc_cta), { shareInviteLink(ctx, inv.app) }, { closed = true })
+        }
+        AppState.STARTING -> Text(stringResource(R.string.eco_off_starting, name), color = c.muted, style = MaterialTheme.typography.bodyMedium)
         else -> {
-            Text("$name otomatik başlatılamadı", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.eco_off_failed, name), color = c.muted, style = MaterialTheme.typography.bodyMedium)
             Spacer8()
-            TbButton("Bilgisayarda aç", { Suite.launch(id) }, Modifier.fillMaxWidth())
+            TbButton(stringResource(R.string.eco_open_pc), { Suite.launch(id) }, Modifier.fillMaxWidth())
         }
     }
 }
@@ -174,33 +185,35 @@ private fun OffState(name: String, id: String, st: AppState) {
 @Composable
 private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState) {
     val c = tb
+    val sendingTpl = stringResource(R.string.eco_sending, "%s")
+    val sendFailed = stringResource(R.string.eco_send_failed)
     TbCard {
-        SectionTitle("İndirmeler")
+        SectionTitle(stringResource(R.string.eco_downloads))
         Spacer8()
         if (st != AppState.RUNNING && active.isEmpty() && done.isEmpty()) { OffState("T-Downloader", "t-downloader", st); return@TbCard }
-        if (active.isEmpty()) Text("Etkin indirme yok", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        if (active.isEmpty()) Text(stringResource(R.string.eco_no_active_dl), color = c.faint, style = MaterialTheme.typography.bodySmall)
         active.forEach { d ->
             Column(Modifier.padding(vertical = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(d.name, Modifier.weight(1f), color = c.text, maxLines = 1, style = MaterialTheme.typography.bodyMedium)
-                    Text(if (d.paused) "duraklatıldı" else "${(d.speed / 1048576).format1()} MB/sn", color = c.muted, style = MaterialTheme.typography.labelSmall)
+                    Text(if (d.paused) stringResource(R.string.eco_paused) else stringResource(R.string.eco_speed, (d.speed / 1048576).format1()), color = c.muted, style = MaterialTheme.typography.labelSmall)
                 }
                 Box(Modifier.padding(vertical = 5.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.s4)) {
                     Box(Modifier.fillMaxWidth((d.pct / 100.0).toFloat().coerceIn(0f, 1f)).height(6.dp).background(c.goldBrush))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("%${d.pct.toInt()}" + (if (d.etaSec >= 0) " · ${eta(d.etaSec)}" else ""), Modifier.weight(1f), color = c.faint, style = MaterialTheme.typography.labelSmall)
-                    Chip(if (d.paused) "Devam" else "Duraklat") { Suite.send("t-downloader", if (d.paused) "download.resume" else "download.pause", """{"id":"${d.id}"}""") }
+                    Chip(if (d.paused) stringResource(R.string.eco_resume) else stringResource(R.string.eco_pause)) { Suite.send("t-downloader", if (d.paused) "download.resume" else "download.pause", """{"id":"${d.id}"}""") }
                 }
             }
         }
         if (done.isNotEmpty()) {
             Spacer8()
-            Text("Tamamlananlar", color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.eco_completed), color = c.muted, style = MaterialTheme.typography.labelLarge)
             done.forEach { d ->
                 Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(d.name, Modifier.weight(1f), color = c.text, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                    Chip("Telefona al") { Suite.send("t-bridge", "file.send", org.json.JSONObject().put("path", d.path).toString()) { ok, _, e -> Suite.toast(if (ok) "Gönderiliyor: ${d.name}" else (e ?: "Gönderilemedi")) } }
+                    Chip(stringResource(R.string.eco_get_on_phone)) { Suite.send("t-bridge", "file.send", org.json.JSONObject().put("path", d.path).toString()) { ok, _, e -> Suite.toast(if (ok) sendingTpl.format(d.name) else (e ?: sendFailed)) } }
                 }
             }
         }
@@ -215,15 +228,15 @@ private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
     if (help) {
         ModalBottomSheet(onDismissRequest = { help = false }, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
             Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Bellek temizleme", color = c.text, style = MaterialTheme.typography.titleMedium)
-                Text("Akıllı: Arka plandaki uygulamaların gereksiz belleğini boşaltır, açık işinize dokunmaz (önerilen).", color = c.muted, style = MaterialTheme.typography.bodyMedium)
-                Text("Tam: Önbellek dahil her şeyi boşaltır; yönetici izni gerekir, kısa süre yavaşlık olabilir.", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.eco_ram_help_title), color = c.text, style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.eco_ram_help_smart), color = c.muted, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.eco_ram_help_full), color = c.muted, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
     TbCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { SectionTitle("RAM") }
+            Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.eco_ram)) }
             Box(
                 Modifier.size(28.dp).clip(RoundedCornerShape(14.dp)).background(c.s4).clickable { help = true },
                 contentAlignment = Alignment.Center,
@@ -242,11 +255,11 @@ private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
                 Text("%${ram?.usedPct ?: "—"}", color = c.text, style = MaterialTheme.typography.titleMedium)
             }
             Column(Modifier.padding(start = 16.dp).weight(1f)) {
-                Text(if (ram != null) "${Suite.fmtMb(ram.usedMb.toDouble())} / ${Suite.fmtMb(ram.totalMb.toDouble())}" else "Veri bekleniyor…", color = c.text, style = MaterialTheme.typography.bodyMedium)
+                Text(if (ram != null) "${Suite.fmtMb(ram.usedMb.toDouble())} / ${Suite.fmtMb(ram.totalMb.toDouble())}" else stringResource(R.string.eco_waiting_data), color = c.text, style = MaterialTheme.typography.bodyMedium)
                 Spacer8()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TbButton("Akıllı", { Suite.ramClean(false) }, Modifier.weight(1f))
-                    TbButton("Tam", { Suite.ramClean(true) }, Modifier.weight(1f))
+                    TbButton(stringResource(R.string.eco_smart), { Suite.ramClean(false) }, Modifier.weight(1f))
+                    TbButton(stringResource(R.string.eco_full), { Suite.ramClean(true) }, Modifier.weight(1f))
                 }
             }
         }
@@ -257,15 +270,15 @@ private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
 private fun DiskCard(disks: List<app.kopru.DiskRow>, st: AppState) {
     val c = tb
     TbCard {
-        SectionTitle("Disk")
+        SectionTitle(stringResource(R.string.eco_disk))
         Spacer8()
         if (st != AppState.RUNNING && disks.isEmpty()) { OffState("T-DeskTree", "t-desktree", st); return@TbCard }
-        if (disks.isEmpty()) Text("Okunuyor…", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        if (disks.isEmpty()) Text(stringResource(R.string.eco_reading), color = c.faint, style = MaterialTheme.typography.bodySmall)
         disks.forEach { d ->
             Column(Modifier.padding(vertical = 5.dp)) {
                 Row {
                     Text(d.drive, Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.bodyMedium)
-                    Text("${Suite.fmtMb(d.freeBytes / 1048576.0)} boş", color = if (d.usedPct > 0.9f) Color(0xFFF87171) else c.muted, style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.eco_free, Suite.fmtMb(d.freeBytes / 1048576.0)), color = if (d.usedPct > 0.9f) Color(0xFFF87171) else c.muted, style = MaterialTheme.typography.labelSmall)
                 }
                 Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(c.s4)) {
                     Box(Modifier.fillMaxWidth(d.usedPct).height(6.dp).background(c.goldBrush))
@@ -279,43 +292,66 @@ private fun DiskCard(disks: List<app.kopru.DiskRow>, st: AppState) {
 private fun AppsCard(s: app.kopru.SuiteUi, viewer: app.kopru.ViewerState) {
     val c = tb
     TbCard {
-        SectionTitle("Uygulamalar")
+        SectionTitle(stringResource(R.string.eco_apps))
         Spacer8()
-        if (s.apps.isEmpty()) Text("Bu bilgisayarda kurulu T-Suite uygulaması bulunamadı", color = c.faint, style = MaterialTheme.typography.bodySmall)
+        if (s.apps.isEmpty()) Text(stringResource(R.string.eco_no_pc_apps), color = c.faint, style = MaterialTheme.typography.bodySmall)
         s.apps.forEach { a ->
             Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(if (a.running) c.goldHi else c.faint))
                 Text(a.name.ifEmpty { a.id }, Modifier.padding(start = 10.dp).weight(1f), color = c.text, style = MaterialTheme.typography.bodyMedium)
                 Text("v${a.version}", color = c.muted, style = MaterialTheme.typography.labelSmall)
-                if (a.updateAvailable != null) Box(Modifier.padding(start = 8.dp)) { Pill("güncelleme", "gold") }
+                if (a.updateAvailable != null) Box(Modifier.padding(start = 8.dp)) { Pill(stringResource(R.string.eco_update_badge), "gold") }
             }
         }
         if (viewer.installed) {
             Spacer8()
-            Text("Bu telefonda", color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.eco_on_phone), color = c.muted, style = MaterialTheme.typography.labelLarge)
             ViewerRow(viewer)
+        } else {
+            // T-Desk Viewer yoksa satır yerinde kalır, içinde davet görünür (× yalnızca bu daveti kapatır).
+            var closed by remember { mutableStateOf(false) }
+            val ictx = LocalContext.current
+            if (!closed) {
+                Spacer8()
+                InviteCard(InviteApp.VIEWER, stringResource(R.string.inv_viewer_title), stringResource(R.string.inv_viewer_body), stringResource(R.string.inv_viewer_cta), { openInviteUrl(ictx, InviteApp.VIEWER) }, { closed = true })
+            }
         }
         val n = s.apps.count { it.updateAvailable != null }
         Spacer8()
-        TbButton(if (n > 0) "Hepsini güncelle ($n)" else "Hepsini güncelle", { Suite.updateAll() }, Modifier.fillMaxWidth(), enabled = n > 0)
+        TbButton(if (n > 0) stringResource(R.string.eco_update_all_n, n) else stringResource(R.string.eco_update_all), { Suite.updateAll() }, Modifier.fillMaxWidth(), enabled = n > 0)
     }
 }
 
 private fun Double.format1() = String.format(java.util.Locale.getDefault(), "%.1f", this)
-private fun eta(sec: Long) = if (sec >= 3600) "${sec / 3600} sa ${sec % 3600 / 60} dk" else if (sec >= 60) "${sec / 60} dk ${sec % 60} sn" else "$sec sn"
+@Composable
+private fun eta(sec: Long): String =
+    if (sec >= 3600) stringResource(R.string.eco_eta_h, sec / 3600, sec % 3600 / 60)
+    else if (sec >= 60) stringResource(R.string.eco_eta_m, sec / 60, sec % 60)
+    else stringResource(R.string.eco_eta_s, sec)
+
+private class InviteSpec(val app: InviteApp, @StringRes val title: Int, @StringRes val body: Int)
+
+/** Ekosistem kartındaki PC uygulaması için bağlama özel davet metni. */
+private fun inviteFor(id: String): InviteSpec? = when (id) {
+    "t-downloader" -> InviteSpec(InviteApp.DOWNLOADER, R.string.inv_dl_title, R.string.inv_dl_body)
+    "t-ramcash" -> InviteSpec(InviteApp.RAMCASH, R.string.inv_ram_title, R.string.inv_ram_body)
+    "t-desktree" -> InviteSpec(InviteApp.DESKTREE, R.string.inv_disk_title, R.string.inv_disk_body)
+    else -> null
+}
 
 /** T-Desk Viewer satırı: sürüm (PackageManager), "Aç" ve güncelleme varsa altın rozet (viewer'ın güncelleme ekranına derin bağlantı). */
 @Composable
 private fun ViewerRow(v: app.kopru.ViewerState) {
     val c = tb
     val ctx = LocalContext.current
+    val openFailed = stringResource(R.string.eco_open_failed)
     Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(4.dp)).background(c.goldHi))
         Text("T-Desk Viewer", Modifier.padding(start = 10.dp).weight(1f), color = c.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
         Text("v${v.version}", color = c.muted, style = MaterialTheme.typography.labelSmall)
         if (v.update != null) {
-            Box(Modifier.padding(start = 8.dp).clip(RoundedCornerShape(8.dp)).clickable { ViewerLink.openUpdateScreen(ctx) }) { Pill("Güncelleme var", "gold") }
+            Box(Modifier.padding(start = 8.dp).clip(RoundedCornerShape(8.dp)).clickable { ViewerLink.openUpdateScreen(ctx) }) { Pill(stringResource(R.string.eco_update_available), "gold") }
         }
-        Box(Modifier.padding(start = 8.dp)) { Chip("Aç") { if (!ViewerLink.launchViewer(ctx)) Suite.toast("Uygulama açılamadı") } }
+        Box(Modifier.padding(start = 8.dp)) { Chip(stringResource(R.string.eco_open)) { if (!ViewerLink.launchViewer(ctx)) Suite.toast(openFailed) } }
     }
 }

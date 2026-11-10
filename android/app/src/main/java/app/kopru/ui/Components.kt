@@ -1,5 +1,7 @@
 package app.kopru.ui
 
+import androidx.compose.ui.res.stringResource
+import app.kopru.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -384,7 +386,7 @@ fun CheckRow(title: String, desc: String, ok: Boolean, onClick: () -> Unit) {
             Text(title, color = c.text, style = MaterialTheme.typography.titleSmall)
             Text(desc, color = c.muted, style = MaterialTheme.typography.bodySmall)
         }
-        if (!ok) Text("Aç", color = c.goldHi, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
+        if (!ok) Text(stringResource(R.string.components_open), color = c.goldHi, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

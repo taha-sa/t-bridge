@@ -33,8 +33,6 @@ class NotifListener : NotificationListenerService() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReplyHandle>?) = size > 100
         }
 
-        private const val NOT_VALID = "Bildirim artık geçerli değil"
-
         /** SEMANTIC_ACTION_REPLY tercih edilir; yoksa serbest metin girişi olan ilk RemoteInput'lu eylem. */
         private fun findReply(n: Notification): Pair<Notification.Action, RemoteInput>? {
             val actions = n.actions ?: return null
@@ -62,7 +60,7 @@ class NotifListener : NotificationListenerService() {
                 node.sendNotificationReplyResult(key, ok, err)
             }
             val h = synchronized(replies) { replies[key] }
-            if (h == null) { result(false, NOT_VALID); return }
+            if (h == null) { result(false, ctx.getString(R.string.notif_err_invalid)); return }
             try {
                 val intent = Intent().addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
                 val bundle = Bundle().apply { putCharSequence(h.resultKey, text) }
@@ -72,9 +70,9 @@ class NotifListener : NotificationListenerService() {
                 result(true, null)
             } catch (e: PendingIntent.CanceledException) {
                 synchronized(replies) { replies.remove(key) }
-                result(false, NOT_VALID)
+                result(false, ctx.getString(R.string.notif_err_invalid))
             } catch (e: Exception) {
-                result(false, e.message ?: "Yanıt gönderilemedi")
+                result(false, e.message ?: ctx.getString(R.string.notif_err_reply_failed))
             }
         }
 

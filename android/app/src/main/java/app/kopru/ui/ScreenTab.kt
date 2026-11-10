@@ -2,6 +2,8 @@
 
 package app.kopru.ui
 
+import app.kopru.R
+import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -177,19 +179,19 @@ private fun Toolbar(
             val pad = mode == ControlMode.PAD
             ToolItem(
                 if (pad) Icons.Outlined.Mouse else Icons.Outlined.TouchApp,
-                mode.label,
-                "Kontrol modu: ${mode.label}. ${if (pad) "Dokunma moduna" else "Touchpad moduna"} geçmek için dokun",
+                stringResource(mode.label),
+                stringResource(if (pad) R.string.scr_mode_to_tap else R.string.scr_mode_to_pad, stringResource(mode.label)),
                 active = false,
                 onClick = onMode,
                 Modifier.weight(1f),
             )
-            ToolItem(Icons.Outlined.Keyboard, "Klavye", "Klavye", kbOpen, onKeyboard, Modifier.weight(1f))
-            ToolItem(Icons.Outlined.KeyboardAlt, "Tuşlar", "Özel tuşlar", keysOpen, onKeys, Modifier.weight(1f))
-            ToolItem(Icons.Outlined.Speed, "Kalite", "Görüntü kalitesi", false, onQuality, Modifier.weight(1f))
+            ToolItem(Icons.Outlined.Keyboard, stringResource(R.string.scr_tool_keyboard), stringResource(R.string.scr_tool_keyboard), kbOpen, onKeyboard, Modifier.weight(1f))
+            ToolItem(Icons.Outlined.KeyboardAlt, stringResource(R.string.scr_tool_keys), stringResource(R.string.scr_tool_keys_desc), keysOpen, onKeys, Modifier.weight(1f))
+            ToolItem(Icons.Outlined.Speed, stringResource(R.string.scr_tool_quality), stringResource(R.string.scr_tool_quality_desc), false, onQuality, Modifier.weight(1f))
             ToolItem(
                 if (full) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
-                if (full) "Küçült" else "Tam ekran",
-                if (full) "Tam ekrandan çık" else "Tam ekran",
+                stringResource(if (full) R.string.scr_tool_shrink else R.string.scr_full),
+                stringResource(if (full) R.string.scr_full_exit else R.string.scr_full),
                 full, onFull, Modifier.weight(1f),
             )
         }
@@ -200,6 +202,7 @@ private fun Toolbar(
 private fun ToolItem(icon: ImageVector, label: String, desc: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = tb
     val fg = if (active) c.goldHi else Color(0xFFF2F0EA)
+    val onDesc = stringResource(R.string.scr_state_on)
     Column(
         modifier
             .height(ToolbarHeight)
@@ -207,7 +210,7 @@ private fun ToolItem(icon: ImageVector, label: String, desc: String, active: Boo
             .semantics(mergeDescendants = true) {
                 role = Role.Button
                 contentDescription = desc
-                if (active) stateDescription = "Açık"
+                if (active) stateDescription = onDesc
             },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -220,9 +223,9 @@ private fun ToolItem(icon: ImageVector, label: String, desc: String, active: Boo
 }
 
 private val presetNotes = mapOf(
-    ScreenPreset.ECO to "Az veri ve pil harcar; 15 kare/sn, yavaş ağda en güvenlisi",
-    ScreenPreset.BALANCED to "Günlük kullanım için en iyisi; 30 kare/sn, net görüntü (önerilen)",
-    ScreenPreset.SMOOTH to "En akıcı hareket; 60 kare/sn, daha çok veri ve pil harcar",
+    ScreenPreset.ECO to R.string.scr_preset_eco_note,
+    ScreenPreset.BALANCED to R.string.scr_preset_balanced_note,
+    ScreenPreset.SMOOTH to R.string.scr_preset_smooth_note,
 )
 
 @Composable
@@ -230,7 +233,7 @@ private fun QualitySheet(current: ScreenPreset, onPick: (ScreenPreset) -> Unit, 
     val c = tb
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Görüntü kalitesi", color = c.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+            Text(stringResource(R.string.scr_quality_title), color = c.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
             ScreenPreset.entries.forEach { p ->
                 val sel = p == current
                 Row(
@@ -246,10 +249,10 @@ private fun QualitySheet(current: ScreenPreset, onPick: (ScreenPreset) -> Unit, 
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(p.label, color = if (sel) c.goldHi else c.text, style = MaterialTheme.typography.titleSmall)
-                        Text(presetNotes[p] ?: "", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(p.label), color = if (sel) c.goldHi else c.text, style = MaterialTheme.typography.titleSmall)
+                        Text(presetNotes[p]?.let { stringResource(it) } ?: "", color = c.muted, style = MaterialTheme.typography.bodySmall)
                     }
-                    if (sel) Icon(Icons.Outlined.Check, "Seçili", tint = c.goldHi, modifier = Modifier.size(22.dp))
+                    if (sel) Icon(Icons.Outlined.Check, stringResource(R.string.scr_selected), tint = c.goldHi, modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -266,28 +269,29 @@ private fun StartPanel(scr: app.kopru.ScreenUi, on: Boolean) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Ekran", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
-            Pill(if (on) "canlı" else "bağlı değil", if (on) "violet" else "muted")
+            Text(stringResource(R.string.scr_title), Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
+            Pill(if (on) stringResource(R.string.remote_pill_live) else stringResource(R.string.remote_pill_offline), if (on) "violet" else "muted")
         }
         Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             IconTile(Icons.Outlined.Cast, size = 72.dp)
             Spacer(Modifier.height(16.dp))
-            Text("Bilgisayar ekranı", color = c.text, style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.scr_pc_screen), color = c.text, style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             Text(
                 when {
-                    !on -> "Bağlanınca bilgisayar ekranını burada görür ve dokunarak kontrol edersin."
-                    !supported -> "Bilgisayardaki T-Bridge sürümü ekran paylaşımını desteklemiyor. Bilgisayardaki uygulamayı güncelle."
+                    !on -> stringResource(R.string.scr_hint_offline)
+                    !supported -> stringResource(R.string.scr_hint_unsupported)
+                    scr.errorRes != 0 -> stringResource(scr.errorRes)
                     scr.error != null -> scr.error
-                    else -> "Ekranı başlat: bilgisayar ekranı canlı gelir; Dokunma ya da Touchpad moduyla kontrol edersin. İlk seferde bilgisayarda onay istenebilir."
+                    else -> stringResource(R.string.scr_hint_ready)
                 } ?: "",
-                color = if (scr.error != null) c.bad else c.muted,
+                color = if (scr.error != null || scr.errorRes != 0) c.bad else c.muted,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.widthIn(max = 420.dp),
             )
         }
-        GoldButton("Ekranı başlat", { Screen.startViewing() }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Cast, enabled = supported, height = 56.dp)
+        GoldButton(stringResource(R.string.scr_start), { Screen.startViewing() }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Cast, enabled = supported, height = 56.dp)
     }
 }
 

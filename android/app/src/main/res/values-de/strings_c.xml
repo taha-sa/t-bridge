@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="svc_ring_title">Telefon klingelt</string>
+    <string name="svc_ring_text">Vom Computer aus ausgelöst. Zum Beenden tippen.</string>
+    <string name="svc_ring_stop">Stoppen</string>
+    <string name="svc_ch_status">Verbindungsstatus</string>
+    <string name="svc_ch_files">Empfangene Dateien</string>
+    <string name="svc_ch_ring">Telefon finden</string>
+    <string name="svc_notif_default_pc">Computer</string>
+    <string name="svc_notif_connected">%1$s verbunden</string>
+    <string name="svc_notif_connecting">Verbindung wird hergestellt…</string>
+    <string name="svc_notif_no_pairs">Kein gekoppelter Computer</string>
+    <string name="svc_notif_waiting">Warten auf Computer</string>
+    <string name="svc_notif_send_clip">Zwischenablage an PC senden</string>
+    <string name="svc_file_received">Datei empfangen</string>
+    <string name="svc_file_received_open">Datei empfangen · zum Öffnen tippen</string>
+    <string name="clip_empty">Die Zwischenablage enthält keinen Text</string>
+    <string name="clip_not_connected">Computer nicht verbunden</string>
+    <string name="clip_sent">Zwischenablage gesendet</string>
+    <string name="clip_already_sent">Bereits gesendet</string>
+    <string name="share_failed">Senden nicht möglich. Ist ein Computer gekoppelt?</string>
+    <string name="share_nothing">Nichts zum Teilen vorhanden</string>
+    <string name="share_text_sent">Text an die PC-Zwischenablage gesendet</string>
+    <string name="core_err_open_in">Eingehende Datei konnte nicht geöffnet werden</string>
+    <string name="core_err_read_out">Ausgehende Datei konnte nicht gelesen werden</string>
+    <string name="upd_channel">Aktualisierungen</string>
+    <string name="upd_ready_title">T-Bridge %1$s ist bereit</string>
+    <string name="upd_ready_text">Zum Installieren tippen. Kopplung und Einstellungen bleiben erhalten.</string>
+    <string name="upd_install">Installieren</string>
+    <string name="upd_none_ready">Keine Aktualisierung bereit</string>
+    <string name="upd_allow_source">Erlauben Sie T-Bridge die Installation aus dieser Quelle und versuchen Sie es dann erneut.</string>
+    <string name="upd_err_no_release">Es wurde noch keine Version veröffentlicht</string>
+    <string name="upd_err_server">Serverantwort: %1$d</string>
+    <string name="upd_err_insecure">Unsichere Adresse</string>
+    <string name="upd_err_download">Download fehlgeschlagen, Antwort: %1$d</string>
+    <string name="upd_err_verify">Die heruntergeladene Datei konnte nicht überprüft werden</string>
+    <string name="upd_err_move">Datei konnte nicht verschoben werden</string>
+    <string name="upd_err_installer">Installer konnte nicht geöffnet werden: %1$s</string>
+    <plurals name="share_sending">
+        <item quantity="one">%1$d Datei wird gesendet</item>
+        <item quantity="other">%1$d Dateien werden gesendet</item>
+    </plurals>
+    <plurals name="share_queued">
+        <item quantity="one">%1$d Datei in der Warteschlange; sie wird gesendet, sobald der Computer verbunden ist</item>
+        <item quantity="other">%1$d Dateien in der Warteschlange; sie werden gesendet, sobald der Computer verbunden ist</item>
+    </plurals>
+</resources>

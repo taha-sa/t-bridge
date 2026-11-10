@@ -2,6 +2,8 @@
 
 package app.kopru.ui
 
+import app.kopru.R
+import androidx.compose.ui.res.stringResource
 import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -202,8 +204,8 @@ internal fun KeyBtn(
         else -> Triple(c.s3, c.line2, c.text)
     }
     val stateText = when (mod) {
-        ModState.LOCKED -> "Kilitli"
-        ModState.ARMED -> "Sonraki tuşa uygulanır"
+        ModState.LOCKED -> stringResource(R.string.keys_state_locked)
+        ModState.ARMED -> stringResource(R.string.keys_state_armed)
         else -> null
     }
     val base = modifier
@@ -303,13 +305,13 @@ internal fun SpecialKeysPanel(modifier: Modifier = Modifier, maxHeightFraction: 
         ) {
             if (connected && !hold) {
                 Text(
-                    "Bilgisayardaki T-Bridge eski: Ctrl/Alt/Shift/Win basılı tutma, F tuşları ve bazı kısayollar için bilgisayarı güncelle.",
+                    stringResource(R.string.keys_old_pc),
                     color = c.muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
                 Text(
-                    "Değiştirici: dokun = sonraki tuşa · çift dokun ya da basılı tut = kilitle",
+                    stringResource(R.string.keys_modifier_help),
                     color = c.muted,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -318,31 +320,31 @@ internal fun SpecialKeysPanel(modifier: Modifier = Modifier, maxHeightFraction: 
                 M("Ctrl", KeyCode.CTRL, "Control")
                 M("Alt", KeyCode.ALT, "Alt")
                 M("Shift", KeyCode.SHIFT, "Shift")
-                M("Win", KeyCode.WIN, "Windows tuşu")
+                M("Win", KeyCode.WIN, stringResource(R.string.keys_desc_win))
             }
             KeyRow {
                 K("Esc", KeyCode.ESC, SpecialKey.ESCAPE, "Escape")
                 K("Tab", KeyCode.TAB, SpecialKey.TAB, "Tab")
                 K("Enter", KeyCode.ENTER, SpecialKey.ENTER, "Enter")
-                K("⌫", KeyCode.BACKSPACE, SpecialKey.BACKSPACE, "Geri sil", repeat = true)
+                K("⌫", KeyCode.BACKSPACE, SpecialKey.BACKSPACE, stringResource(R.string.keys_desc_backspace), repeat = true)
                 K("Del", KeyCode.DELETE, SpecialKey.DELETE, "Delete")
                 K("Ins", KeyCode.INSERT, null, "Insert")
             }
             KeyRow {
-                K("←", KeyCode.LEFT, SpecialKey.LEFT, "Sol ok", repeat = true)
-                K("↑", KeyCode.UP, SpecialKey.UP, "Yukarı ok", repeat = true)
-                K("↓", KeyCode.DOWN, SpecialKey.DOWN, "Aşağı ok", repeat = true)
-                K("→", KeyCode.RIGHT, SpecialKey.RIGHT, "Sağ ok", repeat = true)
+                K("←", KeyCode.LEFT, SpecialKey.LEFT, stringResource(R.string.keys_desc_left), repeat = true)
+                K("↑", KeyCode.UP, SpecialKey.UP, stringResource(R.string.keys_desc_up), repeat = true)
+                K("↓", KeyCode.DOWN, SpecialKey.DOWN, stringResource(R.string.keys_desc_down), repeat = true)
+                K("→", KeyCode.RIGHT, SpecialKey.RIGHT, stringResource(R.string.keys_desc_right), repeat = true)
                 K("Home", KeyCode.HOME, SpecialKey.HOME, "Home")
                 K("End", KeyCode.END, SpecialKey.END, "End")
             }
             KeyRow {
-                K("PgUp", KeyCode.PAGE_UP, SpecialKey.PAGE_UP, "Sayfa yukarı", repeat = true)
-                K("PgDn", KeyCode.PAGE_DOWN, SpecialKey.PAGE_DOWN, "Sayfa aşağı", repeat = true)
-                KeyBtn("Alt+Tab", Modifier.weight(1.3f), "Alt Tab, pencere değiştir", enabled = connected && KeyPad.available(SpecialKey.ALT_TAB)) {
+                K("PgUp", KeyCode.PAGE_UP, SpecialKey.PAGE_UP, stringResource(R.string.keys_desc_pgup), repeat = true)
+                K("PgDn", KeyCode.PAGE_DOWN, SpecialKey.PAGE_DOWN, stringResource(R.string.keys_desc_pgdn), repeat = true)
+                KeyBtn("Alt+Tab", Modifier.weight(1.3f), stringResource(R.string.keys_desc_alttab), enabled = connected && KeyPad.available(SpecialKey.ALT_TAB)) {
                     KeyPad.combo(listOf(KeyCode.ALT), KeyCode.TAB, SpecialKey.ALT_TAB)
                 }
-                KeyBtn("Win+D", Modifier.weight(1.3f), "Windows D, masaüstünü göster", enabled = hold) {
+                KeyBtn("Win+D", Modifier.weight(1.3f), stringResource(R.string.keys_desc_windesk), enabled = hold) {
                     KeyPad.combo(listOf(KeyCode.WIN), KeyCode.D)
                 }
             }
@@ -358,13 +360,13 @@ internal fun SpecialKeysPanel(modifier: Modifier = Modifier, maxHeightFraction: 
                 }
             }
             KeyRow {
-                KeyBtn("Kopyala", Modifier.weight(1f), "Kopyala, Control C", enabled = connected && KeyPad.available(SpecialKey.COPY_SHORTCUT)) {
+                KeyBtn(stringResource(R.string.keys_copy), Modifier.weight(1f), stringResource(R.string.keys_copy_desc), enabled = connected && KeyPad.available(SpecialKey.COPY_SHORTCUT)) {
                     KeyPad.combo(listOf(KeyCode.CTRL), KeyCode.C, SpecialKey.COPY_SHORTCUT)
                 }
-                KeyBtn("Yapıştır", Modifier.weight(1f), "Yapıştır, Control V", enabled = connected && KeyPad.available(SpecialKey.PASTE_SHORTCUT)) {
+                KeyBtn(stringResource(R.string.keys_paste), Modifier.weight(1f), stringResource(R.string.keys_paste_desc), enabled = connected && KeyPad.available(SpecialKey.PASTE_SHORTCUT)) {
                     KeyPad.combo(listOf(KeyCode.CTRL), KeyCode.V, SpecialKey.PASTE_SHORTCUT)
                 }
-                KeyBtn("Geri al", Modifier.weight(1f), "Geri al, Control Z", enabled = hold) {
+                KeyBtn(stringResource(R.string.keys_undo), Modifier.weight(1f), stringResource(R.string.keys_undo_desc), enabled = hold) {
                     KeyPad.combo(listOf(KeyCode.CTRL), KeyCode.Z)
                 }
             }
@@ -405,7 +407,7 @@ internal fun LiveKeyboard(modifier: Modifier = Modifier, autoFocus: Boolean = fa
             text = if (new.length > 200) "" else new
         },
         modifier = modifier.fillMaxWidth().focusRequester(focus),
-        placeholder = { Text("Buraya yaz, anında bilgisayara gider", color = tb.faint) },
+        placeholder = { Text(stringResource(R.string.keys_placeholder), color = tb.faint) },
         shape = RoundedCornerShape(14.dp),
         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = tb.gold, unfocusedBorderColor = tb.line2, cursorColor = tb.goldHi),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

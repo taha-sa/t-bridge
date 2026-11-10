@@ -181,14 +181,14 @@ object ViewerLink {
             presentWait.entries.removeAll { now - it.value.at > PENDING_TTL_MS }
             presentWait[key(name)] = PresentWait(reply, now)
         }
-        sendPresentState(reply, "transferring", "Sunum bilgisayara gönderiliyor")
+        sendPresentState(reply, "transferring", s(R.string.viewer_present_sending))
     }
 
     /** Terminal durum (opened/failed): bekleyeni kaldırır ve Viewer'a bildirir. Bekleyen yoksa yok sayar. */
     fun finishPresent(name: String, ok: Boolean, failMsg: String? = null) {
         val w = synchronized(presentWait) { presentWait.remove(key(name)) } ?: return
-        if (ok) sendPresentState(w.reply, "opened", "Sunum bilgisayarda açıldı")
-        else sendPresentState(w.reply, "failed", failMsg ?: "Sunum bilgisayarda açılamadı")
+        if (ok) sendPresentState(w.reply, "opened", s(R.string.viewer_present_opened))
+        else sendPresentState(w.reply, "failed", failMsg ?: s(R.string.viewer_present_failed))
     }
 
     /** PC `file.presented` olayı. */
@@ -196,7 +196,7 @@ object ViewerLink {
 
     /** Giden aktarım başarısız/iptal olduysa sunum da başarısızdır. */
     fun onOutgoingTransfer(name: String, failed: Boolean) {
-        if (failed) finishPresent(name, false, "Dosya bilgisayara gönderilemedi")
+        if (failed) finishPresent(name, false, s(R.string.viewer_send_failed))
     }
 
     private fun sendPresentState(to: Messenger, state: String, text: String) {
@@ -225,8 +225,10 @@ object ViewerLink {
         return try {
             if (isInstalled(ctx) && supports(name)) {
                 ctx.startActivity(view.setPackage(PKG))
+            } else if (supports(name)) {
+                ctx.startActivity(ViewerInviteActivity.intent(ctx, uri, name, mime))
             } else {
-                ctx.startActivity(Intent.createChooser(view, "Aç").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                ctx.startActivity(Intent.createChooser(view, ctx.getString(R.string.viewer_chooser)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
             true
         } catch (_: Exception) {
@@ -239,9 +241,12 @@ object ViewerLink {
         val mime = mimeOf(ctx, uri, name)
         val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         if (isInstalled(ctx) && supports(name)) i.setPackage(PKG)
+        else if (supports(name)) return ViewerInviteActivity.intent(ctx, uri, name, mime)
         return i
     }
 }
+
+private fun s(@androidx.annotation.StringRes id: Int): String = Suite.appCtx().getString(id)
 
 /**
  * Viewer -> Bridge kanalı (Messenger). Yalnızca com.tdesk.viewer UID'sinden gelen iletiler işlenir; diğerlerine "reddedildi" döner.
@@ -258,7 +263,7 @@ class ViewerBridgeService : Service() {
         override fun handleMessage(msg: Message) {
             val reply = msg.replyTo
             if (!callerIsViewer(msg.sendingUid)) {
-                respond(reply, false, "Reddedildi")
+                respond(reply, false, s(R.string.viewer_denied))
                 return
             }
             when (msg.what) {
@@ -271,10 +276,10 @@ class ViewerBridgeService : Service() {
                         else -> null
                     }
                     val ok = k != null && Core.isConnected() && Core.node?.sendPc(PcCommand.Key(k)) == true
-                    respond(reply, ok, if (ok) "" else "Bilgisayar bağlı değil")
+                    respond(reply, ok, if (ok) "" else s(R.string.viewer_pc_off))
                 }
                 WHAT_PING -> respond(reply, true, "")
-                else -> respond(reply, false, "Bilinmeyen komut")
+                else -> respond(reply, false, s(R.string.viewer_unknown_cmd))
             }
         }
     }
@@ -288,26 +293,26 @@ class ViewerBridgeService : Service() {
 
     private fun handleSend(d: Bundle, reply: Messenger?) {
         val uri = d.getString("uri")?.let(Uri::parse)
-        if (uri == null) { respond(reply, false, "Dosya yok"); return }
+        if (uri == null) { respond(reply, false, s(R.string.viewer_no_file)); return }
         val file = OutgoingFiles.describe(this, uri, persist = false)
-        if (file == null) { respond(reply, false, "Dosya okunamadı"); return }
+        if (file == null) { respond(reply, false, s(R.string.viewer_unreadable)); return }
         KopruService.startHolding(this, listOf(uri))
         val present = d.getBoolean("present", false)
         if (present) {
-            if (!Core.isConnected() || !Suite.supported()) { respond(reply, false, "Bilgisayar bağlı değil veya sürüm eski"); return }
+            if (!Core.isConnected() || !Suite.supported()) { respond(reply, false, s(R.string.viewer_pc_off_or_old)); return }
             // PC önce adı öğrenir; dosya bitince tam ekran açar.
             val pname = file.name.substringAfterLast('/')
             ViewerLink.trackPresent(pname, reply)
             Suite.send("t-bridge", "file.present", JSONObject().put("name", pname).toString()) { ok, _, err ->
-                if (!ok) ViewerLink.finishPresent(pname, false, Suite.friendlyError(err) ?: "Bilgisayar sunumu kabul etmedi")
+                if (!ok) ViewerLink.finishPresent(pname, false, Suite.friendlyError(err) ?: s(R.string.viewer_rejected))
             }
         }
         val n = Core.sendFiles(listOf(file))
-        if (present && n == 0) ViewerLink.finishPresent(file.name, false, "Gönderilemedi")
+        if (present && n == 0) ViewerLink.finishPresent(file.name, false, s(R.string.viewer_send_fail_short))
         when {
-            n == 0 -> respond(reply, false, "Gönderilemedi (eşleşmiş bilgisayar yok?)")
-            Core.isConnected() -> respond(reply, true, if (present) "Sunum bilgisayara gönderiliyor" else "Dosya gönderiliyor")
-            else -> respond(reply, true, "Sıraya alındı; bilgisayar bağlanınca gidecek")
+            n == 0 -> respond(reply, false, s(R.string.viewer_send_fail_nopc))
+            Core.isConnected() -> respond(reply, true, if (present) s(R.string.viewer_present_sending) else s(R.string.viewer_sending_file))
+            else -> respond(reply, true, s(R.string.viewer_queued))
         }
     }
 

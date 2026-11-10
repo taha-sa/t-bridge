@@ -1,5 +1,6 @@
 package app.kopru
 
+import androidx.annotation.StringRes
 import android.content.res.Resources
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -26,10 +27,10 @@ import kotlin.math.min
  * Hazır kalite ayarları. Çözünürlük telefonun GERÇEK görüntü alanından (piksel) gelir; `cap*` yalnızca üst sınırdır
  * (Eko 720p, diğerleri 1080p; yatay/dikey ayrımı kutu yönüne göre). Bit hızını PC otomatik seçer (yeni PC); eski PC için `legacyKbps`.
  */
-enum class ScreenPreset(val label: String, val capW: Int, val capH: Int, val fps: Int, val legacyKbps: Int) {
-    ECO("Eko", 1280, 720, 15, 2000),
-    BALANCED("Dengeli", 1920, 1080, 30, 5000),
-    SMOOTH("Akıcı", 1920, 1080, 60, 8000),
+enum class ScreenPreset(@StringRes val label: Int, val capW: Int, val capH: Int, val fps: Int, val legacyKbps: Int) {
+    ECO(R.string.scr_preset_eco, 1280, 720, 15, 2000),
+    BALANCED(R.string.scr_preset_balanced, 1920, 1080, 30, 5000),
+    SMOOTH(R.string.scr_preset_smooth, 1920, 1080, 60, 8000),
 }
 
 data class ScreenUi(
@@ -40,6 +41,8 @@ data class ScreenUi(
     /** Telefon "ekranı göster" modunda mı (kullanıcı isteği). */
     val viewing: Boolean = false,
     val error: String? = null,
+    /** Telefonun kendi hatası (kaynak kimliği); 0 = yok. Arayüz yerelleştirilmiş metni çözer. */
+    @StringRes val errorRes: Int = 0,
     /** PC güvenli masaüstünde (UAC / kilit ekranı): görüntü geçici olarak durdu. */
     val secure: Boolean = false,
     val videoW: Int = 0,
@@ -186,10 +189,10 @@ object Screen {
     fun startViewing(monitor: Int = _ui.value.current, preset: ScreenPreset = _ui.value.preset) {
         val n = Core.node ?: return
         if (!n.peerSupportsScreen()) {
-            _ui.update { it.copy(error = "Bilgisayardaki T-Bridge ekran paylaşımını desteklemiyor") }
+            _ui.update { it.copy(error = null, errorRes = R.string.scr_err_unsupported) }
             return
         }
-        _ui.update { it.copy(viewing = true, error = null, secure = false, current = monitor, preset = preset, fps = 0, latencyMs = 0) }
+        _ui.update { it.copy(viewing = true, error = null, errorRes = 0, secure = false, current = monitor, preset = preset, fps = 0, latencyMs = 0) }
         needKey = true
         resetStats()
         if (viewW > 0) {
@@ -257,7 +260,7 @@ object Screen {
 
     fun onInfo(monitors: List<MonitorInfo>, current: Int, active: Boolean, error: String?) {
         // Paylaşım bittiyse güvenli masaüstü notu da kalkar; aktifken (yeniden kurulum bildirimi) not korunur.
-        _ui.update { it.copy(monitors = monitors, current = if (it.viewing) it.current else current, active = active, error = error, secure = it.secure && active) }
+        _ui.update { it.copy(monitors = monitors, current = if (it.viewing) it.current else current, active = active, error = error, errorRes = 0, secure = it.secure && active) }
     }
 
     /** PC güvenli masaüstüne geçti / döndü (eski PC bu bildirimi göndermez). */
@@ -389,7 +392,7 @@ object Screen {
             }
         }
         codec = null
-        _ui.update { it.copy(error = "Video çözücü başlatılamadı") }
+        _ui.update { it.copy(error = null, errorRes = R.string.scr_err_decoder) }
     }
 
     private fun stopCodecLocked() {
@@ -577,7 +580,7 @@ object Screen {
                 "çözme ${fmt1(s.decodeMs)} ms · alındı→çizildi ${fmt1(s.r2rMs)} ms",
                 "geç atılan ${s.late} · giriş beklemesi ${s.inputWaits} · kuyruk ${s.qMax}",
                 "RTT ${fmt1(rttMs)} ms · ${if (tune()) "ack+datagram" else "eski PC (ack yok)"}",
-                "video ${v.videoW}x${v.videoH} · ${v.preset.label} · istek ${sentW}x${sentH} (kutu ${viewW}x${viewH}, ×${zoom})",
+                "video ${v.videoW}x${v.videoH} · ${v.preset.name} · istek ${sentW}x${sentH} (kutu ${viewW}x${viewH}, ×${zoom})",
             ),
         )
         Log.i(

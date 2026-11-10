@@ -1,6 +1,8 @@
 package app.kopru
 
 import android.content.ClipboardManager
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -92,6 +94,8 @@ import app.kopru.ui.tb
 
 @OptIn(ExperimentalLayoutApi::class)
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: android.content.Context) = super.attachBaseContext(Lang.wrap(newBase))
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { sendClipIfNew() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -174,7 +178,7 @@ class MainActivity : ComponentActivity() {
         if ((data.scheme != "tbridge" && data.scheme != "kopru") || data.host != "pair") return
         i.data = null
         runCatching { Core.node?.pairUri(data.toString()) }
-            .onFailure { Toast.makeText(this, "Geçersiz eşleştirme bağlantısı", Toast.LENGTH_LONG).show() }
+            .onFailure { Toast.makeText(this, getString(R.string.main_err_pair_link), Toast.LENGTH_LONG).show() }
     }
 
     override fun onResume() {
@@ -204,7 +208,7 @@ class MainActivity : ComponentActivity() {
 
 private const val TAB_SCREEN = 2
 
-private data class NavItem(val tab: Int, val label: String, val desc: String, val icon: ImageVector)
+private data class NavItem(val tab: Int, @StringRes val label: Int, @StringRes val desc: Int, val icon: ImageVector)
 
 /*
  * Alt gezinme düzeni: 7 hedef var ama telefon genişliğinde (360 dp) 7 sekme ancak ~51 dp/sekme olur; "Ekosistem" gibi
@@ -213,15 +217,15 @@ private data class NavItem(val tab: Int, val label: String, val desc: String, va
  * bir kez kurulan şeyler). Kamera/Ekran/Kumanda ayrı hedeflerdir; "Daha fazla" içindeki bir hedefteyken yuva seçili görünür.
  */
 private val primary = listOf(
-    NavItem(0, "Ana", "Ana sayfa, bağlantı", Icons.Outlined.Home),
-    NavItem(1, "Dosyalar", "Dosya aktarımı", Icons.Outlined.Folder),
-    NavItem(TAB_SCREEN, "Ekran", "Bilgisayar ekranı", Icons.Outlined.Cast),
-    NavItem(3, "Kumanda", "Uzaktan kumanda", Icons.Outlined.Mouse),
+    NavItem(0, R.string.nav_home, R.string.nav_home_desc, Icons.Outlined.Home),
+    NavItem(1, R.string.nav_files, R.string.nav_files_desc, Icons.Outlined.Folder),
+    NavItem(TAB_SCREEN, R.string.nav_screen, R.string.nav_screen_desc, Icons.Outlined.Cast),
+    NavItem(3, R.string.nav_remote, R.string.nav_remote_desc, Icons.Outlined.Mouse),
 )
 private val more = listOf(
-    NavItem(4, "Kamera", "Telefonu bilgisayarda web kamerası yap", Icons.Outlined.Videocam),
-    NavItem(5, "Ekosistem", "T-Suite uygulamaları ve ortak özellikler", Icons.Outlined.Hub),
-    NavItem(6, "Ayarlar", "Bağlantı, görünüm ve güncelleme", Icons.Outlined.Settings),
+    NavItem(4, R.string.nav_camera, R.string.nav_camera_desc, Icons.Outlined.Videocam),
+    NavItem(5, R.string.nav_eco, R.string.nav_eco_desc, Icons.Outlined.Hub),
+    NavItem(6, R.string.nav_settings, R.string.nav_settings_desc, Icons.Outlined.Settings),
 )
 
 /** Alt gezinme: seçili sekmede altın gösterge. */
@@ -230,7 +234,7 @@ private val more = listOf(
 private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
     val c = tb
     var sheet by remember { mutableStateOf(false) }
-    val slots = primary + NavItem(-1, "Daha fazla", "Kamera, Ekosistem, Ayarlar", Icons.Outlined.MoreHoriz)
+    val slots = primary + NavItem(-1, R.string.nav_more, R.string.nav_more_desc, Icons.Outlined.MoreHoriz)
     Column(
         Modifier
             .fillMaxWidth()
@@ -240,6 +244,7 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
             slots.forEach { it ->
+                val navDesc = stringResource(it.label) + ", " + stringResource(it.desc)
                 val sel = if (it.tab < 0) selected >= 4 else it.tab == selected
                 val w by animateDpAsState(if (sel) 22.dp else 0.dp, tween(260), label = "ind")
                 Column(
@@ -249,7 +254,7 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
                         .semantics(mergeDescendants = true) {
                             role = Role.Tab
                             selectedState = sel
-                            contentDescription = it.label + ", " + it.desc
+                            contentDescription = navDesc
                         }
                         .clickable(remember { MutableInteractionSource() }, indication = null) { if (it.tab < 0) sheet = true else onSelect(it.tab) }
                         .heightIn(min = 48.dp)
@@ -270,7 +275,7 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
                         }
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text(it.label, color = if (sel) c.text else c.muted, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    Text(stringResource(it.label), color = if (sel) c.text else c.muted, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     Spacer(Modifier.height(3.dp))
                     Box(Modifier.width(w).height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.goldBrush))
                 }
@@ -280,7 +285,7 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
     if (sheet) {
         ModalBottomSheet(onDismissRequest = { sheet = false }, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Daha fazla", color = c.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+                Text(stringResource(R.string.nav_more), color = c.text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
                 more.forEach { m ->
                     val sel = m.tab == selected
                     Row(
@@ -296,10 +301,10 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
                         Icon(m.icon, null, tint = if (sel) c.goldHi else c.text2, modifier = Modifier.size(24.dp))
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(m.label, color = c.text, style = MaterialTheme.typography.titleSmall)
-                            Text(m.desc, color = c.muted, style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(m.label), color = c.text, style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(m.desc), color = c.muted, style = MaterialTheme.typography.bodySmall)
                         }
-                        if (sel) Icon(Icons.Outlined.Check, "Seçili", tint = c.goldHi, modifier = Modifier.size(22.dp))
+                        if (sel) Icon(Icons.Outlined.Check, stringResource(R.string.nav_selected), tint = c.goldHi, modifier = Modifier.size(22.dp))
                     }
                 }
             }

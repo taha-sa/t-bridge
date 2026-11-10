@@ -141,7 +141,7 @@ fun TBridgeTheme(content: @Composable () -> Unit) {
 }
 
 fun fmtBytes(n: Long): String {
-    if (n < 1024) return "$n B"
+    if (n < 1024) return "$n\u00a0B"
     val u = arrayOf("KB", "MB", "GB", "TB")
     var v = n / 1024.0
     var i = 0
@@ -149,5 +149,5 @@ fun fmtBytes(n: Long): String {
         v /= 1024
         i++
     }
-    return if (v >= 100) "%.0f %s".format(v, u[i]) else "%.1f %s".format(v, u[i])
+    return if (v >= 100) String.format(java.util.Locale.getDefault(), "%.0f\u00a0%s", v, u[i]) else String.format(java.util.Locale.getDefault(), "%.1f\u00a0%s", v, u[i])
 }

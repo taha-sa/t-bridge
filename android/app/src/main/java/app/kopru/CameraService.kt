@@ -1,5 +1,6 @@
 package app.kopru
 
+import androidx.annotation.StringRes
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -50,7 +51,7 @@ data class CamUi(
     val rotation: Int = 0,
     val w: Int = 0,
     val h: Int = 0,
-    val error: String? = null,
+    @StringRes val error: Int? = null,
 )
 
 /**
@@ -79,12 +80,12 @@ class CameraService : Service(), LifecycleOwner {
     @SuppressLint("InlinedApi")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CH, "Telefon kamerası", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH, getString(R.string.cam_channel_name), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n: Notification = NotificationCompat.Builder(this, CH)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("T-Bridge kamera olarak kullanılıyor")
-            .setContentText("Telefon kamerası bilgisayara aktarılıyor")
+            .setContentTitle(getString(R.string.cam_notif_title))
+            .setContentText(getString(R.string.cam_notif_text))
             .setOngoing(true)
             .setContentIntent(open)
             .build()
@@ -109,7 +110,7 @@ class CameraService : Service(), LifecycleOwner {
 
     private fun startCamera() {
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            fail("Kamera izni verilmedi")
+            fail(R.string.cam_err_permission)
             return
         }
         val fut = ProcessCameraProvider.getInstance(this)
@@ -155,7 +156,7 @@ class CameraService : Service(), LifecycleOwner {
                 _ui.update { it.copy(streaming = true, error = null, exposureRange = ev.exposureCompensationRange.lower..ev.exposureCompensationRange.upper) }
             } catch (e: Exception) {
                 Log.w(TAG, "kamera başlatılamadı: $e")
-                fail("Kamera açılamadı")
+                fail(R.string.cam_err_open)
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -191,7 +192,7 @@ class CameraService : Service(), LifecycleOwner {
         Core.node?.sendCamState(false, 0u, 0u, 30u, if (_ui.value.front) 1u else 0u, _ui.value.mirror, 0u.toUShort())
     }
 
-    private fun fail(msg: String) {
+    private fun fail(@StringRes msg: Int) {
         _ui.update { it.copy(streaming = false, error = msg) }
         stopSelf()
     }

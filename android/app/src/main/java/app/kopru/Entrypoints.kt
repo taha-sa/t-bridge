@@ -18,6 +18,8 @@ import android.widget.RemoteViews
 import android.widget.Toast
 
 class KopruApp : Application() {
+    override fun attachBaseContext(base: Context) = super.attachBaseContext(Lang.wrap(base))
+
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
@@ -52,10 +54,10 @@ class ClipReadActivity : Activity() {
         val cm = getSystemService(ClipboardManager::class.java)
         val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
         val msg = when {
-            text.isNullOrEmpty() -> "Panoda metin yok"
-            Core.node == null || !Core.isConnected() -> "Bilgisayar bağlı değil"
-            Core.sendClipboardText(text) -> "Panoya gönderildi"
-            else -> "Zaten gönderildi"
+            text.isNullOrEmpty() -> getString(R.string.clip_empty)
+            Core.node == null || !Core.isConnected() -> getString(R.string.clip_not_connected)
+            Core.sendClipboardText(text) -> getString(R.string.clip_sent)
+            else -> getString(R.string.clip_already_sent)
         }
         Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
         finish()
@@ -112,17 +114,17 @@ class ShareActivity : Activity() {
             val files = uris.mapNotNull { OutgoingFiles.describe(this, it, persist = true) }
             val n = Core.sendFiles(files)
             when {
-                n == 0 -> "Gönderilemedi (eşleşmiş bilgisayar yok?)"
-                Core.isConnected() -> "$n dosya gönderiliyor"
-                else -> "$n dosya sıraya alındı; bilgisayar bağlanınca gidecek"
+                n == 0 -> getString(R.string.share_failed)
+                Core.isConnected() -> resources.getQuantityString(R.plurals.share_sending, n, n)
+                else -> resources.getQuantityString(R.plurals.share_queued, n, n)
             }
         } else {
             val text = intent?.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
             when {
-                text.isNullOrEmpty() -> "Paylaşılacak bir şey yok"
-                !Core.isConnected() -> "Bilgisayar bağlı değil"
-                Core.sendClipboardText(text) -> "Metin PC panosuna gönderildi"
-                else -> "Zaten gönderildi"
+                text.isNullOrEmpty() -> getString(R.string.share_nothing)
+                !Core.isConnected() -> getString(R.string.clip_not_connected)
+                Core.sendClipboardText(text) -> getString(R.string.share_text_sent)
+                else -> getString(R.string.clip_already_sent)
             }
         }
         Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()

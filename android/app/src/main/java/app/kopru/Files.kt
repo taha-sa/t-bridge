@@ -30,7 +30,7 @@ object IncomingFiles {
             .filter { it.isNotBlank() && it != "." && it != ".." }
             .map { p -> p.map { c -> if (c.isISOControl() || "<>:\"|?*".indexOf(c) >= 0) '_' else c }.joinToString("").trim().trimEnd('.') }
             .map { it.ifEmpty { "_" } }
-        return parts.ifEmpty { listOf("dosya") }
+        return parts.ifEmpty { listOf(ctx.getString(R.string.files_default_name)) }
     }
 
     @Synchronized
@@ -53,8 +53,8 @@ object IncomingFiles {
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("İndirilenler'e yazılamadı")
-        val pfd = cr.openFileDescriptor(uri, "rw") ?: error("dosya açılamadı")
+            ?: error(ctx.getString(R.string.files_err_write))
+        val pfd = cr.openFileDescriptor(uri, "rw") ?: error(ctx.getString(R.string.files_err_open))
         prefs.edit().putString(key, uri.toString()).apply()
         return OpenedFd(pfd.detachFd(), 0u)
     }
@@ -95,7 +95,7 @@ object IncomingFiles {
 
 object OutgoingFiles {
     fun openFd(ctx: Context, source: String): Int {
-        val pfd = ctx.contentResolver.openFileDescriptor(Uri.parse(source), "r") ?: error("dosya açılamadı")
+        val pfd = ctx.contentResolver.openFileDescriptor(Uri.parse(source), "r") ?: error(ctx.getString(R.string.files_err_open))
         return pfd.detachFd()
     }
 
@@ -117,6 +117,6 @@ object OutgoingFiles {
             size = runCatching { cr.openFileDescriptor(uri, "r")?.use { it.statSize } }.getOrNull() ?: -1L
         }
         if (size < 0) return null
-        return FileSource(uri.toString(), name ?: uri.lastPathSegment ?: "dosya", size.toULong())
+        return FileSource(uri.toString(), name ?: uri.lastPathSegment ?: ctx.getString(R.string.files_default_name), size.toULong())
     }
 }

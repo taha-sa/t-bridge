@@ -183,7 +183,7 @@ object Core : Host {
             IncomingFiles.open(key, name, size.toLong())
         } catch (e: Exception) {
             Log.w(TAG, "gelen dosya açılamadı", e)
-            throw KopruException.Failed(e.message ?: "dosya açılamadı")
+            throw KopruException.Failed(e.message ?: ctx.getString(R.string.core_err_open_in))
         }
 
     override fun completeIncoming(key: String, ok: Boolean): String? = IncomingFiles.complete(key, ok)
@@ -193,7 +193,7 @@ object Core : Host {
             OutgoingFiles.openFd(ctx, source)
         } catch (e: Exception) {
             Log.w(TAG, "giden dosya açılamadı", e)
-            throw KopruException.Failed(e.message ?: "dosya okunamadı")
+            throw KopruException.Failed(e.message ?: ctx.getString(R.string.core_err_read_out))
         }
 
     // ---------- Kısayollar ----------

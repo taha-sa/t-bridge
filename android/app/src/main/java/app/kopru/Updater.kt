@@ -133,11 +133,11 @@ object Updater {
     private fun fetchManifest(): Info {
         val c = open(MANIFEST_URL)
         try {
-            if (c.responseCode == 404) throw IllegalStateException("henüz yayınlanmış sürüm yok")
-            if (c.responseCode !in 200..299) throw IllegalStateException("sunucu yanıtı ${c.responseCode}")
+            if (c.responseCode == 404) throw IllegalStateException(ctx.getString(R.string.upd_err_no_release))
+            if (c.responseCode !in 200..299) throw IllegalStateException(ctx.getString(R.string.upd_err_server, c.responseCode))
             val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
             val url = j.getString("url")
-            require(url.startsWith("https://")) { "güvensiz adres" }
+            require(url.startsWith("https://")) { ctx.getString(R.string.upd_err_insecure) }
             return Info(j.getInt("versionCode"), j.getString("versionName"), url, j.getString("sha256").lowercase(), j.optString("notes"))
         } finally {
             c.disconnect()
@@ -151,7 +151,7 @@ object Updater {
         val tmp = File(ctx.cacheDir, "update.part")
         val c = open(info.url)
         try {
-            if (c.responseCode !in 200..299) throw IllegalStateException("indirme yanıtı ${c.responseCode}")
+            if (c.responseCode !in 200..299) throw IllegalStateException(ctx.getString(R.string.upd_err_download, c.responseCode))
             val total = c.contentLengthLong
             val md = MessageDigest.getInstance("SHA-256")
             var got = 0L
@@ -176,10 +176,10 @@ object Updater {
             val hash = md.digest().joinToString("") { "%02x".format(it) }
             if (hash != info.sha256) {
                 tmp.delete()
-                throw SecurityException("indirilen dosya doğrulanamadı")
+                throw SecurityException(ctx.getString(R.string.upd_err_verify))
             }
             out.delete()
-            if (!tmp.renameTo(out)) throw IllegalStateException("dosya taşınamadı")
+            if (!tmp.renameTo(out)) throw IllegalStateException(ctx.getString(R.string.upd_err_move))
         } finally {
             c.disconnect()
         }
@@ -200,18 +200,18 @@ object Updater {
 
     private fun notifyReady(info: Info) {
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, "Güncellemeler", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, ctx.getString(R.string.upd_channel), NotificationManager.IMPORTANCE_DEFAULT))
         val pi = PendingIntent.getActivity(
             ctx, 7, Intent(ctx, UpdateActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = Notification.Builder(ctx, CH_UPDATE)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("T-Bridge ${info.versionName} hazır")
-            .setContentText(info.notes.ifBlank { "Yüklemek için dokun — eşleşme ve ayarlar korunur." })
+            .setContentTitle(ctx.getString(R.string.upd_ready_title, info.versionName))
+            .setContentText(info.notes.ifBlank { ctx.getString(R.string.upd_ready_text) })
             .setContentIntent(pi)
             .setAutoCancel(true)
-            .addAction(Notification.Action.Builder(null, "Yükle", pi).build())
+            .addAction(Notification.Action.Builder(null, ctx.getString(R.string.upd_install), pi).build())
             .build()
         nm.notify(ID_UPDATE, n)
     }
@@ -226,11 +226,11 @@ object Updater {
     fun install(a: Activity) {
         val s = _state.value
         if (s !is State.Ready || !apk().exists()) {
-            Toast.makeText(a, "Hazır güncelleme yok", Toast.LENGTH_SHORT).show()
+            Toast.makeText(a, a.getString(R.string.upd_none_ready), Toast.LENGTH_SHORT).show()
             return
         }
         if (!canInstall()) {
-            Toast.makeText(a, "T-Bridge'e bu kaynaktan yükleme izni ver, sonra tekrar dene.", Toast.LENGTH_LONG).show()
+            Toast.makeText(a, a.getString(R.string.upd_allow_source), Toast.LENGTH_LONG).show()
             openInstallPermission(a)
             return
         }
@@ -268,7 +268,7 @@ object Updater {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
         runCatching { a.startActivity(i) }.onFailure {
-            _state.value = State.Error("yükleyici açılamadı: ${it.message}")
+            _state.value = State.Error(ctx.getString(R.string.upd_err_installer, it.message ?: ""))
             return
         }
         // Yükleyici açıldı; vazgeçilirse paket hazır kalsın.

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="svc_ring_title">Phone ringing</string>
+    <string name="svc_ring_text">Rung from your computer. Tap to stop.</string>
+    <string name="svc_ring_stop">Stop</string>
+    <string name="svc_ch_status">Connection status</string>
+    <string name="svc_ch_files">Received files</string>
+    <string name="svc_ch_ring">Find my phone</string>
+    <string name="svc_notif_default_pc">Computer</string>
+    <string name="svc_notif_connected">%1$s connected</string>
+    <string name="svc_notif_connecting">Connecting…</string>
+    <string name="svc_notif_no_pairs">No paired computer</string>
+    <string name="svc_notif_waiting">Waiting for computer</string>
+    <string name="svc_notif_send_clip">Send clipboard to PC</string>
+    <string name="svc_file_received">File received</string>
+    <string name="svc_file_received_open">File received · tap to open</string>
+    <string name="clip_empty">The clipboard has no text</string>
+    <string name="clip_not_connected">Computer not connected</string>
+    <string name="clip_sent">Clipboard sent</string>
+    <string name="clip_already_sent">Already sent</string>
+    <string name="share_failed">Could not send. Is a computer paired?</string>
+    <string name="share_nothing">Nothing to share</string>
+    <string name="share_text_sent">Text sent to the PC clipboard</string>
+    <string name="core_err_open_in">Could not open the incoming file</string>
+    <string name="core_err_read_out">Could not read the outgoing file</string>
+    <string name="upd_channel">Updates</string>
+    <string name="upd_ready_title">T-Bridge %1$s is ready</string>
+    <string name="upd_ready_text">Tap to install. Your pairing and settings are kept.</string>
+    <string name="upd_install">Install</string>
+    <string name="upd_none_ready">No update is ready</string>
+    <string name="upd_allow_source">Allow T-Bridge to install from this source, then try again.</string>
+    <string name="upd_err_no_release">No release has been published yet</string>
+    <string name="upd_err_server">Server responded with %1$d</string>
+    <string name="upd_err_insecure">Insecure address</string>
+    <string name="upd_err_download">Download failed with response %1$d</string>
+    <string name="upd_err_verify">The downloaded file could not be verified</string>
+    <string name="upd_err_move">Could not move the file</string>
+    <string name="upd_err_installer">Could not open the installer: %1$s</string>
+    <plurals name="share_sending">
+        <item quantity="one">Sending %1$d file</item>
+        <item quantity="other">Sending %1$d files</item>
+    </plurals>
+    <plurals name="share_queued">
+        <item quantity="one">%1$d file queued; it will be sent when the computer connects</item>
+        <item quantity="other">%1$d files queued; they will be sent when the computer connects</item>
+    </plurals>
+</resources>

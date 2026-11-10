@@ -99,10 +99,10 @@ class KopruService : Service() {
             )
             val n = Notification.Builder(ctx, CH_RING)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle("Telefon çalıyor")
-                .setContentText("Bilgisayardan çaldırıldı. Durdurmak için dokun.")
+                .setContentTitle(ctx.getString(R.string.svc_ring_title))
+                .setContentText(ctx.getString(R.string.svc_ring_text))
                 .setContentIntent(stop)
-                .addAction(Notification.Action.Builder(null, "Durdur", stop).build())
+                .addAction(Notification.Action.Builder(null, ctx.getString(R.string.svc_ring_stop), stop).build())
                 .setOngoing(true)
                 .setCategory(Notification.CATEGORY_ALARM)
                 .build()
@@ -165,11 +165,11 @@ class KopruService : Service() {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CH_STATUS, "Bağlantı durumu", NotificationManager.IMPORTANCE_MIN).apply {
+        nm.createNotificationChannel(NotificationChannel(CH_STATUS, getString(R.string.svc_ch_status), NotificationManager.IMPORTANCE_MIN).apply {
             setShowBadge(false)
         })
-        nm.createNotificationChannel(NotificationChannel(CH_EVENTS, "Alınan dosyalar", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_RING, "Telefonu bul", NotificationManager.IMPORTANCE_HIGH).apply {
+        nm.createNotificationChannel(NotificationChannel(CH_EVENTS, getString(R.string.svc_ch_files), NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_RING, getString(R.string.svc_ch_ring), NotificationManager.IMPORTANCE_HIGH).apply {
             setSound(null, null)
         })
     }
@@ -177,9 +177,9 @@ class KopruService : Service() {
     private fun buildNotification(): Notification {
         val ui = Core.ui.value
         val text = when (ui.conn) {
-            ConnState.CONNECTED -> "${ui.peer?.name ?: "Bilgisayar"} bağlı"
-            ConnState.CONNECTING -> "Bağlanıyor…"
-            ConnState.DISCONNECTED -> if (ui.peers.isEmpty()) "Eşleşmiş bilgisayar yok" else "Bilgisayar bekleniyor"
+            ConnState.CONNECTED -> getString(R.string.svc_notif_connected, ui.peer?.name ?: getString(R.string.svc_notif_default_pc))
+            ConnState.CONNECTING -> getString(R.string.svc_notif_connecting)
+            ConnState.DISCONNECTED -> if (ui.peers.isEmpty()) getString(R.string.svc_notif_no_pairs) else getString(R.string.svc_notif_waiting)
         }
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -194,7 +194,7 @@ class KopruService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setShowWhen(false)
-            .addAction(Notification.Action.Builder(null, "Panoyu PC'ye gönder", clip).build())
+            .addAction(Notification.Action.Builder(null, getString(R.string.svc_notif_send_clip), clip).build())
             .build()
     }
 
@@ -261,7 +261,7 @@ class KopruService : Service() {
         }
         val n = Notification.Builder(this, CH_EVENTS)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(if (autoOpen) "Dosya alındı · dokunarak aç" else "Dosya alındı")
+            .setContentTitle(getString(if (autoOpen) R.string.svc_file_received_open else R.string.svc_file_received))
             .setContentText(name)
             .setAutoCancel(true)
             .apply { if (view != null) setContentIntent(view) }

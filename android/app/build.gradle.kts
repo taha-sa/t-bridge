@@ -56,6 +56,13 @@ android {
         }
     }
 
+    // Eksik çeviri derlemeyi bozar (EN varsayılan; TR ve DE tam olmalı).
+    lint {
+        error += listOf("MissingTranslation", "ExtraTranslation")
+        // Geri çağrılarda çözülen metinler: dil değişince etkinlik yeniden oluşturulur.
+        disable += "LocalContextGetResourceValueCall"
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

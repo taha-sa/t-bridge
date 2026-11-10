@@ -1,5 +1,7 @@
 package app.kopru.ui
 
+import androidx.compose.ui.res.stringResource
+import app.kopru.R
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
@@ -86,7 +88,7 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
     ) {
         Header()
         Hero(ui)
-        ui.startError?.let { ErrorCard("Çekirdek başlatılamadı: $it") }
+        ui.startError?.let { ErrorCard(stringResource(R.string.home_core_start_failed, it)) }
         if (on) QuickActions(go)
         if (showPair) {
             PairCard(ui, onScan = { scanning = true }, onPick = { codeFor = it })
@@ -102,7 +104,7 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
         QrScanner(onClose = { scanning = false }) { raw ->
             scanning = false
             runCatching { Core.node?.pairUri(raw) }.onFailure {
-                Toast.makeText(ctx, "Bu QR kod T-Bridge'e ait değil.", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, ctx.getString(R.string.home_qr_not_tbridge), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -119,7 +121,7 @@ fun HomeScreen(ui: UiState, go: (Int) -> Unit) {
         AlertDialog(
             onDismissRequest = { Core.clearPairError() },
             containerColor = tb.s2,
-            confirmButton = { TextButton({ Core.clearPairError() }) { Text("Tamam") } },
+            confirmButton = { TextButton({ Core.clearPairError() }) { Text(stringResource(R.string.home_ok)) } },
             title = { Text(explainPairError(err).first) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -145,11 +147,11 @@ private fun Hero(ui: UiState) {
     val c = tb
     val on = ui.conn == ConnState.CONNECTED
     val (eyebrow, title, sub) = when (ui.conn) {
-        ConnState.CONNECTED -> Triple("Bağlı", ui.peer?.name ?: "Bilgisayar", "Pano, dosya, bildirim ve kumanda hazır.")
-        ConnState.CONNECTING -> Triple("Durum", "Bağlanıyor…", "Bilgisayara bağlanılıyor.")
+        ConnState.CONNECTED -> Triple(stringResource(R.string.home_hero_connected_eyebrow), ui.peer?.name ?: stringResource(R.string.home_hero_computer_default), stringResource(R.string.home_hero_connected_sub))
+        ConnState.CONNECTING -> Triple(stringResource(R.string.home_hero_status), stringResource(R.string.home_hero_connecting), stringResource(R.string.home_hero_connecting_sub))
         ConnState.DISCONNECTED ->
-            if (ui.peers.isEmpty()) Triple("Hoş geldin", "Bilgisayarını eşleştir", "Telefon ve bilgisayar aynı Wi‑Fi'da olmalı.")
-            else Triple("Durum", "Bağlı değil", "T-Bridge bilgisayarda açılınca kendiliğinden bağlanır.")
+            if (ui.peers.isEmpty()) Triple(stringResource(R.string.home_hero_welcome), stringResource(R.string.home_hero_pair_title), stringResource(R.string.home_hero_pair_sub))
+            else Triple(stringResource(R.string.home_hero_status), stringResource(R.string.home_hero_disconnected), stringResource(R.string.home_hero_disconnected_sub))
     }
     TbCard(gold = on, padding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -170,20 +172,20 @@ private fun Hero(ui: UiState) {
 private fun QuickActions(go: (Int) -> Unit) {
     val ctx = LocalContext.current
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        ActionTile("Panoyu\ngönder", Icons.Outlined.ContentPaste, Modifier.weight(1f)) {
+        ActionTile(stringResource(R.string.home_action_send_clipboard), Icons.Outlined.ContentPaste, Modifier.weight(1f)) {
             val cm = ctx.getSystemService(ClipboardManager::class.java)
             val text = cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()
             val msg = when {
-                text.isNullOrEmpty() -> "Panoda metin yok"
-                Core.sendClipboardText(text) -> "PC panosuna gönderildi"
-                else -> "Zaten gönderildi"
+                text.isNullOrEmpty() -> ctx.getString(R.string.home_toast_clip_empty)
+                Core.sendClipboardText(text) -> ctx.getString(R.string.home_toast_clip_sent)
+                else -> ctx.getString(R.string.home_toast_clip_dup)
             }
             Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
         }
-        ActionTile("Dosya\ngönder", Icons.Outlined.Upload, Modifier.weight(1f)) { go(1) }
-        ActionTile("PC'yi\nkilitle", Icons.Outlined.Lock, Modifier.weight(1f)) {
+        ActionTile(stringResource(R.string.home_action_send_file), Icons.Outlined.Upload, Modifier.weight(1f)) { go(1) }
+        ActionTile(stringResource(R.string.home_action_lock_pc), Icons.Outlined.Lock, Modifier.weight(1f)) {
             Core.node?.sendPc(PcCommand.Power(PowerAction.LOCK))
-            Toast.makeText(ctx, "Bilgisayar kilitlendi", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.home_toast_locked), Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -207,23 +209,24 @@ private fun ActionTile(label: String, icon: ImageVector, modifier: Modifier, onC
 }
 
 /** Çekirdekten gelen teknik hatayı başlık + çözüm adımlarına çevirir. IP/port gösterilmez. */
+@Composable
 private fun explainPairError(raw: String): Pair<String, List<String>> {
     val r = raw.lowercase()
     return when {
-        "kod" in r || "reddedildi" in r -> "Kod kabul edilmedi" to listOf(
-            "Kodu yanlış girmiş olabilirsin ya da süresi dolmuştur (5 dakika).",
-            "Bilgisayardaki güncel kodu gir veya QR'ı yeniden okut.",
+        "kod" in r || "reddedildi" in r -> stringResource(R.string.home_err_code_title) to listOf(
+            stringResource(R.string.home_err_code_1),
+            stringResource(R.string.home_err_code_2),
         )
-        "sürüm" in r -> "Sürümler uyuşmuyor" to listOf("İki cihazda da T-Bridge'i güncelle: Ayarlar → Şimdi denetle.")
-        "certificate" in r || "sertifika" in r || "tls" in r || "fingerprint" in r -> "Bilgisayar doğrulanamadı" to listOf(
-            "Bu QR eski bir kuruluma ait olabilir.",
-            "Bilgisayardaki güncel QR'ı yeniden okut.",
+        "sürüm" in r -> stringResource(R.string.home_err_version_title) to listOf(stringResource(R.string.home_err_version_1))
+        "certificate" in r || "sertifika" in r || "tls" in r || "fingerprint" in r -> stringResource(R.string.home_err_cert_title) to listOf(
+            stringResource(R.string.home_err_cert_1),
+            stringResource(R.string.home_err_cert_2),
         )
-        else -> "Bilgisayara ulaşılamadı" to listOf(
-            "Bilgisayarda T-Bridge açık mı?",
-            "İki cihaz da aynı Wi‑Fi'da mı? Mobil veriyi ve VPN'i kapat.",
-            "Bilgisayarda T-Bridge → Ayarlar → Güvenlik: güvenlik duvarı izni verilmiş olmalı.",
-            "Misafir ağındaysan veya modemde istemci izolasyonu açıksa cihazlar birbirini göremez.",
+        else -> stringResource(R.string.home_err_unreach_title) to listOf(
+            stringResource(R.string.home_err_unreach_1),
+            stringResource(R.string.home_err_unreach_2),
+            stringResource(R.string.home_err_unreach_3),
+            stringResource(R.string.home_err_unreach_4),
         )
     }
 }
@@ -236,17 +239,17 @@ private fun HelpCard(defaultOpen: Boolean) {
     var open by remember { mutableStateOf(defaultOpen) }
     TbCard {
         Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
-            Text("Bağlanamıyor musun?", Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.titleSmall)
-            Text(if (open) "Kapat" else "Çözümler", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.home_help_title), Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.titleSmall)
+            Text(if (open) stringResource(R.string.home_help_close) else stringResource(R.string.home_help_show), color = c.goldHi, style = MaterialTheme.typography.labelLarge)
         }
         if (open) {
             Spacer(Modifier.height(10.dp))
             listOf(
-                "Bilgisayarda T-Bridge açık olmalı.",
-                "İki cihaz aynı Wi‑Fi'da olmalı; mobil veriyi ve VPN'i kapat.",
-                "Bilgisayarda T-Bridge → Ayarlar → Güvenlik: güvenlik duvarı izni verilmiş olmalı.",
-                "Bilgisayar listede çıkmıyorsa Yeniden tara'ya bas ya da Wi‑Fi'ı kapatıp aç.",
-                "Misafir ağları ve modemdeki istemci izolasyonu cihazların birbirini görmesini engeller.",
+                stringResource(R.string.home_help_1),
+                stringResource(R.string.home_help_2),
+                stringResource(R.string.home_help_3),
+                stringResource(R.string.home_help_4),
+                stringResource(R.string.home_help_5),
             ).forEachIndexed { i, s ->
                 Row(Modifier.padding(vertical = 4.dp)) {
                     Text("${i + 1}.", Modifier.width(22.dp), color = c.gold, style = MaterialTheme.typography.bodyMedium)
@@ -255,11 +258,11 @@ private fun HelpCard(defaultOpen: Boolean) {
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TbButton("Yeniden tara", {
+                TbButton(stringResource(R.string.home_rescan), {
                     Core.rescan()
-                    Toast.makeText(ctx, "Ağ yeniden taranıyor", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.home_toast_rescanning), Toast.LENGTH_SHORT).show()
                 }, Modifier.weight(1f), height = 44.dp)
-                TbButton("Wi‑Fi ayarları", {
+                TbButton(stringResource(R.string.home_wifi_settings), {
                     runCatching { ctx.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
                 }, Modifier.weight(1f), height = 44.dp)
             }
@@ -285,25 +288,25 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
     // Kart açılınca sınırlı bir tarama penceresi aç (zaten tarıyorsa dokunma).
     LaunchedEffect(Unit) { if (!ui.scanning) Core.rescan() }
     TbCard(gold = true) {
-        SectionTitle("Eşleştirme", color = c.gold)
+        SectionTitle(stringResource(R.string.home_pair_eyebrow), color = c.gold)
         Spacer(Modifier.height(4.dp))
-        Text("Bilgisayarı bağla", color = c.text, style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.home_pair_title), color = c.text, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
-        Text("Bilgisayarda T-Bridge'i aç; ekranda bir QR kod ve 6 haneli kod görünür.", color = c.muted, style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.home_pair_desc), color = c.muted, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(14.dp))
-        GoldButton("QR ile eşleştir", onScan, Modifier.fillMaxWidth(), icon = Icons.Outlined.QrCodeScanner)
+        GoldButton(stringResource(R.string.home_pair_scan), onScan, Modifier.fillMaxWidth(), icon = Icons.Outlined.QrCodeScanner)
         Spacer(Modifier.height(16.dp))
-        SectionTitle("veya ağda bulunanlardan seç")
+        SectionTitle(stringResource(R.string.home_pair_or_pick))
         Spacer(Modifier.height(6.dp))
         val list = ui.discovered.filter { !it.paired }
         if (list.isEmpty()) {
             // Sabit metin (dönen animasyon yok): tarama sınırlı bir pencere, bitince "Yeniden tara".
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (ui.scanning) "Ağ taranıyor, birkaç saniye sürer." else "Bu ağda bilgisayar bulunamadı.",
+                    if (ui.scanning) stringResource(R.string.home_pair_scanning) else stringResource(R.string.home_pair_none),
                     Modifier.weight(1f), color = c.muted, style = MaterialTheme.typography.bodyMedium,
                 )
-                if (!ui.scanning) TextButton({ Core.rescan() }) { Text("Yeniden tara", color = c.goldHi) }
+                if (!ui.scanning) TextButton({ Core.rescan() }) { Text(stringResource(R.string.home_rescan), color = c.goldHi) }
             }
         }
         list.forEach { s ->
@@ -315,9 +318,9 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(s.name, color = c.text, style = MaterialTheme.typography.titleSmall)
-                    Text("Aynı ağda", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.home_pair_same_network), color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
-                Text("Kodu gir", color = c.goldHi, style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.home_pair_enter_code), color = c.goldHi, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -329,8 +332,8 @@ private fun PeersCard(ui: UiState, onNew: () -> Unit) {
     var confirm by remember { mutableStateOf<String?>(null) }
     TbCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("Eşleşmiş bilgisayarlar", Modifier.weight(1f))
-            TextButton(onNew) { Text("Yeni ekle", color = c.goldHi) }
+            SectionTitle(stringResource(R.string.home_peers_title), Modifier.weight(1f))
+            TextButton(onNew) { Text(stringResource(R.string.home_peers_add), color = c.goldHi) }
         }
         ui.peers.forEach { p ->
             val live = ui.peer?.id == p.id
@@ -343,12 +346,12 @@ private fun PeersCard(ui: UiState, onNew: () -> Unit) {
                         Text(p.name, Modifier.weight(1f, fill = false), color = c.text, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (live) {
                             Spacer(Modifier.width(8.dp))
-                            Pill("bağlı")
+                            Pill(stringResource(R.string.home_peer_connected_pill))
                         }
                     }
-                    Text(if (live) "Şifreli bağlantı" else "Eşleşti", color = c.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(if (live) stringResource(R.string.home_peer_encrypted) else stringResource(R.string.home_peer_paired), color = c.muted, style = MaterialTheme.typography.bodySmall)
                 }
-                TextButton({ confirm = p.id }) { Text("Kaldır", color = c.muted) }
+                TextButton({ confirm = p.id }) { Text(stringResource(R.string.home_peer_remove), color = c.muted) }
             }
         }
     }
@@ -361,11 +364,11 @@ private fun PeersCard(ui: UiState, onNew: () -> Unit) {
                     Core.node?.unpair(id)
                     Core.refreshPeers()
                     confirm = null
-                }) { Text("Kaldır", color = c.bad) }
+                }) { Text(stringResource(R.string.home_peer_remove), color = c.bad) }
             },
-            dismissButton = { TextButton({ confirm = null }) { Text("Vazgeç", color = c.text2) } },
-            title = { Text("Eşleşme kaldırılsın mı?") },
-            text = { Text("Tekrar bağlanmak için yeniden eşleştirmen gerekir.", color = c.text2) },
+            dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.home_cancel), color = c.text2) } },
+            title = { Text(stringResource(R.string.home_unpair_title)) },
+            text = { Text(stringResource(R.string.home_unpair_text), color = c.text2) },
         )
     }
 }
@@ -377,10 +380,10 @@ private fun CodeDialog(srv: ServerInfo, onDismiss: () -> Unit, onOk: (String) ->
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = c.s2,
-        title = { Text("${srv.name} ile eşleş") },
+        title = { Text(stringResource(R.string.home_code_title, srv.name)) },
         text = {
             Column {
-                Text("Bilgisayar ekranındaki 6 haneli kodu gir.", color = c.text2)
+                Text(stringResource(R.string.home_code_prompt), color = c.text2)
                 Spacer(Modifier.size(10.dp))
                 OutlinedTextField(
                     value = code,
@@ -392,8 +395,8 @@ private fun CodeDialog(srv: ServerInfo, onDismiss: () -> Unit, onOk: (String) ->
                 )
             }
         },
-        confirmButton = { TextButton({ onOk(code) }, enabled = code.length == 6) { Text("Eşleştir", color = if (code.length == 6) c.goldHi else c.faint) } },
-        dismissButton = { TextButton(onDismiss) { Text("Vazgeç", color = c.text2) } },
+        confirmButton = { TextButton({ onOk(code) }, enabled = code.length == 6) { Text(stringResource(R.string.home_code_confirm), color = if (code.length == 6) c.goldHi else c.faint) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.home_cancel), color = c.text2) } },
     )
 }
 
@@ -412,12 +415,12 @@ private fun PermissionsCard() {
     val perms = buildList {
         add(
             Perm(
-                "Bildirim erişimi", "Bildirimleri PC'de göstermek ve medyayı kontrol etmek için.",
+                stringResource(R.string.home_perm_notif_access), stringResource(R.string.home_perm_notif_access_desc),
                 NotifListener.connected || enabledListener(ctx),
             ) { it.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
         )
         add(
-            Perm("Pil kısıtlaması yok", "Ekran kapalıyken bağlantı kopmasın.", pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+            Perm(stringResource(R.string.home_perm_battery), stringResource(R.string.home_perm_battery_desc), pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
                 @Suppress("BatteryLife")
                 it.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${it.packageName}")))
             },
@@ -425,21 +428,21 @@ private fun PermissionsCard() {
         if (Build.VERSION.SDK_INT >= 33) {
             add(
                 Perm(
-                    "Bildirim izni", "Durum ve 'dosya alındı' bildirimleri için.",
+                    stringResource(R.string.home_perm_notif_post), stringResource(R.string.home_perm_notif_post_desc),
                     ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
                 ) { notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS) },
             )
         }
         if (Build.MANUFACTURER.equals("Xiaomi", true) || Build.MANUFACTURER.equals("Redmi", true) || Build.MANUFACTURER.equals("POCO", true)) {
             // MIUI bu ayarın durumunu uygulamalara bildirmez: ok = null (doğrulanamıyor).
-            add(Perm("MIUI: Otomatik başlatma", "Durumu okunamıyor; açık olduğundan emin ol.", null) { openMiuiAutostart(it) })
+            add(Perm(stringResource(R.string.home_perm_miui), stringResource(R.string.home_perm_miui_desc), null) { openMiuiAutostart(it) })
         }
     }
     val checkable = perms.filter { it.ok != null }
     val done = checkable.count { it.ok == true }
     TbCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionTitle("Kurulum", Modifier.weight(1f))
+            SectionTitle(stringResource(R.string.home_setup_title), Modifier.weight(1f))
             Text("$done / ${checkable.size}", color = if (done == checkable.size) c.ok else c.goldHi, style = MaterialTheme.typography.labelMedium)
         }
         Spacer(Modifier.height(8.dp))
@@ -456,7 +459,7 @@ private fun Tip() {
     val c = tb
     Box(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
         Text(
-            "İpucu: Ana ekrana “T-Bridge: Panoyu gönder” widget'ını ya da hızlı ayarlara “Panoyu PC'ye” kutucuğunu ekleyerek kopyaladığını tek dokunuşla gönderebilirsin.",
+            stringResource(R.string.home_tip, stringResource(R.string.widget_label), stringResource(R.string.tile_label)),
             color = c.faint,
             style = MaterialTheme.typography.bodySmall,
         )

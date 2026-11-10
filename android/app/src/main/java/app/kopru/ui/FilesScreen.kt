@@ -1,5 +1,9 @@
+@file:Suppress("LocalContextGetResourceValueCall") // metinler tıklama/sonuç geri çağrılarında çözülür; dil değişince etkinlik yeniden oluşturulur
+
 package app.kopru.ui
 
+import androidx.compose.ui.res.stringResource
+import app.kopru.R
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -66,10 +70,12 @@ fun FilesScreen(ui: UiState) {
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
         val files = uris.mapNotNull { OutgoingFiles.describe(ctx, it, persist = true) }
         val n = Core.sendFiles(files)
-        val msg = if (n == 0) "Gönderilemedi" else if (Core.isConnected()) "$n dosya gönderiliyor" else "$n dosya sıraya alındı"
+        val msg = if (n == 0) ctx.getString(R.string.files_toast_failed) else if (Core.isConnected()) ctx.resources.getQuantityString(R.plurals.files_toast_sending, n, n) else ctx.resources.getQuantityString(R.plurals.files_toast_queued, n, n)
         Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
     }
     val all = ui.transfers.values.toList()
+    val groupRunning = stringResource(R.string.files_group_running)
+    val groupWaiting = stringResource(R.string.files_group_waiting)
     val running = all.filter { it.state == TransferState.ACTIVE }
     val waiting = all.filter { it.state == TransferState.QUEUED || it.state == TransferState.PAUSED }
     val finished = all.filter { it.state in setOf(TransferState.DONE, TransferState.FAILED, TransferState.CANCELLED) }.sortedByDescending { it.id }
@@ -77,7 +83,7 @@ fun FilesScreen(ui: UiState) {
 
     LazyColumn(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Dosyalar", color = c.text, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+            Text(stringResource(R.string.files_title), color = c.text, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
         }
         item {
             TbCard(gold = on) {
@@ -85,12 +91,12 @@ fun FilesScreen(ui: UiState) {
                     IconTile(Icons.Outlined.Upload, size = 46.dp)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Bilgisayara gönder", color = c.text, style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.files_send_title), color = c.text, style = MaterialTheme.typography.titleMedium)
                         Text(
                             when {
-                                ui.peers.isEmpty() -> "Önce bir bilgisayar eşleştir."
-                                on -> "${ui.peer?.name ?: "Bilgisayar"} hazır."
-                                else -> "Çevrimdışı: sıraya alınır, bağlanınca gider."
+                                ui.peers.isEmpty() -> stringResource(R.string.files_hint_pair_first)
+                                on -> stringResource(R.string.files_hint_ready, ui.peer?.name ?: stringResource(R.string.files_computer_default))
+                                else -> stringResource(R.string.files_hint_offline)
                             },
                             color = c.muted,
                             style = MaterialTheme.typography.bodySmall,
@@ -98,10 +104,10 @@ fun FilesScreen(ui: UiState) {
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                GoldButton("Bilgisayara dosya gönder", { picker.launch(arrayOf("*/*")) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Upload, enabled = ui.peers.isNotEmpty())
+                GoldButton(stringResource(R.string.files_send_button), { picker.launch(arrayOf("*/*")) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Upload, enabled = ui.peers.isNotEmpty())
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Gelen dosyalar: İndirilenler/T-Bridge. Herhangi bir uygulamadan “Paylaş → T-Bridge” ile de gönderebilirsin.",
+                    stringResource(R.string.files_incoming_hint),
                     color = c.faint,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -112,17 +118,17 @@ fun FilesScreen(ui: UiState) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     IconTile(Icons.AutoMirrored.Outlined.InsertDriveFile, tint = c.muted, bg = c.s3, border = c.line, size = 56.dp)
                     Spacer(Modifier.height(12.dp))
-                    Text("Henüz aktarım yok", color = c.text2, style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.files_empty), color = c.text2, style = MaterialTheme.typography.titleSmall)
                 }
             }
         }
-        group("Sürüyor", running, on)
-        group("Sırada", waiting, on)
+        group(groupRunning, running, on)
+        group(groupWaiting, waiting, on)
         if (finished.isNotEmpty()) {
             item(key = "h-done") {
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SectionTitle("Bitti", Modifier.weight(1f))
-                    TextButton({ Core.node?.clearFinished() }) { Text("Temizle", color = c.goldHi) }
+                    SectionTitle(stringResource(R.string.files_group_done), Modifier.weight(1f))
+                    TextButton({ Core.node?.clearFinished() }) { Text(stringResource(R.string.files_clear), color = c.goldHi) }
                 }
             }
             items(finished, key = { Core.tkey(it) }) { t -> TransferRow(t, on) }
@@ -145,12 +151,12 @@ private fun TransferRow(t: TransferInfo, connected: Boolean) {
     val p = if (size == 0L) (if (t.state == TransferState.DONE) 1f else 0f) else (done.toFloat() / size).coerceIn(0f, 1f)
     val incoming = t.direction == Direction.INCOMING
     val label = when (t.state) {
-        TransferState.QUEUED -> if (connected) "Sırada" else "Bağlantı bekleniyor"
+        TransferState.QUEUED -> if (connected) stringResource(R.string.files_state_queued) else stringResource(R.string.files_state_waiting_conn)
         TransferState.ACTIVE -> "${fmtBytes(t.speed.toLong())}/s"
-        TransferState.PAUSED -> "Duraklatıldı"
-        TransferState.DONE -> "Tamamlandı"
-        TransferState.FAILED -> "Başarısız" + (t.detail?.let { ": $it" } ?: "")
-        TransferState.CANCELLED -> "İptal edildi"
+        TransferState.PAUSED -> stringResource(R.string.files_state_paused)
+        TransferState.DONE -> stringResource(R.string.files_state_done)
+        TransferState.FAILED -> t.detail?.let { stringResource(R.string.files_state_failed_detail, it) } ?: stringResource(R.string.files_state_failed)
+        TransferState.CANCELLED -> stringResource(R.string.files_state_cancelled)
     }
     val labelColor = when (t.state) {
         TransferState.ACTIVE -> c.goldHi
@@ -175,22 +181,22 @@ private fun TransferRow(t: TransferInfo, connected: Boolean) {
             val n = Core.node
             when (t.state) {
                 TransferState.ACTIVE, TransferState.QUEUED ->
-                    IconButton({ runCatching { n?.pauseTransfer(t.id, t.direction) } }) { Icon(Icons.Outlined.Pause, "Duraklat", tint = c.text2) }
+                    IconButton({ runCatching { n?.pauseTransfer(t.id, t.direction) } }) { Icon(Icons.Outlined.Pause, stringResource(R.string.files_cd_pause), tint = c.text2) }
                 TransferState.PAUSED ->
-                    IconButton({ runCatching { n?.resumeTransfer(t.id, t.direction) } }) { Icon(Icons.Outlined.PlayArrow, "Devam", tint = c.goldHi) }
+                    IconButton({ runCatching { n?.resumeTransfer(t.id, t.direction) } }) { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.files_cd_resume), tint = c.goldHi) }
                 TransferState.DONE -> if (incoming && t.detail != null) {
                     IconButton({
                         IncomingFiles.findByPath(t.detail!!)?.let { uri ->
                             val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, ctx.contentResolver.getType(uri) ?: "*/*")
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            runCatching { ctx.startActivity(i) }.onFailure { Toast.makeText(ctx, "Açacak uygulama yok", Toast.LENGTH_SHORT).show() }
+                            runCatching { ctx.startActivity(i) }.onFailure { Toast.makeText(ctx, ctx.getString(R.string.files_toast_no_app), Toast.LENGTH_SHORT).show() }
                         }
-                    }) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, "Aç", tint = c.goldHi) }
+                    }) { Icon(Icons.AutoMirrored.Outlined.OpenInNew, stringResource(R.string.files_cd_open), tint = c.goldHi) }
                 }
                 else -> {}
             }
             if (t.state in setOf(TransferState.ACTIVE, TransferState.QUEUED, TransferState.PAUSED)) {
-                IconButton({ n?.cancelTransfer(t.id, t.direction) }) { Icon(Icons.Outlined.Close, "İptal", tint = c.muted) }
+                IconButton({ n?.cancelTransfer(t.id, t.direction) }) { Icon(Icons.Outlined.Close, stringResource(R.string.files_cd_cancel), tint = c.muted) }
             }
         }
         Column(Modifier.padding(end = 8.dp, top = 8.dp)) {
