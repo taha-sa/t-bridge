@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { app, flash } from './store.svelte'
+  import { t } from './i18n/index.svelte'
   import Icon from './Icon.svelte'
 
   interface PhoneCam {
@@ -51,7 +52,7 @@
     error = ''
     try {
       await invoke(cmd)
-      flash(cmd === 'camera_enable' ? 'Kamera etkin' : cmd === 'camera_disable' ? 'Kamera durduruldu' : 'Kamera kaldırıldı')
+      flash(cmd === 'camera_enable' ? t('cam.enabled') : cmd === 'camera_disable' ? t('cam.stopped') : t('cam.removed'))
     } catch (e) {
       error = String(e)
     } finally {
@@ -67,9 +68,9 @@
   })
 
   const label = $derived.by(() => {
-    if (!st || !st.running) return 'Etkin değil'
-    if (st.phone.active) return `Yayında · ${st.phone.w}×${st.phone.h} · ${st.phone.fps} fps`
-    return 'Hazır'
+    if (!st || !st.running) return t('cam.inactive')
+    if (st.phone.active) return t('cam.live', { w: st.phone.w, h: st.phone.h, fps: st.phone.fps })
+    return t('cam.ready')
   })
   const tone = $derived(st?.running ? (st.phone.active ? 'live' : 'ready') : 'off')
 </script>
@@ -77,9 +78,9 @@
 <div class="page">
   {#if st === null && loadFailed}
     <section class="card loadfail" role="alert">
-      <div class="lf-title">Kamera durumu okunamadı</div>
-      <div class="muted small">Arka uç yanıt vermiyor olabilir. Biraz sonra yeniden deneyin.</div>
-      <button class="sm" disabled={retrying} onclick={retry}>{retrying ? 'Deneniyor…' : 'Yeniden dene'}</button>
+      <div class="lf-title">{t('cam.loadFailed')}</div>
+      <div class="muted small">{t('cam.loadFailedHint')}</div>
+      <button class="sm" disabled={retrying} onclick={retry}>{retrying ? t('cam.retrying') : t('common.retry')}</button>
     </section>
   {:else if st === null}
     <div class="skeleton" aria-busy="true"></div>
@@ -87,16 +88,16 @@
     <!-- Windows 10 ve altı: kilitli durum, düğme yok -->
     <section class="card locked" aria-live="polite">
       <div class="lockart"><Icon name="lock" size={28} /></div>
-      <h2>Telefon kamerası</h2>
-      <p class="dim">Bu özellik yalnızca Windows 11 için tasarlanmıştır.</p>
+      <h2>{t('cam.title')}</h2>
+      <p class="dim">{t('cam.win11')}</p>
     </section>
   {:else}
     <section class="card cam">
       <header class="row">
         <div class="camicon"><Icon name="video" size={22} /></div>
         <div class="grow">
-          <h2>Telefon kamerası</h2>
-          <div class="muted small">Telefonu bu bilgisayarda web kamerası olarak kullan (Zoom, Teams, Kamera uygulaması…)</div>
+          <h2>{t('cam.title')}</h2>
+          <div class="muted small">{t('cam.subtitle')}</div>
         </div>
         <span class="status {tone}"><span class="dot"></span>{label}</span>
       </header>
@@ -104,37 +105,37 @@
       <div class="actions">
         {#if !st?.running}
           <button class="primary" disabled={busy || !st} onclick={() => run('camera_enable')}>
-            {busy ? 'Hazırlanıyor…' : 'Kamerayı etkinleştir'}
+            {busy ? t('cam.preparing') : t('cam.enable')}
           </button>
         {:else}
-          <button disabled={busy} onclick={() => run('camera_disable')}>Durdur</button>
+          <button disabled={busy} onclick={() => run('camera_disable')}>{t('common.stop')}</button>
         {/if}
         {#if st?.installed}
-          <button class="ghost" disabled={busy} onclick={() => run('camera_uninstall')}>Kamerayı kaldır</button>
+          <button class="ghost" disabled={busy} onclick={() => run('camera_uninstall')}>{t('cam.uninstall')}</button>
         {/if}
       </div>
       {#if st?.updateNeeded}
-        <p class="hint small"><Icon name="info" size={14} /> Kamera bileşeni güncellendi; “Kamerayı etkinleştir” yönetici izniyle yeniden kaydeder (kamerayı kullanan uygulamaları kapat).</p>
+        <p class="hint small"><Icon name="info" size={14} /> {t('cam.hintUpdate')}</p>
       {:else if !st?.installed}
-        <p class="hint small"><Icon name="info" size={14} /> Bir kez yönetici izni gerekir (kamera sürücüsüz bir Windows bileşeni olarak kaydedilir).</p>
+        <p class="hint small"><Icon name="info" size={14} /> {t('cam.hintAdmin')}</p>
       {/if}
       {#if error}<p class="err small" role="alert">{error}</p>{/if}
 
       <ul class="steps small muted">
-        <li class:ok={st?.running}>1. “Kamerayı etkinleştir” — Windows’ta “T-Bridge Kamera” görünür.</li>
-        <li class:ok={on && st?.phoneSupports}>2. Telefonda T-Bridge → Kumanda → Kamera bölümünden yayını başlat{on ? '' : ' (telefon bağlı değil)'}.</li>
-        <li class:ok={st?.inUse}>3. Uygulamanda kamera olarak “T-Bridge Kamera”yı seç.</li>
+        <li class:ok={st?.running}>{t('cam.step1')}</li>
+        <li class:ok={on && st?.phoneSupports}>{t('cam.step2')}{on ? '' : ` ${t('cam.step2off')}`}</li>
+        <li class:ok={st?.inUse}>{t('cam.step3')}</li>
       </ul>
     </section>
 
     <section class="card tight help">
-      <h3>Sorun giderme</h3>
+      <h3>{t('cam.trouble')}</h3>
       <ul class="small muted">
-        <li>Kamera listede görünmüyorsa: T-Bridge’i kapatıp açın, kamerayı kullanan uygulamayı (Zoom/Teams) yeniden başlatın.</li>
-        <li>Görüntüde “Telefon bekleniyor” yazıyorsa telefondaki yayın kapalı ya da bağlantı kopmuş demektir.</li>
-        <li>Telefonun ve bilgisayarın aynı Wi-Fi ağında olması en iyi gecikmeyi verir.</li>
+        <li>{t('cam.trouble1')}</li>
+        <li>{t('cam.trouble2')}</li>
+        <li>{t('cam.trouble3')}</li>
         {#if st?.running && !st.phoneSupports && on}
-          <li>Telefondaki T-Bridge sürümü kamerayı desteklemiyor; telefon uygulamasını güncelleyin.</li>
+          <li>{t('cam.trouble4')}</li>
         {/if}
       </ul>
     </section>

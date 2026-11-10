@@ -1,6 +1,7 @@
 <script lang="ts">
   // Özel başlık çubuğu: sürükleme bölgesi + küçült / büyüt / kapat (kapat = tepsiye).
   import { getCurrentWindow } from '@tauri-apps/api/window'
+  import { t } from '../i18n/index.svelte'
   const w = getCurrentWindow()
   let { title = '' }: { title?: string } = $props()
 </script>
@@ -9,13 +10,13 @@
 <header class="tb" data-tauri-drag-region>
   <div class="t" data-tauri-drag-region>{title}</div>
   <div class="ctl">
-    <button class="wb" aria-label="Küçült" onclick={() => w.minimize()}>
+    <button class="wb" aria-label={t('title.min')} onclick={() => w.minimize()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 5h10" /></svg>
     </button>
-    <button class="wb" aria-label="Büyüt" onclick={() => w.toggleMaximize()}>
+    <button class="wb" aria-label={t('title.max')} onclick={() => w.toggleMaximize()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><rect x="0.5" y="0.5" width="9" height="9" rx="1.5" /></svg>
     </button>
-    <button class="wb x" aria-label="Kapat (tepside çalışmaya devam eder)" title="Tepsiye küçült" onclick={() => w.close()}>
+    <button class="wb x" aria-label={t('title.closeAria')} title={t('title.closeTitle')} onclick={() => w.close()}>
       <svg viewBox="0 0 10 10" width="10" height="10"><path d="M0 0l10 10M10 0L0 10" /></svg>
     </button>
   </div>

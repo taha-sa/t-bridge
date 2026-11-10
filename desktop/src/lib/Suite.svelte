@@ -2,6 +2,9 @@
   import { onMount } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { flash } from './store.svelte'
+  import { t, tn } from './i18n/index.svelte'
+  import { isAppId, type AppId } from './apps'
+  import InviteDialog from './InviteDialog.svelte'
   import Icon from './Icon.svelte'
 
   interface Card {
@@ -18,6 +21,8 @@
 
   let cards = $state<Card[] | null>(null)
   let busy = $state<string | null>(null)
+  /** Açık davet (yalnızca bu örnek; kapatınca tekrar basılana kadar görünmez). */
+  let invite = $state<AppId | null>(null)
   const updatable = $derived((cards ?? []).filter((c) => c.updateAvailable).length)
 
   async function refresh() {
@@ -41,32 +46,39 @@
     }
   }
 
-  const open = (c: Card) => run(c.id, () => invoke('suite_open', { id: c.id }), c.running ? 'Öne getirildi' : `${c.name} açılıyor`)
-  const update = (c: Card) => run(c.id, () => invoke('suite_update', { id: c.id }), `${c.name} güncelleniyor`)
-  const updateAll = () => run('all', () => invoke('suite_update', { id: null }), 'Güncellemeler başlatıldı')
-  const check = () => run('check', () => invoke('suite_check'), 'Güncellemeler denetlendi')
-  const releases = (c: Card) => invoke('open_url', { url: c.releasesUrl }).catch(() => {})
+  // Uygulama yoksa düğme yine görünür: basınca o uygulamaya özel davet açılır.
+  function open(c: Card) {
+    if (!c.installed) {
+      if (isAppId(c.id)) invite = c.id
+      else if (c.releasesUrl) invoke('open_url', { url: c.releasesUrl }).catch(() => {})
+      return
+    }
+    return run(c.id, () => invoke('suite_open', { id: c.id }), c.running ? t('suite.focused') : t('suite.opening', { name: c.name }))
+  }
+  const update = (c: Card) => run(c.id, () => invoke('suite_update', { id: c.id }), t('suite.updating', { name: c.name }))
+  const updateAll = () => run('all', () => invoke('suite_update', { id: null }), t('suite.updatesStarted'))
+  const check = () => run('check', () => invoke('suite_check'), t('suite.checked'))
 
   onMount(() => {
     refresh()
-    const t = setInterval(refresh, 2000)
-    return () => clearInterval(t)
+    const timer = setInterval(refresh, 2000)
+    return () => clearInterval(timer)
   })
 </script>
 
 <div class="page">
   <div class="row headrow">
     <div class="grow">
-      <div class="muted small">T-Suite uygulamaları bu bilgisayarda ve telefonunda tek yerden yönetilir.</div>
+      <div class="muted small">{t('suite.intro')}</div>
     </div>
-    <button class="ghost sm" disabled={busy !== null} onclick={check}><Icon name="refresh" size={15} /> Denetle</button>
-    <button class="primary sm" disabled={busy !== null || updatable === 0} onclick={updateAll}>Hepsini güncelle{updatable ? ` (${updatable})` : ''}</button>
+    <button class="ghost sm" disabled={busy !== null} onclick={check}><Icon name="refresh" size={15} /> {t('suite.check')}</button>
+    <button class="primary sm" disabled={busy !== null || updatable === 0} onclick={updateAll}>{t('suite.updateAll')}{updatable ? ` (${updatable})` : ''}</button>
   </div>
 
   {#if cards === null}
-    <section class="card tight loading muted small">Uygulamalar aranıyor…</section>
+    <section class="card tight loading muted small">{t('suite.searching')}</section>
   {:else if cards.length === 0}
-    <section class="card tight muted small">Henüz kayıtlı T-Suite uygulaması yok.</section>
+    <section class="card tight muted small">{t('suite.none')}</section>
   {:else}
     <div class="grid">
       {#each cards as c (c.id)}
@@ -75,27 +87,21 @@
             <div class="ico"><Icon name={ICONS[c.id] ?? 'sparkle'} size={20} /></div>
             <div class="grow">
               <div class="nm ellipsis">{c.name}</div>
-              <div class="muted small">{c.installed ? `Sürüm ${c.version || '—'}` : 'Yüklü değil'}</div>
+              <div class="muted small">{c.installed ? t('suite.version', { v: c.version || '—' }) : t('suite.notInstalled')}</div>
             </div>
             {#if c.installed}
-              <span class="st" class:on={c.running} title={c.running ? 'Çalışıyor' : 'Kapalı'}><span class="dot"></span>{c.running ? 'Açık' : 'Kapalı'}</span>
+              <span class="st" class:on={c.running} title={c.running ? t('suite.runningTitle') : t('suite.closed')}><span class="dot"></span>{c.running ? t('suite.on') : t('suite.closed')}</span>
             {/if}
           </header>
 
           <div class="badgeslot">
-            {#if c.updateAvailable}<span class="badge">Güncelleme var · {c.updateAvailable}</span>{/if}
+            {#if c.updateAvailable}<span class="badge">{t('suite.updateBadge', { v: c.updateAvailable })}</span>{/if}
           </div>
 
           <footer class="row acts">
-            {#if c.installed}
-              <button class="sm" disabled={busy !== null} onclick={() => open(c)}>{c.running ? 'Öne getir' : 'Aç'}</button>
-              {#if c.updateAvailable}
-                <button class="primary sm" disabled={busy !== null} onclick={() => update(c)}>Güncelle</button>
-              {/if}
-            {:else if c.releasesUrl}
-              <button class="ghost sm" onclick={() => releases(c)}>Sürümler sayfası</button>
-            {:else}
-              <span class="muted small">Kurulum için uygulamanın yayın sayfasına bakın.</span>
+            <button class="sm" disabled={busy !== null} onclick={() => open(c)}>{c.installed && c.running ? t('suite.focus') : t('common.open')}</button>
+            {#if c.installed && c.updateAvailable}
+              <button class="primary sm" disabled={busy !== null} onclick={() => update(c)}>{t('suite.update')}</button>
             {/if}
           </footer>
         </article>
@@ -103,6 +109,10 @@
     </div>
   {/if}
 </div>
+
+{#if invite}
+  <InviteDialog app={invite} onclose={() => (invite = null)} />
+{/if}
 
 <style>
   .headrow {

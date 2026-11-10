@@ -2,10 +2,12 @@
   import { invoke } from '@tauri-apps/api/core'
 
   import { onMount } from 'svelte'
+  import { syncLang, t } from './lib/i18n/index.svelte'
 
   let stopping = $state(false)
   let label = $state('')
   onMount(() => {
+    syncLang()
     invoke<string>('pill_info').then((s) => (label = s)).catch(() => {})
   })
   // Klavye: hap odaktayken Esc veya Ctrl+Shift+S paylaşımı durdurur.
@@ -29,9 +31,9 @@
 
 <div class="pill" data-tauri-drag-region role="status" aria-live="polite" aria-keyshortcuts="Escape Control+Shift+S">
   <span class="dot" aria-hidden="true"></span>
-  <span class="t" data-tauri-drag-region>Ekran paylaşılıyor{label ? ` · ${label}` : ''}</span>
+  <span class="t" data-tauri-drag-region>{t('pill.sharing')}{label ? ` · ${label}` : ''}</span>
   <span class="sep" aria-hidden="true">·</span>
-  <button class="stop" onclick={stop} disabled={stopping} title="Durdur (Esc veya Ctrl+Shift+S)">{stopping ? 'Durduruluyor…' : 'Durdur'}</button>
+  <button class="stop" onclick={stop} disabled={stopping} title={t('pill.stopTitle')}>{stopping ? t('pill.stopping') : t('pill.stop')}</button>
 </div>
 
 <style>

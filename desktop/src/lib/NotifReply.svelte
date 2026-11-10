@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
   import { app } from './store.svelte'
+  import { t } from './i18n/index.svelte'
   import type { NotificationData } from './types'
   import Icon from './Icon.svelte'
 
@@ -41,8 +42,8 @@
   }
 
   async function send(value: string = text) {
-    const t = value.trim()
-    if (!t || phase === 'sending') return
+    const body = value.trim()
+    if (!body || phase === 'sending') return
     phase = 'sending'
     err = ''
     delete app.replyState[n.key]
@@ -51,11 +52,11 @@
     guard = setTimeout(() => {
       if (phase === 'sending') {
         phase = 'error'
-        err = 'Telefon yanıt vermedi'
+        err = t('reply.timeout')
       }
     }, 15000)
     try {
-      await invoke('reply_notification', { key: n.key, text: t })
+      await invoke('reply_notification', { key: n.key, text: body })
     } catch (e) {
       clearTimeout(guard)
       phase = 'error'
@@ -76,7 +77,7 @@
       doneTimer = setTimeout(() => (phase = 'idle'), 2000)
     } else {
       phase = 'error'
-      err = r.error || 'Yanıt gönderilemedi'
+      err = r.error || t('reply.failed')
     }
   })
 
@@ -99,15 +100,15 @@
 {#if info?.canReply}
   <div class="reply" class:prominent>
     {#if phase === 'sent'}
-      <div class="sent" role="status"><Icon name="check" size={15} /> Gönderildi</div>
+      <div class="sent" role="status"><Icon name="check" size={15} /> {t('reply.sent')}</div>
     {:else if !open}
       {#if prominent}
-        <button class="fake" onclick={expand} aria-label="Yanıtla">
-          <span class="ph">Yanıt yaz…</span>
+        <button class="fake" onclick={expand} aria-label={t('reply.aria')}>
+          <span class="ph">{t('reply.placeholder')}</span>
           <span class="go"><Icon name="up" size={14} /></span>
         </button>
       {:else}
-        <button class="ghost sm" onclick={expand}>Yanıtla</button>
+        <button class="ghost sm" onclick={expand}>{t('reply.aria')}</button>
       {/if}
     {/if}
 
@@ -125,14 +126,14 @@
             bind:this={ta}
             bind:value={text}
             rows="1"
-            placeholder="Yanıt yaz…"
-            aria-label="Yanıt"
+            placeholder={t('reply.placeholder')}
+            aria-label={t('reply.aria')}
             disabled={phase === 'sending'}
             tabindex={open ? 0 : -1}
             oninput={grow}
             onkeydown={onkey}
           ></textarea>
-          <button class="sendbtn" title="Gönder (Enter)" aria-label="Gönder" disabled={!text.trim() || phase === 'sending'} tabindex={open ? 0 : -1} onclick={() => send()}>
+          <button class="sendbtn" title={t('reply.send')} aria-label={t('reply.sendAria')} disabled={!text.trim() || phase === 'sending'} tabindex={open ? 0 : -1} onclick={() => send()}>
             {#if phase === 'sending'}<span class="spin" aria-hidden="true"></span>{:else}<Icon name="up" size={16} />{/if}
           </button>
         </div>

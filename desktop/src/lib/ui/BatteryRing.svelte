@@ -1,5 +1,6 @@
 <script lang="ts">
   // Pil halkası: yüzde, şarj animasyonu; %15 altı kırmızı.
+  import { t } from '../i18n/index.svelte'
   let { level, charging, size = 46 }: { level: number; charging: boolean; size?: number } = $props()
   const r = 19
   const c = 2 * Math.PI * r
@@ -7,7 +8,7 @@
   const off = $derived(c * (1 - Math.max(0, Math.min(100, level)) / 100))
 </script>
 
-<div class="bat" class:low class:charging style="--sz:{size}px" title={`Pil %${level}${charging ? ', şarj oluyor' : ''}`}>
+<div class="bat" class:low class:charging style="--sz:{size}px" title={t('battery.title', { level }) + (charging ? ', ' + t('battery.charging') : '')}>
   <svg viewBox="0 0 46 46" width={size} height={size}>
     <circle cx="23" cy="23" r={r} class="track" />
     <circle cx="23" cy="23" r={r} class="val" stroke-dasharray={c} stroke-dashoffset={off} />

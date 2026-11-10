@@ -2,6 +2,7 @@
   import { flip } from 'svelte/animate'
   import { fly } from 'svelte/transition'
   import { app, call, flash, fmtBytes } from './store.svelte'
+  import { t, tn, fmtNum, type Key } from './i18n/index.svelte'
   import type { TransferInfo } from './types'
   import Icon from './Icon.svelte'
   import Progress from './ui/Progress.svelte'
@@ -9,37 +10,30 @@
   const s = $derived(app.s)
   const on = $derived(s.state === 'Connected')
 
-  const running = $derived(s.transfers.filter((t) => t.state === 'Active'))
-  const waiting = $derived(s.transfers.filter((t) => t.state === 'Queued' || t.state === 'Paused'))
+  const running = $derived(s.transfers.filter((x) => x.state === 'Active'))
+  const waiting = $derived(s.transfers.filter((x) => x.state === 'Queued' || x.state === 'Paused'))
   const finished = $derived(
-    s.transfers.filter((t) => ['Done', 'Failed', 'Cancelled'].includes(t.state)).sort((a, b) => b.id - a.id),
+    s.transfers.filter((x) => ['Done', 'Failed', 'Cancelled'].includes(x.state)).sort((a, b) => b.id - a.id),
   )
   const groups = $derived(
     [
-      { key: 'run', title: 'Sürüyor', items: running },
-      { key: 'wait', title: 'Sırada', items: waiting },
-      { key: 'done', title: 'Bitti', items: finished },
+      { key: 'run', title: t('files.groupRun'), items: running },
+      { key: 'wait', title: t('files.groupWait'), items: waiting },
+      { key: 'done', title: t('files.groupDone'), items: finished },
     ].filter((g) => g.items.length),
   )
-  const totalSpeed = $derived(running.reduce((a, t) => a + t.speed, 0))
+  const totalSpeed = $derived(running.reduce((a, x) => a + x.speed, 0))
 
-  const stateLabel: Record<string, string> = {
-    Queued: 'Sırada',
-    Active: 'Aktarılıyor',
-    Paused: 'Duraklatıldı',
-    Done: 'Tamamlandı',
-    Failed: 'Başarısız',
-    Cancelled: 'İptal edildi',
-  }
+  const stateLabel = (st: string) => t(`files.state.${st}` as Key)
 
-  const pct = (t: TransferInfo) => (t.size === 0 ? (t.state === 'Done' ? 100 : 0) : Math.min(100, (t.done / t.size) * 100))
+  const pct = (x: TransferInfo) => (x.size === 0 ? (x.state === 'Done' ? 100 : 0) : Math.min(100, (x.done / x.size) * 100))
 
-  function eta(t: TransferInfo) {
-    if (t.state !== 'Active' || t.speed <= 0) return ''
-    const sec = Math.round((t.size - t.done) / t.speed)
-    if (sec < 60) return `${sec} sn kaldı`
-    if (sec < 3600) return `${Math.round(sec / 60)} dk kaldı`
-    return `${(sec / 3600).toFixed(1)} sa kaldı`
+  function eta(x: TransferInfo) {
+    if (x.state !== 'Active' || x.speed <= 0) return ''
+    const sec = Math.round((x.size - x.done) / x.speed)
+    if (sec < 60) return t('files.etaSec', { n: sec })
+    if (sec < 3600) return t('files.etaMin', { n: Math.round(sec / 60) })
+    return t('files.etaHour', { n: fmtNum(sec / 3600, 1) })
   }
 
   function kind(name: string): string {
@@ -53,44 +47,44 @@
 
   async function pick(folder: boolean) {
     const n = await call<number>('pick_and_send', { folder })
-    if (n) flash(`${n} dosya sıraya eklendi`)
+    if (n) flash(tn('files.queued', n))
   }
 
-  const args = (t: TransferInfo) => ({ id: t.id, direction: t.direction })
+  const args = (x: TransferInfo) => ({ id: x.id, direction: x.direction })
   const shortName = (n: string) => n.split('/').pop() ?? n
   const dirName = (n: string) => (n.includes('/') ? n.slice(0, n.lastIndexOf('/')) : '')
-  const tone = (t: TransferInfo) => (t.state === 'Done' ? 'ok' : t.state === 'Failed' ? 'bad' : t.state === 'Active' ? 'gold' : 'muted')
+  const tone = (x: TransferInfo) => (x.state === 'Done' ? 'ok' : x.state === 'Failed' ? 'bad' : x.state === 'Active' ? 'gold' : 'muted')
 </script>
 
 <div class="page">
   <section class="zone card" class:disabled={!s.peers.length}>
     <div class="zi"><Icon name="upload" size={26} /></div>
     <div class="grow">
-      <h2>Dosyaları pencereye sürükle</h2>
+      <h2>{t('files.dropTitle')}</h2>
       <p class="muted">
         {#if !s.peers.length}
-          Göndermek için önce bir telefon eşleştir.
+          {t('files.needPhone')}
         {:else if on}
-          {s.peer?.name} hazır — bırakılan her şey hemen gider.
+          {t('files.ready', { name: s.peer?.name ?? '' })}
         {:else}
-          Telefon çevrimdışı — sıraya alınır, bağlanınca kendiliğinden gider.
+          {t('files.offline')}
         {/if}
       </p>
     </div>
     <div class="zb">
-      <button class="primary" disabled={!s.peers.length} onclick={() => pick(false)}><Icon name="doc" size={16} /> Dosya seç</button>
-      <button disabled={!s.peers.length} onclick={() => pick(true)}><Icon name="folder" size={16} /> Klasör</button>
+      <button class="primary" disabled={!s.peers.length} onclick={() => pick(false)}><Icon name="doc" size={16} /> {t('files.pickFile')}</button>
+      <button disabled={!s.peers.length} onclick={() => pick(true)}><Icon name="folder" size={16} /> {t('files.pickFolder')}</button>
     </div>
   </section>
 
   <div class="row bar">
     {#if running.length}
-      <span class="chip gold num"><span class="live"></span>{fmtBytes(totalSpeed)}/s</span>
+      <span class="chip gold num"><span class="live"></span>{fmtBytes(totalSpeed)}{t('unit.perSec')}</span>
     {/if}
     <div class="grow"></div>
-    <button class="ghost sm" onclick={() => call('open_downloads')}><Icon name="folder" size={15} /> Gelenler klasörü</button>
+    <button class="ghost sm" onclick={() => call('open_downloads')}><Icon name="folder" size={15} /> {t('files.openInbox')}</button>
     {#if finished.length}
-      <button class="ghost sm" onclick={() => call('clear_finished')}><Icon name="trash" size={15} /> Bitenleri temizle</button>
+      <button class="ghost sm" onclick={() => call('clear_finished')}><Icon name="trash" size={15} /> {t('files.clearDone')}</button>
     {/if}
   </div>
 
@@ -101,9 +95,9 @@
         <div class="sheet b"></div>
         <div class="sheet c"><Icon name="files" size={22} /></div>
       </div>
-      <h2>Henüz aktarım yok</h2>
+      <h2>{t('files.emptyTitle')}</h2>
       <p class="muted">
-        Telefondan paylaşılan dosyalar şuraya kaydedilir:<br /><span class="selectable path">{s.downloadDir}</span>
+        {t('files.emptyBody')}<br /><span class="selectable path">{s.downloadDir}</span>
       </p>
     </section>
   {:else}
@@ -111,41 +105,41 @@
       <div class="group">
         <h3>{g.title} <span class="faint num">{g.items.length}</span></h3>
         <div class="list">
-          {#each g.items as t (t.direction + t.id)}
-            <div class="item card tight" class:active={t.state === 'Active'} animate:flip={{ duration: 260 }} in:fly={{ y: 8, duration: 240 }}>
-              <div class="fi {kind(t.name)}">
-                <Icon name={kind(t.name)} size={19} />
-                <span class="arrow" class:in={t.direction === 'Incoming'}><Icon name={t.direction === 'Incoming' ? 'down' : 'up'} size={11} /></span>
+          {#each g.items as x (x.direction + x.id)}
+            <div class="item card tight" class:active={x.state === 'Active'} animate:flip={{ duration: 260 }} in:fly={{ y: 8, duration: 240 }}>
+              <div class="fi {kind(x.name)}">
+                <Icon name={kind(x.name)} size={19} />
+                <span class="arrow" class:in={x.direction === 'Incoming'}><Icon name={x.direction === 'Incoming' ? 'down' : 'up'} size={11} /></span>
               </div>
               <div class="grow body">
                 <div class="row top">
-                  <div class="grow ellipsis" title={t.name}>
-                    <span class="fn">{shortName(t.name)}</span>
-                    {#if dirName(t.name)}<span class="faint small"> · {dirName(t.name)}</span>{/if}
+                  <div class="grow ellipsis" title={x.name}>
+                    <span class="fn">{shortName(x.name)}</span>
+                    {#if dirName(x.name)}<span class="faint small"> · {dirName(x.name)}</span>{/if}
                   </div>
-                  <div class="small muted num sz">{fmtBytes(t.done)} / {fmtBytes(t.size)}</div>
+                  <div class="small muted num sz">{fmtBytes(x.done)} / {fmtBytes(x.size)}</div>
                 </div>
-                <Progress value={pct(t)} active={t.state === 'Active'} tone={tone(t)} />
+                <Progress value={pct(x)} active={x.state === 'Active'} tone={tone(x)} />
                 <div class="row meta small">
-                  <span class="st {t.state}">{stateLabel[t.state]}</span>
+                  <span class="st {x.state}">{stateLabel(x.state)}</span>
                   <span class="muted grow ellipsis">
-                    {#if t.state === 'Active'}{fmtBytes(t.speed)}/s · {eta(t)}{/if}
-                    {#if t.state === 'Failed' && t.detail}{t.detail}{/if}
-                    {#if t.state === 'Queued' && !on}bağlantı bekleniyor{/if}
-                    {#if t.state !== 'Failed'}{t.direction === 'Incoming' ? '· telefondan' : '· telefona'}{/if}
+                    {#if x.state === 'Active'}{fmtBytes(x.speed)}{t('unit.perSec')} · {eta(x)}{/if}
+                    {#if x.state === 'Failed' && x.detail}{x.detail}{/if}
+                    {#if x.state === 'Queued' && !on}{t('files.waitingConn')}{/if}
+                    {#if x.state !== 'Failed'}{x.direction === 'Incoming' ? t('files.fromPhone') : t('files.toPhone')}{/if}
                   </span>
                   <div class="acts">
-                    {#if t.state === 'Active' || t.state === 'Queued'}
-                      <button class="ghost icon sm" title="Duraklat" onclick={() => call('pause_transfer', args(t))}><Icon name="pause" size={15} /></button>
+                    {#if x.state === 'Active' || x.state === 'Queued'}
+                      <button class="ghost icon sm" title={t('files.pause')} onclick={() => call('pause_transfer', args(x))}><Icon name="pause" size={15} /></button>
                     {/if}
-                    {#if t.state === 'Paused'}
-                      <button class="ghost icon sm" title="Devam et" onclick={() => call('resume_transfer', args(t))}><Icon name="play" size={15} /></button>
+                    {#if x.state === 'Paused'}
+                      <button class="ghost icon sm" title={t('files.resume')} onclick={() => call('resume_transfer', args(x))}><Icon name="play" size={15} /></button>
                     {/if}
-                    {#if ['Active', 'Queued', 'Paused'].includes(t.state)}
-                      <button class="ghost icon sm" title="İptal" onclick={() => call('cancel_transfer', args(t))}><Icon name="x" size={15} /></button>
+                    {#if ['Active', 'Queued', 'Paused'].includes(x.state)}
+                      <button class="ghost icon sm" title={t('files.cancel')} onclick={() => call('cancel_transfer', args(x))}><Icon name="x" size={15} /></button>
                     {/if}
-                    {#if t.state === 'Done' && t.direction === 'Incoming' && t.detail}
-                      <button class="ghost sm" onclick={() => call('reveal', { path: t.detail })}><Icon name="folder" size={14} /> Göster</button>
+                    {#if x.state === 'Done' && x.direction === 'Incoming' && x.detail}
+                      <button class="ghost sm" onclick={() => call('reveal', { path: x.detail })}><Icon name="folder" size={14} /> {t('files.show')}</button>
                     {/if}
                   </div>
                 </div>

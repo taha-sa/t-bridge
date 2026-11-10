@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, call, flash } from './store.svelte'
+  import { t } from './i18n/index.svelte'
   import type { MediaAction, PhoneCommand, VolumeAction } from './types'
   import Icon from './Icon.svelte'
 
@@ -15,7 +16,7 @@
     await send({ Ring: { on: ringing } })
     clearTimeout(ringTimer)
     if (ringing) {
-      flash('Telefon çalıyor (30 sn)')
+      flash(t('home.ringing'))
       ringTimer = setTimeout(() => (ringing = false), 30_000)
     }
   }
@@ -30,65 +31,63 @@
   {#if !on}
     <section class="card tight off">
       <Icon name="wifi" />
-      <span class="muted">Telefon bağlı değil. Bağlanınca bu sayfadan telefonu kontrol edebilirsin.</span>
+      <span class="muted">{t('remote.offline')}</span>
     </section>
   {/if}
 
   <section class="card find" class:ringing>
     <div class="pulse"><span></span><span></span><span></span></div>
     <div class="ringbtn">
-      <button class="big" class:primary={!ringing} class:stop={ringing} disabled={!on} onclick={ring} aria-label={ringing ? 'Durdur' : 'Telefonu çaldır'}>
+      <button class="big" class:primary={!ringing} class:stop={ringing} disabled={!on} onclick={ring} aria-label={ringing ? t('common.stop') : t('home.ring')}>
         <Icon name="ring" size={30} />
       </button>
     </div>
     <div class="grow">
       <div class="row">
-        <h2>Telefonu bul</h2>
-        {#if ringing}<span class="chip violet"><span class="dot"></span>çalıyor</span>{/if}
+        <h2>{t('remote.findTitle')}</h2>
+        {#if ringing}<span class="chip violet"><span class="dot"></span>{t('remote.ringingChip')}</span>{/if}
       </div>
-      <p class="muted">Sessiz moddayken bile alarm sesiyle, tam seste 30 saniye çalar.</p>
-      <button class="sm" disabled={!on} onclick={ring}>{ringing ? 'Durdur' : 'Çaldır'}</button>
+      <p class="muted">{t('remote.findBody')}</p>
+      <button class="sm" disabled={!on} onclick={ring}>{ringing ? t('common.stop') : t('remote.ringBtn')}</button>
     </div>
   </section>
 
   <section class="card media">
-    <h3>Medya</h3>
+    <h3>{t('remote.media')}</h3>
     <div class="row np">
       <div class="art" class:playing={s.nowPlaying?.playing}>
         <Icon name="music" size={24} />
       </div>
       <div class="grow">
         {#if s.nowPlaying}
-          <div class="tt ellipsis">{s.nowPlaying.title || 'Bilinmeyen parça'}</div>
+          <div class="tt ellipsis">{s.nowPlaying.title || t('remote.unknownTrack')}</div>
           <div class="muted ellipsis small">{s.nowPlaying.artist}{s.nowPlaying.app_name ? ` · ${s.nowPlaying.app_name}` : ''}</div>
         {:else}
-          <div class="tt muted">Şu an çalan bir şey yok</div>
-          <div class="faint small">Kontroller yine de telefondaki son oynatıcıya gider.</div>
+          <div class="tt muted">{t('remote.nothingPlaying')}</div>
+          <div class="faint small">{t('remote.nothingHint')}</div>
         {/if}
       </div>
     </div>
     <div class="controls">
-      <button class="ghost icon lg" disabled={!on} onclick={() => media('Previous')} title="Önceki"><Icon name="prev" size={20} /></button>
-      <button class="primary play" disabled={!on} onclick={() => media('PlayPause')} title="Oynat/Duraklat">
+      <button class="ghost icon lg" disabled={!on} onclick={() => media('Previous')} title={t('media.prev')}><Icon name="prev" size={20} /></button>
+      <button class="primary play" disabled={!on} onclick={() => media('PlayPause')} title={t('media.playPause')}>
         <Icon name={s.nowPlaying?.playing ? 'pause' : 'play'} size={24} />
       </button>
-      <button class="ghost icon lg" disabled={!on} onclick={() => media('Next')} title="Sonraki"><Icon name="next" size={20} /></button>
+      <button class="ghost icon lg" disabled={!on} onclick={() => media('Next')} title={t('media.next')}><Icon name="next" size={20} /></button>
     </div>
     <div class="vol">
-      <span class="muted small">Ses</span>
+      <span class="muted small">{t('remote.volume')}</span>
       <div class="seg">
-        <button disabled={!on} onclick={() => vol('Down')} title="Sesi kıs"><Icon name="voldown" size={17} /></button>
-        <button disabled={!on} onclick={() => vol('Mute')} title="Sessiz"><Icon name="mute" size={17} /></button>
-        <button disabled={!on} onclick={() => vol('Up')} title="Sesi aç"><Icon name="volup" size={17} /></button>
+        <button disabled={!on} onclick={() => vol('Down')} title={t('remote.volDown')}><Icon name="voldown" size={17} /></button>
+        <button disabled={!on} onclick={() => vol('Mute')} title={t('remote.mute')}><Icon name="mute" size={17} /></button>
+        <button disabled={!on} onclick={() => vol('Up')} title={t('remote.volUp')}><Icon name="volup" size={17} /></button>
       </div>
     </div>
   </section>
 
   <section class="card tight hint">
     <Icon name="phone" size={18} />
-    <span class="muted small">
-      Bilgisayarı telefondan yönetmek için telefondaki <b>Kumanda</b> sekmesini kullan: touchpad, klavye, medya, ses, sunum ve güç.
-    </span>
+    <span class="muted small">{@html t('remote.hint')}</span>
   </section>
 </div>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fly } from 'svelte/transition'
   import { app, call, flash } from './store.svelte'
+  import { t, tn } from './i18n/index.svelte'
   import type { MediaAction, Pairing, PhoneCommand } from './types'
   import Icon from './Icon.svelte'
   import Orb from './ui/Orb.svelte'
@@ -54,17 +55,17 @@
   $effect(() => () => clearInterval(ticker))
 
   async function unpair(id: string, name: string) {
-    if (!confirm(`${name} eşleşmesi kaldırılsın mı?`)) return
+    if (!confirm(t('home.unpairConfirm', { name }))) return
     await call('unpair', { id })
     s.settings.screenAllowed = s.settings.screenAllowed.filter((p) => p !== id)
     s.peers = s.peers.filter((p) => p.id !== id)
-    flash('Eşleşme kaldırıldı')
+    flash(t('home.unpaired'))
   }
 
   async function sendFiles() {
     const n = await call<number>('pick_and_send', { folder: false })
     if (n) {
-      flash(`${n} dosya sıraya eklendi`)
+      flash(tn('files.queued', n))
       go('files')
     }
   }
@@ -72,24 +73,25 @@
   const media = (action: MediaAction) => phone({ Media: { action } })
   async function ring() {
     await phone({ Ring: { on: true } })
-    flash('Telefon çalıyor (30 sn)')
+    flash(t('home.ringing'))
   }
   async function fixFirewall() {
     const ok = await call<boolean>('fix_firewall')
     s.firewallOk = !!ok
-    flash(ok ? 'Güvenlik duvarı izni verildi' : 'İzin verilmedi')
+    flash(ok ? t('fw.granted') : t('fw.notGranted'))
   }
 
   const title = $derived(
-    on ? (s.peer?.name ?? 'Telefon') : s.state === 'Connecting' ? 'Bağlanıyor…' : paired ? 'Telefon bekleniyor' : 'Hoş geldin',
-  )
-  const subtitle = $derived(
     on
-      ? 'Bağlı · pano, dosya ve bildirimler eşitleniyor'
-      : paired
-        ? 'Telefonda T-Bridge açıkken ve aynı Wi‑Fi’dayken kendiliğinden bağlanır.'
-        : 'Başlamak için telefonunu bir kez eşleştir.',
+      ? (s.peer?.name ?? t('app.phone'))
+      : s.state === 'Connecting'
+        ? t('app.connecting')
+        : paired
+          ? t('home.titleWaiting')
+          : t('home.titleWelcome'),
   )
+  const subtitle = $derived(on ? t('home.subOn') : paired ? t('home.subPaired') : t('home.subNew'))
+  const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c)
   const mmss = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`
 </script>
 
@@ -98,27 +100,27 @@
     <div class="glow" class:on></div>
     <Orb state={s.state} size={78} />
     <div class="grow">
-      <div class="eyebrow">{on ? 'Bağlı cihaz' : 'Durum'}</div>
+      <div class="eyebrow">{on ? t('home.eyebrowOn') : t('home.eyebrow')}</div>
       <h1 class="ellipsis">{title}</h1>
       <p class="muted">{subtitle}</p>
     </div>
     {#if on && s.battery}
       <div class="bat">
         <BatteryRing level={s.battery.level} charging={s.battery.charging} size={64} />
-        <span class="small muted">{s.battery.charging ? 'Şarj oluyor' : 'Pil'}</span>
+        <span class="small muted">{s.battery.charging ? t('home.charging') : t('home.battery')}</span>
       </div>
     {/if}
   </section>
 
   {#if on}
     <div class="actions rise">
-      <button class="primary" onclick={sendFiles}><Icon name="upload" size={17} /> Dosya gönder</button>
-      <button onclick={ring}><Icon name="ring" size={17} /> Telefonu çaldır</button>
+      <button class="primary" onclick={sendFiles}><Icon name="upload" size={17} /> {t('home.sendFile')}</button>
+      <button onclick={ring}><Icon name="ring" size={17} /> {t('home.ring')}</button>
       <button onclick={() => go('notifs')}>
-        <Icon name="bell" size={17} /> Bildirimler
+        <Icon name="bell" size={17} /> {t('nav.notifs')}
         {#if s.notifications.length}<span class="chip violet num">{s.notifications.length}</span>{/if}
       </button>
-      <button onclick={() => go('remote')}><Icon name="remote" size={17} /> Kumanda</button>
+      <button onclick={() => go('remote')}><Icon name="remote" size={17} /> {t('nav.remote')}</button>
     </div>
   {/if}
 
@@ -126,10 +128,10 @@
     <section class="card tight warn rise">
       <Icon name="shield" />
       <div class="grow">
-        <b>Güvenlik duvarı izni yok</b>
-        <div class="muted small">Telefonun bu bilgisayara ulaşabilmesi için Windows’un bir kez izin vermesi gerekiyor.</div>
+        <b>{t('fw.title')}</b>
+        <div class="muted small">{t('fw.body')}</div>
       </div>
-      <button class="primary sm" onclick={fixFirewall}>İzin ver</button>
+      <button class="primary sm" onclick={fixFirewall}>{t('common.allow')}</button>
     </section>
   {/if}
 
@@ -137,7 +139,7 @@
     <section class="card tight err">
       <Icon name="alert" />
       <div class="grow">
-        <b>Çekirdek başlatılamadı</b>
+        <b>{t('home.coreFailed')}</b>
         <div class="selectable small">{s.error}</div>
       </div>
     </section>
@@ -159,14 +161,14 @@
         <div class="corner br"></div>
       </div>
       <div class="grow steps">
-        <div class="eyebrow">Eşleştirme</div>
-        <h2>Telefonu bu bilgisayara bağla</h2>
+        <div class="eyebrow">{t('home.pairEyebrow')}</div>
+        <h2>{t('home.pairTitle')}</h2>
         <ol>
-          <li><span class="n">1</span>Telefonda <b>T-Bridge</b>’i aç.</li>
-          <li><span class="n">2</span><b>QR ile eşleştir</b>’e dokunup bu kodu okut.</li>
-          <li><span class="n">3</span>Ya da listeden <b>{pairing?.name ?? s.deviceName}</b>’i seçip kodu gir:</li>
+          <li><span class="n">1</span>{@html t('home.pairStep1')}</li>
+          <li><span class="n">2</span>{@html t('home.pairStep2')}</li>
+          <li><span class="n">3</span>{@html t('home.pairStep3', { name: `<b>${esc(pairing?.name ?? s.deviceName)}</b>` })}</li>
         </ol>
-        <div class="code selectable num" aria-label="Eşleştirme kodu">
+        <div class="code selectable num" aria-label={t('home.pairCode')}>
           {#each digits as d, i (i)}
             <span class="dg" class:gap={i === 3}>{d}</span>
           {/each}
@@ -174,13 +176,13 @@
         <div class="row timer">
           <div class="tbar"><div style="width:{(left / TTL) * 100}%"></div></div>
           <span class="small muted num">{mmss(left)}</span>
-          <button class="ghost sm" onclick={refreshCode}><Icon name="refresh" size={14} /> Yenile</button>
+          <button class="ghost sm" onclick={refreshCode}><Icon name="refresh" size={14} /> {t('common.refresh')}</button>
         </div>
         {#if pairing && pairing.addrs.length === 0}
-          <div class="warnline small"><Icon name="alert" size={15} /> Ağ bağlantısı bulunamadı — Wi‑Fi’ye bağlı mısın?</div>
+          <div class="warnline small"><Icon name="alert" size={15} /> {t('home.noNetwork')}</div>
         {/if}
         {#if paired}
-          <button class="ghost sm close" onclick={closePairing}>Vazgeç</button>
+          <button class="ghost sm close" onclick={closePairing}>{t('common.cancelShort')}</button>
         {/if}
       </div>
     </section>
@@ -189,7 +191,7 @@
   {#if on}
     <div class="grid">
       <section class="card np rise">
-        <h3>Şimdi çalıyor</h3>
+        <h3>{t('home.nowPlaying')}</h3>
         {#if s.nowPlaying}
           <div class="row track">
             <div class="art" class:playing={s.nowPlaying.playing}>
@@ -202,25 +204,23 @@
             </div>
           </div>
           <div class="row mc">
-            <button class="ghost icon" aria-label="Önceki" onclick={() => media('Previous')}><Icon name="prev" size={17} /></button>
-            <button class="primary icon round" aria-label="Oynat/Duraklat" onclick={() => media('PlayPause')}>
+            <button class="ghost icon" aria-label={t('media.prev')} onclick={() => media('Previous')}><Icon name="prev" size={17} /></button>
+            <button class="primary icon round" aria-label={t('media.playPause')} onclick={() => media('PlayPause')}>
               <Icon name={s.nowPlaying.playing ? 'pause' : 'play'} size={17} />
             </button>
-            <button class="ghost icon" aria-label="Sonraki" onclick={() => media('Next')}><Icon name="next" size={17} /></button>
+            <button class="ghost icon" aria-label={t('media.next')} onclick={() => media('Next')}><Icon name="next" size={17} /></button>
           </div>
         {:else}
-          <div class="emptyline muted small">Telefonda müzik veya video çalınca burada görünür.</div>
+          <div class="emptyline muted small">{t('home.nowPlayingEmpty')}</div>
         {/if}
       </section>
 
       <section class="card clip rise">
-        <h3>Son gelen pano</h3>
+        <h3>{t('home.lastClip')}</h3>
         {#if app.lastClip}
           <div class="cliptext selectable">{app.lastClip}</div>
         {:else}
-          <div class="emptyline muted small">
-            Telefonda kopyaladığın metni bildirimdeki <b>“Panoyu PC’ye gönder”</b> ile yolla; burada ve panonda belirir.
-          </div>
+          <div class="emptyline muted small">{@html t('home.lastClipEmpty')}</div>
         {/if}
       </section>
     </div>
@@ -228,17 +228,17 @@
 
   {#if !on}
     <details class="card tight help rise" open={!s.firewallOk}>
-      <summary><Icon name="info" size={18} /> Telefon bağlanamıyor mu?</summary>
+      <summary><Icon name="info" size={18} /> {t('home.helpTitle')}</summary>
       <ol>
-        <li><span class="n">1</span><span>Telefonda T-Bridge açık mı, iki cihaz da aynı Wi‑Fi’da mı? Misafir ağları cihazların birbirini görmesini engeller.</span></li>
+        <li><span class="n">1</span><span>{t('home.help1')}</span></li>
         <li><span class="n">2</span>
           <span>
-            Güvenlik duvarı izni:
-            {#if s.firewallOk}<b>verilmiş</b>.{:else}<b>yok</b>. Yukarıdaki <b>İzin ver</b>’e bas.{/if}
+            {t('home.help2')}
+            {#if s.firewallOk}<b>{t('home.help2ok')}</b>.{:else}<b>{t('home.help2no')}</b>. {@html t('home.help2fix')}{/if}
           </span>
         </li>
-        <li><span class="n">3</span><span>Telefonda Wi‑Fi’ı kapatıp aç; VPN varsa kapat.</span></li>
-        <li><span class="n">4</span><span>Hâlâ olmuyorsa modemde “istemci izolasyonu / AP izolasyonu” kapalı olmalı.</span></li>
+        <li><span class="n">3</span><span>{t('home.help3')}</span></li>
+        <li><span class="n">4</span><span>{t('home.help4')}</span></li>
       </ol>
     </details>
   {/if}
@@ -246,8 +246,8 @@
   {#if !showPair}
     <section class="card rise">
       <div class="row">
-        <h3 class="grow">Eşleşmiş cihazlar</h3>
-        <button class="sm" onclick={openPairing}><Icon name="link" size={15} /> Yeni telefon</button>
+        <h3 class="grow">{t('home.peers')}</h3>
+        <button class="sm" onclick={openPairing}><Icon name="link" size={15} /> {t('home.newPhone')}</button>
       </div>
       <div class="peers">
         {#each s.peers as p (p.id)}
@@ -256,14 +256,14 @@
             <div class="grow">
               <div class="row pn">
                 <b class="ellipsis">{p.name}</b>
-                {#if s.peer?.id === p.id}<span class="chip gold">bağlı</span>{/if}
+                {#if s.peer?.id === p.id}<span class="chip gold">{t('app.connected')}</span>{/if}
               </div>
-              <div class="faint small">{s.peer?.id === p.id ? 'Şifreli bağlantı' : 'Eşleşti'}</div>
+              <div class="faint small">{s.peer?.id === p.id ? t('home.encrypted') : t('home.pairedState')}</div>
             </div>
-            <button class="ghost sm" onclick={() => unpair(p.id, p.name)}>Kaldır</button>
+            <button class="ghost sm" onclick={() => unpair(p.id, p.name)}>{t('common.remove')}</button>
           </div>
         {:else}
-          <div class="emptyline muted small">Henüz eşleşmiş telefon yok.</div>
+          <div class="emptyline muted small">{t('home.noPeers')}</div>
         {/each}
       </div>
     </section>

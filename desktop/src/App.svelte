@@ -3,6 +3,7 @@
   import { fade, fly, scale } from 'svelte/transition'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import { app, call, flash, init } from './lib/store.svelte'
+  import { t, tn, type Key } from './lib/i18n/index.svelte'
   import Icon from './lib/Icon.svelte'
   import Logo from './lib/ui/Logo.svelte'
   import Orb from './lib/ui/Orb.svelte'
@@ -26,27 +27,19 @@
   })
 
   const s = $derived(app.s)
-  const active = $derived(s.transfers.filter((t) => t.state === 'Active' || t.state === 'Queued').length)
+  const active = $derived(s.transfers.filter((x) => x.state === 'Active' || x.state === 'Queued').length)
   const on = $derived(s.state === 'Connected')
 
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'home', label: 'Bağlantı', icon: 'home' },
-    { id: 'files', label: 'Dosyalar', icon: 'files' },
-    { id: 'notifs', label: 'Bildirimler', icon: 'bell' },
-    { id: 'remote', label: 'Kumanda', icon: 'remote' },
-    { id: 'camera', label: 'Kamera', icon: 'video' },
-    { id: 'suite', label: 'T-Suite', icon: 'sparkle' },
-    { id: 'settings', label: 'Ayarlar', icon: 'gear' },
+  const tabs: { id: Tab; icon: string }[] = [
+    { id: 'home', icon: 'home' },
+    { id: 'files', icon: 'files' },
+    { id: 'notifs', icon: 'bell' },
+    { id: 'remote', icon: 'remote' },
+    { id: 'camera', icon: 'video' },
+    { id: 'suite', icon: 'sparkle' },
+    { id: 'settings', icon: 'gear' },
   ]
-  const titles: Record<Tab, string> = {
-    home: 'Bağlantı',
-    files: 'Dosyalar',
-    notifs: 'Bildirimler',
-    remote: 'Kumanda',
-    camera: 'Kamera',
-    suite: 'T-Suite',
-    settings: 'Ayarlar',
-  }
+  const tabLabel = (id: Tab) => t(`nav.${id}` as Key)
 
   onMount(() => {
     init()
@@ -62,12 +55,12 @@
           dragging = false
           if (!p.paths.length) return
           if (app.s.peers.length === 0) {
-            flash('Önce bir telefon eşleştir')
+            flash(t('app.needPhone'))
             return
           }
           tab = 'files'
           const n = await call<number>('send_paths', { paths: p.paths })
-          if (n) flash(`${n} dosya sıraya eklendi`)
+          if (n) flash(tn('files.queued', n))
         }
       })
       .then((u) => (unlisten = u))
@@ -86,13 +79,13 @@
     </div>
 
     <div class="tabs">
-      {#each tabs as t (t.id)}
-        <button class="navbtn" class:sel={tab === t.id} onclick={() => (tab = t.id)}>
-          <span class="ico"><Icon name={t.icon} size={18} /></span>
-          <span class="grow">{t.label}</span>
-          {#if t.id === 'files' && active}<span class="count num">{active}</span>{/if}
-          {#if t.id === 'notifs' && s.notifications.length}<span class="count violet num">{s.notifications.length}</span>{/if}
-          {#if t.id === 'settings' && (s.update.phase === 'ready' || !s.firewallOk)}<span class="pip"></span>{/if}
+      {#each tabs as tb (tb.id)}
+        <button class="navbtn" class:sel={tab === tb.id} onclick={() => (tab = tb.id)}>
+          <span class="ico"><Icon name={tb.icon} size={18} /></span>
+          <span class="grow">{tabLabel(tb.id)}</span>
+          {#if tb.id === 'files' && active}<span class="count num">{active}</span>{/if}
+          {#if tb.id === 'notifs' && s.notifications.length}<span class="count violet num">{s.notifications.length}</span>{/if}
+          {#if tb.id === 'settings' && (s.update.phase === 'ready' || !s.firewallOk)}<span class="pip"></span>{/if}
         </button>
       {/each}
     </div>
@@ -102,9 +95,9 @@
     <div class="device" class:on>
       <Orb state={s.state} size={38} />
       <div class="grow">
-        <div class="dn ellipsis">{on ? (s.peer?.name ?? 'Telefon') : s.peers[0]?.name ?? 'Telefon yok'}</div>
+        <div class="dn ellipsis">{on ? (s.peer?.name ?? t('app.phone')) : s.peers[0]?.name ?? t('app.noPhone')}</div>
         <div class="ds small">
-          {on ? 'Bağlı' : s.state === 'Connecting' ? 'Bağlanıyor…' : s.peers.length ? 'Bekleniyor' : 'Eşleşmedi'}
+          {on ? t('app.connected') : s.state === 'Connecting' ? t('app.connecting') : s.peers.length ? t('app.waiting') : t('app.unpaired')}
         </div>
       </div>
       {#if on && s.battery}
@@ -114,7 +107,7 @@
   </nav>
 
   <section class="content">
-    <Titlebar title={titles[tab]} />
+    <Titlebar title={tabLabel(tab)} />
     <main bind:this={mainEl}>
       {#if !app.ready}
         <div class="loading" in:fade><Orb state="Connecting" size={44} /></div>
@@ -122,7 +115,7 @@
         {#key tab}
           <div class="view" in:fly={{ y: 10, duration: 260, opacity: 0 }}>
             {#if tab === 'home'}
-              <Home go={(t: Tab) => (tab = t)} />
+              <Home go={(x: Tab) => (tab = x)} />
             {:else if tab === 'files'}
               <Files />
             {:else if tab === 'notifs'}
@@ -146,8 +139,8 @@
     <div class="drop" transition:fade={{ duration: 160 }}>
       <div class="dropbox" in:scale={{ start: 0.96, duration: 220 }}>
         <div class="dropicon"><Icon name="upload" size={34} /></div>
-        <div class="dt">Bırak, telefona gitsin</div>
-        <div class="muted">{s.peers.length ? (on ? `${s.peer?.name} hazır` : 'Telefon bağlanınca gönderilecek') : 'Önce bir telefon eşleştir'}</div>
+        <div class="dt">{t('app.dropTitle')}</div>
+        <div class="muted">{s.peers.length ? (on ? t('app.dropReady', { name: s.peer?.name ?? '' }) : t('app.dropWait')) : t('app.needPhone')}</div>
       </div>
     </div>
   {/if}

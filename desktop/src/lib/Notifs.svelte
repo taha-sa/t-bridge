@@ -2,6 +2,7 @@
   import { flip } from 'svelte/animate'
   import { fly } from 'svelte/transition'
   import { app, call, fmtTime } from './store.svelte'
+  import { t, tn, locale } from './i18n/index.svelte'
   import type { NotificationData } from './types'
   import Icon from './Icon.svelte'
   import NotifReply from './NotifReply.svelte'
@@ -24,7 +25,7 @@
   let filter = $state('')
 
   const apps = $derived(
-    [...new Map(s.notifications.map((n) => [n.package, n.app_name])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'tr')),
+    [...new Map(s.notifications.map((n) => [n.package, n.app_name])).entries()].sort((a, b) => a[1].localeCompare(b[1], locale())),
   )
   const count = (pkg: string) => s.notifications.filter((n) => n.package === pkg).length
   const list = $derived(filter ? s.notifications.filter((n) => n.package === filter) : s.notifications)
@@ -58,7 +59,7 @@
   }
 
   async function mute(pkg: string, name: string) {
-    if (!confirm(`${name} bildirimleri artık gösterilmesin mi? (Ayarlar’dan geri açabilirsin)`)) return
+    if (!confirm(t('notifs.muteConfirm', { name }))) return
     s.settings.mutedApps = [...s.settings.mutedApps, pkg]
     s.notifications = s.notifications.filter((n) => n.package !== pkg)
     if (filter === pkg) filter = ''
@@ -70,18 +71,18 @@
   <div class="row headrow">
     <div class="grow">
       <div class="muted small">
-        {s.notifications.length ? `${s.notifications.length} bildirim · kapattığın telefondan da kalkar` : 'Telefon bildirimleri burada'}
+        {s.notifications.length ? tn('notifs.summary', s.notifications.length) : t('notifs.summaryEmpty')}
       </div>
     </div>
     {#if s.notifications.length}
-      <button class="ghost sm" onclick={clearAll}><Icon name="trash" size={15} /> Tümünü kapat</button>
+      <button class="ghost sm" onclick={clearAll}><Icon name="trash" size={15} /> {t('notifs.clearAll')}</button>
     {/if}
   </div>
 
   {#if apps.length > 1}
     <div class="chips">
       <button class="pill" class:sel={filter === ''} onclick={() => (filter = '')}>
-        Tümü <span class="num c">{s.notifications.length}</span>
+        {t('notifs.all')} <span class="num c">{s.notifications.length}</span>
       </button>
       {#each apps as [pkg, name] (pkg)}
         <button class="pill" class:sel={filter === pkg} onclick={() => (filter = pkg)}>
@@ -98,12 +99,10 @@
         <Icon name="bell" size={30} />
         <span class="ping"></span>
       </div>
-      <h2>{s.state === 'Connected' ? 'Her şey sakin' : 'Telefon bağlı değil'}</h2>
+      <h2>{s.state === 'Connected' ? t('notifs.calm') : t('notifs.offline')}</h2>
       <p class="muted">
-        {s.state === 'Connected'
-          ? 'Yeni bir bildirim gelince burada belirir.'
-          : 'Bağlanınca telefondaki bildirimler burada görünür.'}
-        <br /><span class="small faint">Telefonda T-Bridge’e “Bildirim erişimi” izni verilmiş olmalı.</span>
+        {s.state === 'Connected' ? t('notifs.calmBody') : t('notifs.offlineBody')}
+        <br /><span class="small faint">{t('notifs.accessHint')}</span>
       </p>
     </section>
   {:else}
@@ -115,9 +114,9 @@
               {#if s.icons[g.pkg]}<img src={s.icons[g.pkg]} alt="" />{:else}<Icon name="bell" size={16} />{/if}
             </div>
             <span class="an grow ellipsis">{g.name}</span>
-            <button class="ghost icon sm" title="Bu uygulamayı sustur" onclick={() => mute(g.pkg, g.name)}><Icon name="eyeoff" size={15} /></button>
+            <button class="ghost icon sm" title={t('notifs.muteApp')} onclick={() => mute(g.pkg, g.name)}><Icon name="eyeoff" size={15} /></button>
             {#if g.items.length > 1}
-              <button class="ghost sm" onclick={() => dismissGroup(g.items)}>Hepsini kapat</button>
+              <button class="ghost sm" onclick={() => dismissGroup(g.items)}>{t('notifs.dismissGroup')}</button>
             {/if}
           </header>
           {#each g.items as n (n.key)}
@@ -130,7 +129,7 @@
                 {#if n.text}<div class="text selectable">{n.text}</div>{/if}
                 <NotifReply {n} prominent={MESSAGING.has(n.package)} />
               </div>
-              <button class="ghost icon sm x" title="Kapat (telefonda da)" onclick={() => dismiss(n.key)}><Icon name="x" size={15} /></button>
+              <button class="ghost icon sm x" title={t('notifs.dismissOne')} onclick={() => dismiss(n.key)}><Icon name="x" size={15} /></button>
             </article>
           {/each}
         </section>

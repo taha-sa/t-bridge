@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { onMount } from 'svelte'
+  import { syncLang, t } from './lib/i18n/index.svelte'
 
   type Info = { id: number; name: string; timeout_secs: number }
   type Choice = 'allow' | 'always' | 'deny'
@@ -22,6 +23,7 @@
   }
 
   onMount(() => {
+    syncLang()
     let timer: ReturnType<typeof setInterval> | undefined
     invoke<Info | null>('consent_info').then((i) => {
       if (!i) {
@@ -63,25 +65,25 @@
             <path d="M8 20h8M12 16v4" />
           </svg>
         </span>
-        <h2 id="c-title">Ekran paylaşımı isteği</h2>
+        <h2 id="c-title">{t('consent.title')}</h2>
       </div>
 
       <p id="c-body" class="body">
-        <strong class="who">{info.name}</strong> ekranı görmek istiyor. İzin verirsen telefon bu bilgisayarın ekranını görür; fareyi ve klavyeyi kullanabilir.
+        <strong class="who">{info.name}</strong> {t('consent.body')}
       </p>
 
       <div class="timer" aria-hidden="true">
         <div class="bar"><span style="width: {pct}%"></span></div>
-        <span class="num">{left} sn içinde yanıt verilmezse reddedilir</span>
+        <span class="num">{t('consent.timeout', { n: left })}</span>
       </div>
 
       <div class="actions">
-        <button class="ghost always" onclick={() => decide('always')} disabled={busy} aria-label="Her zaman izin ver: bu telefona bir daha sorma">
-          Her zaman izin ver
+        <button class="ghost always" onclick={() => decide('always')} disabled={busy} aria-label={t('consent.alwaysAria')}>
+          {t('consent.always')}
         </button>
         <span class="spacer"></span>
-        <button bind:this={denyBtn} class="deny" onclick={() => decide('deny')} disabled={busy} aria-label="Reddet">Reddet</button>
-        <button class="primary" onclick={() => decide('allow')} disabled={busy} aria-label="İzin ver">İzin ver</button>
+        <button bind:this={denyBtn} class="deny" onclick={() => decide('deny')} disabled={busy} aria-label={t('consent.deny')}>{t('consent.deny')}</button>
+        <button class="primary" onclick={() => decide('allow')} disabled={busy} aria-label={t('consent.allow')}>{t('consent.allow')}</button>
       </div>
     </div>
   {/if}

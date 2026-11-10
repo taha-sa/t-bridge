@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, applyTheme, call, flash } from './store.svelte'
+  import { t, syncLang } from './i18n/index.svelte'
   import type { Settings, Theme } from './types'
   import Icon from './Icon.svelte'
   import Toggle from './ui/Toggle.svelte'
@@ -19,6 +20,7 @@
     if (patch.theme) applyTheme(patch.theme)
     const r = await call<boolean>('set_settings', { settings: next })
     if (r) restartNeeded = true
+    if (patch.language) await syncLang()
   }
 
   async function pickDir() {
@@ -32,48 +34,55 @@
   async function unmute(pkg: string) {
     s.settings.mutedApps = s.settings.mutedApps.filter((p) => p !== pkg)
     await call('mute_app', { package: pkg, muted: false })
-    flash('Bildirimler tekrar açıldı')
+    flash(t('set.unmuted'))
   }
 
   async function revokeScreen(id: string) {
     s.settings.screenAllowed = s.settings.screenAllowed.filter((p) => p !== id)
     await call('revoke_screen_allowed', { id })
-    flash('Bu cihaz için ekran izni kaldırıldı')
+    flash(t('set.screenRevoked'))
   }
 
   async function checkNow() {
     checking = true
     const found = await call<boolean>('check_update')
     checking = false
-    if (found === false) flash('T-Bridge güncel')
+    if (found === false) flash(t('set.upToDate'))
   }
 
   async function fixFirewall() {
     const ok = await call<boolean>('fix_firewall')
     s.firewallOk = !!ok
-    flash(ok ? 'Güvenlik duvarı izni verildi' : 'İzin verilmedi')
+    flash(ok ? t('fw.granted') : t('fw.notGranted'))
   }
 
-  const themes: { id: Theme; label: string; icon: string }[] = [
-    { id: 'dark', label: 'Koyu', icon: 'moon' },
-    { id: 'system', label: 'Sistem', icon: 'monitor' },
-    { id: 'light', label: 'Açık', icon: 'sun' },
-  ]
+  const themes = $derived<{ id: Theme; label: string; icon: string }[]>([
+    { id: 'dark', label: t('set.themeDark'), icon: 'moon' },
+    { id: 'system', label: t('set.themeSystem'), icon: 'monitor' },
+    { id: 'light', label: t('set.themeLight'), icon: 'sun' },
+  ])
+  // Dil adları kendi dillerinde yazılır (hangi dilde olursa olsun bulunabilsin).
+  const languages = $derived<{ id: Settings['language']; label: string }[]>([
+    { id: 'system', label: t('set.langSystem') },
+    { id: 'tr', label: 'Türkçe' },
+    { id: 'en', label: 'English' },
+    { id: 'de', label: 'Deutsch' },
+  ])
 
   const updateText = $derived(
     u.phase === 'checking'
-      ? 'Denetleniyor…'
+      ? t('set.updChecking')
       : u.phase === 'downloading'
-        ? `v${u.version} indiriliyor… %${Math.round(u.progress * 100)}`
+        ? t('set.updDownloading', { v: u.version ?? '', p: Math.round(u.progress * 100) })
         : u.phase === 'ready'
-          ? `v${u.version} hazır — aktarım bitince kendiliğinden kurulur`
+          ? t('set.updReady', { v: u.version ?? '' })
           : u.phase === 'installing'
-            ? 'Kuruluyor; T-Bridge birazdan yeniden açılacak…'
+            ? t('set.updInstalling')
             : u.phase === 'latest'
-              ? 'En güncel sürümü kullanıyorsun'
+              ? t('set.updLatest')
               : u.phase === 'error'
-                ? `Denetlenemedi: ${u.error ?? 'bilinmeyen hata'}`
-                : 'Güncellemeler arka planda denetlenir',
+                ? t('set.updError', { e: u.error ?? t('set.unknownError') })
+                : t('set.updIdle'),
   )
 </script>
 
@@ -89,57 +98,68 @@
 
 <div class="page narrow">
   <section class="card group">
-    <h3>Genel</h3>
+    <h3>{t('set.general')}</h3>
     <div class="item">
       <div class="grow">
-        <div class="il">Tema</div>
-        <div class="ih">Koyu tema T-Bridge için tasarlandı.</div>
+        <div class="il">{t('set.theme')}</div>
+        <div class="ih">{t('set.themeHint')}</div>
       </div>
       <div class="seg">
-        {#each themes as t (t.id)}
-          <button class:sel={s.settings.theme === t.id} onclick={() => save({ theme: t.id })}>
-            <Icon name={t.icon} size={14} />{t.label}
+        {#each themes as th (th.id)}
+          <button class:sel={s.settings.theme === th.id} onclick={() => save({ theme: th.id })}>
+            <Icon name={th.icon} size={14} />{th.label}
           </button>
         {/each}
       </div>
     </div>
-    {@render item('Windows açılışında başlat', 'Tepside sessizce çalışır; pencere açılmaz.', 'autostart')}
+    <div class="item">
+      <div class="grow">
+        <div class="il">{t('set.language')}</div>
+        <div class="ih">{t('set.languageHint')}</div>
+      </div>
+      <div class="seg">
+        {#each languages as l (l.id)}
+          <button class:sel={s.settings.language === l.id} onclick={() => save({ language: l.id })}>{l.label}</button>
+        {/each}
+      </div>
+    </div>
+    {@render item(t('set.autostart'), t('set.autostartHint'), 'autostart')}
   </section>
 
   <section class="card group">
-    <h3>Pano ve bildirimler</h3>
-    {@render item('Uzaktan ekran görüntüleme', 'Telefon bu bilgisayarın ekranını görüp fare ve klavyeyi kullanabilir. Her yeni telefon için ilk seferde onay sorulur; paylaşırken üstte bir gösterge görünür.', 'screenShare')}
+    <h3>{t('set.clipNotif')}</h3>
+    {@render item(t('set.screen'), t('set.screenHint'), 'screenShare')}
     {#if s.settings.screenAllowed.length}
       <div class="sub">
-        <div class="ih">Ekranı her zaman görebilen cihazlar</div>
+        <div class="ih">{t('set.screenAllowed')}</div>
         <div class="muted-list">
           {#each s.settings.screenAllowed as id (id)}
-            <span class="chip">{s.peers.find((p) => p.id === id)?.name ?? id.slice(0, 8)}<button class="ghost icon sm x" title="İzni kaldır" onclick={() => revokeScreen(id)}><Icon name="x" size={12} /></button></span>
+            <span class="chip">{s.peers.find((p) => p.id === id)?.name ?? id.slice(0, 8)}<button class="ghost icon sm x" title={t('set.revoke')} onclick={() => revokeScreen(id)}><Icon name="x" size={12} /></button></span>
           {/each}
         </div>
       </div>
     {/if}
-    {@render item('Ekosistemi otomatik başlat', 'Telefon bağlanınca kurulu T-Suite uygulamaları (T-RamCash, T-Downloader…) arka planda kendiliğinden açılır.', 'autoEcosystem')}
-    {@render item('Pano eşitleme', 'Kopyaladığın metin telefonda da kopyalanmış olur.', 'clipboardSync')}
-    {@render item('Telefon bildirimlerini göster', 'Kapatırsan telefon bildirimleri hiç alınmaz; ses ve uyarı da durur.', 'notifMirror')}
+    {@render item(t('set.autoEco'), t('set.autoEcoHint'), 'autoEcosystem')}
+    {@render item(t('set.clipSync'), t('set.clipSyncHint'), 'clipboardSync')}
+    {@render item(t('set.notifMirror'), t('set.notifMirrorHint'), 'notifMirror')}
     {#if s.settings.notifMirror}
       <div class="item">
         <div class="grow">
-          <div class="il">Bildirim sesi</div>
-          <div class="ih">Yeni bildirimde kısa, yumuşak bir ses çalar.</div>
+          <div class="il">{t('set.notifSound')}</div>
+          <div class="ih">{t('set.notifSoundHint')}</div>
         </div>
-        <button class="sm" onclick={() => call('test_notification_sound')}>Dene</button>
-        <Toggle checked={s.settings.notifSound} label="Bildirim sesi" onchange={(v) => save({ notifSound: v })} />
+        <button class="sm" onclick={() => call('test_notification_sound')}>{t('set.try')}</button>
+        <Toggle checked={s.settings.notifSound} label={t('set.notifSound')} onchange={(v) => save({ notifSound: v })} />
       </div>
-      {@render item('Windows bildirimi', 'Sağ altta uyarı da göster (varsayılan kapalı).', 'notifToast')}
+      {@render item(t('set.winToast'), t('set.winToastHint'), 'notifToast')}
     {/if}
-    {@render item('Şarj azalınca uyar', 'Telefon %15’in altına inince haber verir.', 'lowBatteryWarn')}
+    {@render item(t('set.lowBat'), t('set.lowBatHint'), 'lowBatteryWarn')}
     {#if s.settings.mutedApps.length}
       <div class="sub">
-        <div class="ih">Susturulan uygulamalar</div>
+        <div class="ih">{t('set.muted')}</div>
         <div class="muted-list">
           {#each s.settings.mutedApps as pkg (pkg)}
-            <span class="chip">{pkg}<button class="ghost icon sm x" title="Tekrar aç" onclick={() => unmute(pkg)}><Icon name="x" size={12} /></button></span>
+            <span class="chip">{pkg}<button class="ghost icon sm x" title={t('set.unmute')} onclick={() => unmute(pkg)}><Icon name="x" size={12} /></button></span>
           {/each}
         </div>
       </div>
@@ -147,67 +167,67 @@
   </section>
 
   <section class="card group">
-    <h3>Dosyalar</h3>
-    {@render item('Dosya alınınca haber ver', '', 'transferToast')}
+    <h3>{t('nav.files')}</h3>
+    {@render item(t('set.fileToast'), '', 'transferToast')}
     <div class="item">
       <div class="grow">
-        <div class="il">Gelen dosyalar klasörü</div>
+        <div class="il">{t('set.inbox')}</div>
         <div class="ih ellipsis selectable" title={s.downloadDir}>{s.downloadDir}</div>
       </div>
-      <button class="sm" onclick={() => call('open_downloads')}><Icon name="folder" size={14} /> Aç</button>
-      <button class="sm" onclick={pickDir}>Değiştir…</button>
+      <button class="sm" onclick={() => call('open_downloads')}><Icon name="folder" size={14} /> {t('common.open')}</button>
+      <button class="sm" onclick={pickDir}>{t('set.change')}</button>
     </div>
     {#if restartNeeded}
       <div class="notice row">
         <Icon name="info" size={16} />
-        <span class="grow small">Yeni klasör, uygulama yeniden başlayınca kullanılır.</span>
-        <button class="primary sm" onclick={() => call('restart_app')}>Yeniden başlat</button>
+        <span class="grow small">{t('set.restartNote')}</span>
+        <button class="primary sm" onclick={() => call('restart_app')}>{t('set.restart')}</button>
       </div>
     {/if}
   </section>
 
   <section class="card group gold">
-    <h3>Güncelleme</h3>
+    <h3>{t('set.update')}</h3>
     <div class="item">
       <div class="upd-ico" class:busy={u.phase === 'checking' || u.phase === 'downloading'}><Icon name="refresh" size={18} /></div>
       <div class="grow">
         <div class="il">T-Bridge <span class="num">v{s.version}</span>
-          {#if u.phase === 'ready'}<span class="chip gold">yeni sürüm hazır</span>{/if}
+          {#if u.phase === 'ready'}<span class="chip gold">{t('set.newReady')}</span>{/if}
         </div>
         <div class="ih" class:bad={u.phase === 'error'}>{updateText}</div>
         {#if u.phase === 'downloading'}<div class="pb"><Progress value={u.progress * 100} active /></div>{/if}
       </div>
       {#if u.phase === 'ready'}
-        <button class="primary sm" onclick={() => call('install_update')}>Şimdi kur</button>
+        <button class="primary sm" onclick={() => call('install_update')}>{t('set.installNow')}</button>
       {:else}
         <button class="sm" disabled={checking || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'installing'} onclick={checkNow}>
-          Şimdi denetle
+          {t('set.checkNow')}
         </button>
       {/if}
     </div>
     {#if u.notes && (u.phase === 'ready' || u.phase === 'downloading')}
       <div class="notes small selectable">{u.notes}</div>
     {/if}
-    {@render item('Otomatik güncelle', 'Yeni sürüm arka planda iner, aktarım yokken sessizce kurulur. Telefon da güncellemeyi kendisi ister.', 'autoUpdate')}
+    {@render item(t('set.autoUpdate'), t('set.autoUpdateHint'), 'autoUpdate')}
   </section>
 
   <section class="card group">
-    <h3>Güvenlik</h3>
+    <h3>{t('set.security')}</h3>
     <div class="item">
       <div class="grow">
-        <div class="il">Güvenlik duvarı</div>
-        <div class="ih">{s.firewallOk ? 'İzin verildi — telefon bu bilgisayara ulaşabilir.' : 'İzin yok — telefon bağlanamayabilir.'}</div>
+        <div class="il">{t('set.firewall')}</div>
+        <div class="ih">{s.firewallOk ? t('set.firewallOk') : t('set.firewallNo')}</div>
       </div>
       {#if s.firewallOk}
-        <span class="chip ok"><Icon name="check" size={13} /> Açık</span>
+        <span class="chip ok"><Icon name="check" size={13} /> {t('set.on')}</span>
       {:else}
-        <button class="primary sm" onclick={fixFirewall}>İzin ver</button>
+        <button class="primary sm" onclick={fixFirewall}>{t('common.allow')}</button>
       {/if}
     </div>
     <div class="item">
       <div class="grow">
-        <div class="il">Bağlantın şifreli</div>
-        <div class="ih">Yalnızca eşleştirdiğin cihazlar bağlanabilir.</div>
+        <div class="il">{t('set.encrypted')}</div>
+        <div class="ih">{t('set.encryptedHint')}</div>
       </div>
       <Icon name="lock" size={18} />
     </div>
@@ -216,7 +236,7 @@
   <div class="about">
     <Logo size={42} />
     <div class="an">T-Bridge</div>
-    <div class="faint small">Telefon ile bilgisayar arasında köprü · v{s.version}</div>
+    <div class="faint small">{t('set.tagline')} · v{s.version}</div>
   </div>
   <Signature />
 </div>

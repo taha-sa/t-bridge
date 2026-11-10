@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { CoreEvent, Snapshot, Theme, TransferInfo, UpdateState } from './types'
+import { fmtNum, locale, syncLang, t } from './i18n/index.svelte'
 
 const empty: Snapshot = {
   deviceName: '',
@@ -31,6 +32,7 @@ const empty: Snapshot = {
     screenAllowed: [],
     cameraEnabled: false,
     autoEcosystem: true,
+    language: 'system',
   },
   downloadDir: '',
   error: null,
@@ -82,6 +84,7 @@ export function flash(msg: string) {
 export async function refresh() {
   app.s = await invoke<Snapshot>('snapshot')
   applyTheme(app.s.settings.theme)
+  await syncLang()
   app.ready = true
 }
 
@@ -123,7 +126,7 @@ function onEvent(e: CoreEvent) {
     case 'paired': {
       const ev = e as Extract<CoreEvent, { type: 'paired' }>
       s.peers = [ev.peer, ...s.peers.filter((p) => p.id !== ev.peer.id)]
-      flash(`${ev.peer.name} eşleşti`)
+      flash(t('store.paired', { name: ev.peer.name }))
       break
     }
     case 'clipboardReceived':
@@ -204,7 +207,7 @@ export async function call<T = void>(cmd: string, args?: Record<string, unknown>
 }
 
 export function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
+  if (n < 1024) return `${fmtNum(n)} B`
   const u = ['KB', 'MB', 'GB', 'TB']
   let v = n / 1024
   let i = 0
@@ -212,12 +215,12 @@ export function fmtBytes(n: number): string {
     v /= 1024
     i++
   }
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${u[i]}`
+  return `${fmtNum(v, v >= 100 ? 0 : 1)} ${u[i]}`
 }
 
 export function fmtTime(ms: number): string {
   const d = new Date(ms)
   const now = new Date()
-  const hm = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
-  return d.toDateString() === now.toDateString() ? hm : `${d.toLocaleDateString('tr-TR')} ${hm}`
+  const hm = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === now.toDateString() ? hm : `${d.toLocaleDateString(locale())} ${hm}`
 }
