@@ -33,6 +33,7 @@ const empty: Snapshot = {
     cameraEnabled: false,
     autoEcosystem: true,
     language: 'system',
+    autoCrashReport: true,
   },
   downloadDir: '',
   error: null,

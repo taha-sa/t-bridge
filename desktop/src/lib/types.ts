@@ -63,6 +63,7 @@ export interface Settings {
   cameraEnabled: boolean
   autoEcosystem: boolean
   language: 'system' | 'tr' | 'en' | 'de'
+  autoCrashReport: boolean
 }
 
 export type Theme = 'dark' | 'system' | 'light'

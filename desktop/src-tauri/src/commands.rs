@@ -390,6 +390,7 @@ pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
         win::system::set_autostart(settings.autostart);
     }
     crate::i18n::apply(&settings.language);
+    crate::diag::set_auto(settings.auto_crash_report);
     *lk(&s.settings) = settings;
     s.save_settings();
     crate::refresh_tray_menu(&s.app);

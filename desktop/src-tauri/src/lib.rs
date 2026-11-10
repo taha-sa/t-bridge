@@ -1,5 +1,6 @@
 mod app;
 mod commands;
+mod diag;
 mod i18n;
 mod screen_share;
 mod suite;
@@ -204,6 +205,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
+            diag::crash_pending,
+            diag::crash_dismiss,
+            diag::report_manual,
             commands::pairing,
             commands::unpair,
             commands::revoke_screen_allowed,
@@ -254,6 +258,7 @@ pub fn run() {
             // Eski sürümden kalan ayarları bir kez yükselt (ör. Windows bildirimi varsayılanı kapalı).
             let migrated = settings.migrate();
             i18n::apply(&settings.language);
+            diag::init(&app.package_info().version.to_string(), settings.auto_crash_report);
             let shared = Arc::new(Shared {
                 app: app.handle().clone(),
                 settings_path,

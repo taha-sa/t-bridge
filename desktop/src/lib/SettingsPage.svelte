@@ -7,6 +7,12 @@
   import Progress from './ui/Progress.svelte'
   import Logo from './ui/Logo.svelte'
   import Signature from './ui/Signature.svelte'
+  import { onMount } from 'svelte'
+  import { invoke } from '@tauri-apps/api/core'
+  import LegalDialog from './LegalDialog.svelte'
+  import ReportDialog, { type Preview } from './ReportDialog.svelte'
+  import { APPS, type AppId } from './apps'
+  import bridgeIcon from '../assets/apps/t-bridge.png'
 
   const s = $derived(app.s)
   const u = $derived(s.update)
@@ -48,6 +54,20 @@
     const found = await call<boolean>('check_update')
     checking = false
     if (found === false) flash(t('set.upToDate'))
+  }
+
+  // Hakkında: aile uygulamalarının kurulu olup olmadığı (merkez durumundan), yasal metinler, elle hata raporu.
+  let installed = $state<Record<string, boolean>>({})
+  let legal = $state<'privacy' | 'disclaimer' | 'license' | 'notices' | null>(null)
+  let report = $state<Preview | null>(null)
+  const family: AppId[] = ['t-downloader', 't-ramcash', 't-desktree', 't-desk-viewer']
+  onMount(() => {
+    invoke<{ id: string; installed: boolean }[]>('suite_status')
+      .then((cs) => (installed = Object.fromEntries(cs.map((c) => [c.id, c.installed]))))
+      .catch(() => {})
+  })
+  async function reportBug() {
+    report = (await call<Preview>('report_manual')) ?? null
   }
 
   async function fixFirewall() {
@@ -233,6 +253,52 @@
     </div>
   </section>
 
+  <section class="card group">
+    <h3>{t('set.diagnostics')}</h3>
+    {@render item(t('crash.auto'), t('crash.autoHint'), 'autoCrashReport')}
+  </section>
+
+  <section class="card group">
+    <h3>{t('about.title')}</h3>
+    <div class="item">
+      <img src={bridgeIcon} alt="" width="36" height="36" class="fic" />
+      <div class="grow">
+        <div class="il">T-Bridge</div>
+        <div class="ih">{t('about.version', { v: s.version })} · {t('about.family')}</div>
+      </div>
+    </div>
+    {#each family as id (id)}
+      <div class="item fam">
+        <img src={APPS[id].icon} alt="" width="28" height="28" class="fic" />
+        <div class="grow il">{APPS[id].name}</div>
+        {#if id === 't-desk-viewer'}
+          <span class="chip">{t('about.phoneApp')}</span>
+        {/if}
+        {#if id !== 't-desk-viewer' && installed[id]}
+          <span class="chip ok"><Icon name="check" size={13} /> {t('about.installed')}</span>
+        {:else}
+          <button class="ghost sm" onclick={() => invoke('open_url', { url: APPS[id].url })}>{t(`about.get.${id}`)}</button>
+        {/if}
+      </div>
+    {/each}
+    <div class="item">
+      <div class="grow"></div>
+      <button class="ghost sm" onclick={reportBug}>{t('about.reportBug')}</button>
+    </div>
+    <div class="sub">
+      <div class="il">{t('about.legal')}</div>
+      <div class="muted-list">
+        <button class="ghost sm" onclick={() => (legal = 'privacy')}>{t('about.privacy')}</button>
+        <button class="ghost sm" onclick={() => (legal = 'license')}>{t('about.license')}</button>
+        <button class="ghost sm" onclick={() => (legal = 'disclaimer')}>{t('about.disclaimer')}</button>
+        <button class="ghost sm" onclick={() => (legal = 'notices')}>{t('about.notices')}</button>
+      </div>
+    </div>
+  </section>
+
+  {#if legal}<LegalDialog kind={legal} onclose={() => (legal = null)} />{/if}
+  {#if report}<ReportDialog preview={report} manual={true} onclose={() => (report = null)} />{/if}
+
   <div class="about">
     <Logo size={42} />
     <div class="an">T-Bridge</div>
@@ -358,6 +424,10 @@
     margin: -4px 0 12px 52px;
     border-radius: 10px;
     background: var(--s3);
+  }
+  .fic {
+    border-radius: 8px;
+    flex: none;
   }
   .about {
     display: flex;

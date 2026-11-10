@@ -16,6 +16,8 @@
   import Camera from './lib/Camera.svelte'
   import Suite from './lib/Suite.svelte'
   import SettingsPage from './lib/SettingsPage.svelte'
+  import ReportDialog, { type Preview } from './lib/ReportDialog.svelte'
+  import { invoke } from '@tauri-apps/api/core'
 
   type Tab = 'home' | 'files' | 'notifs' | 'remote' | 'camera' | 'suite' | 'settings'
   let tab = $state<Tab>('home')
@@ -41,8 +43,14 @@
   ]
   const tabLabel = (id: Tab) => t(`nav.${id}` as Key)
 
+  // Önceki oturumdan kalan çökme raporu varsa açılışta göster.
+  let crash = $state<Preview | null>(null)
+
   onMount(() => {
     init()
+    invoke<Preview | null>('crash_pending')
+      .then((p) => (crash = p))
+      .catch(() => {})
     let unlisten: (() => void) | undefined
     getCurrentWebview()
       .onDragDropEvent(async (e) => {
@@ -143,6 +151,10 @@
         <div class="muted">{s.peers.length ? (on ? t('app.dropReady', { name: s.peer?.name ?? '' }) : t('app.dropWait')) : t('app.needPhone')}</div>
       </div>
     </div>
+  {/if}
+
+  {#if crash}
+    <ReportDialog preview={crash} manual={false} onclose={() => (crash = null)} />
   {/if}
 
   {#if app.toast}

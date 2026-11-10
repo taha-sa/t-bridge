@@ -49,6 +49,8 @@ pub struct Settings {
     pub auto_ecosystem: bool,
     /// Arayüz dili: "system" | "tr" | "en" | "de".
     pub language: String,
+    /// Çökme/hata raporlarını (yalnızca yerelde, göndermeden) otomatik hazırla.
+    pub auto_crash_report: bool,
     /// Ayar göçleri için sürüm. Dosyada yoksa 0 sayılır (eski kurulum); yeni kurulum doğrudan güncel sürümle başlar.
     #[serde(default = "legacy_version")]
     pub settings_version: u32,
@@ -94,6 +96,7 @@ impl Default for Settings {
             camera_enabled: false,
             auto_ecosystem: true,
             language: "system".into(),
+            auto_crash_report: true,
             settings_version: SETTINGS_VERSION,
         }
     }
