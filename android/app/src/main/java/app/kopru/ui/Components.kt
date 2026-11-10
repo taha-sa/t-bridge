@@ -62,8 +62,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import uniffi.kopru_core.ConnState
 
-val CardShape = RoundedCornerShape(22.dp)
-val BtnShape = RoundedCornerShape(14.dp)
+val CardShape = RoundedCornerShape(16.dp)
+val BtnShape = RoundedCornerShape(12.dp)
 
 /** Kart: hafif dikey gradyan, ince çizgi; `gold` ise altın gradyan kenar. */
 @Composable
@@ -97,7 +97,7 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, color: Color = tb.
 @Composable
 private fun pressScale(src: MutableInteractionSource): Float {
     val pressed by src.collectIsPressedAsState()
-    val s by animateFloatAsState(if (pressed) 0.96f else 1f, tween(140), label = "press")
+    val s by animateFloatAsState(if (pressed) 0.96f else 1f, tween(120, easing = TbEasing), label = "press")
     return s
 }
 
@@ -194,7 +194,7 @@ fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size: Dp = 4
 @Composable
 fun IconTile(icon: ImageVector, tint: Color = tb.goldHi, bg: Color = tb.goldSoft, border: Color = tb.goldLine, size: Dp = 42.dp) {
     Box(
-        Modifier.size(size).clip(RoundedCornerShape(13.dp)).background(bg).border(1.dp, border, RoundedCornerShape(13.dp)),
+        Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(bg).border(1.dp, border, RoundedCornerShape(12.dp)),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, null, tint = tint, modifier = Modifier.size(size * 0.48f)) }
 }
@@ -222,7 +222,7 @@ fun Pill(text: String, tone: String = "gold") {
 @Composable
 fun TbSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
     val c = tb
-    val x by animateFloatAsState(if (checked) 1f else 0f, tween(240, easing = FastOutSlowInEasing), label = "sw")
+    val x by animateFloatAsState(if (checked) 1f else 0f, tween(150, easing = TbEasing), label = "sw")
     val knob by animateColorAsState(if (checked) Color(0xFFFFF8E6) else Color(0xFFD8D5CC), label = "knob")
     Box(
         Modifier
@@ -240,7 +240,7 @@ fun TbSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 fun GoldProgress(progress: Float, active: Boolean, tone: String = "gold", modifier: Modifier = Modifier) {
     val c = tb
-    val p by animateFloatAsState(progress.coerceIn(0f, 1f), tween(300), label = "p")
+    val p by animateFloatAsState(progress.coerceIn(0f, 1f), tween(250, easing = TbEasing), label = "p")
     val sheen = if (active) {
         val t = rememberInfiniteTransition(label = "sheen")
         t.animateFloat(-0.4f, 1.4f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "s").value
@@ -336,7 +336,7 @@ fun SignatureFooter(onInstagram: () -> Unit) {
     val path = remember { PathParser().parsePathString(SignaturePath.D).toPath() }
     Column(Modifier.fillMaxWidth().padding(top = 26.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
-            Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onInstagram).padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onInstagram).padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Canvas(Modifier.size(16.dp)) {
@@ -362,7 +362,7 @@ fun SignatureFooter(onInstagram: () -> Unit) {
 fun CheckRow(title: String, desc: String, ok: Boolean, onClick: () -> Unit) {
     val c = tb
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(enabled = !ok, onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = !ok, onClick = onClick).padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(

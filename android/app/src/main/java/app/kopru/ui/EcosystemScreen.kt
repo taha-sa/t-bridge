@@ -105,7 +105,7 @@ fun EcosystemScreen(ui: UiState) {
         )
 
         s.message?.let { m ->
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.goldSoft).padding(14.dp)) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.goldSoft).padding(14.dp)) {
                 Text(m, color = c.goldHi, style = MaterialTheme.typography.bodyMedium)
             }
         }
@@ -152,7 +152,7 @@ private fun appState(s: app.kopru.SuiteUi, id: String, grace: Boolean): AppState
 private fun StatusRow(ok: Boolean, text: String) {
     val c = tb
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(c.s2).padding(horizontal = 14.dp, vertical = 12.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.s2).padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(if (ok) c.goldHi else c.faint))
@@ -238,7 +238,7 @@ private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.eco_ram)) }
             Box(
-                Modifier.size(28.dp).clip(RoundedCornerShape(14.dp)).background(c.s4).clickable { help = true },
+                Modifier.size(28.dp).clip(RoundedCornerShape(12.dp)).background(c.s4).clickable { help = true },
                 contentAlignment = Alignment.Center,
             ) { Text("?", color = c.goldHi, style = MaterialTheme.typography.labelLarge) }
         }

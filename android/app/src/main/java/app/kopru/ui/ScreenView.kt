@@ -403,7 +403,7 @@ fun ScreenViewer(
             Modifier.align(Alignment.TopCenter),
             enter = fadeIn(), exit = fadeOut(),
         ) {
-            val shape = RoundedCornerShape(14.dp)
+            val shape = RoundedCornerShape(12.dp)
             val stopDesc = stringResource(R.string.scr_stop_sharing)
             Row(
                 Modifier.statusBarsPadding().padding(8.dp).clip(shape).background(Color(0xCC111113)).padding(horizontal = 4.dp),

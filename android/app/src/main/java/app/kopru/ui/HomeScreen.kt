@@ -193,7 +193,7 @@ private fun QuickActions(go: (Int) -> Unit) {
 @Composable
 private fun ActionTile(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
     val c = tb
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(16.dp)
     Column(
         modifier
             .clip(shape)
@@ -311,7 +311,7 @@ private fun PairCard(ui: UiState, onScan: () -> Unit, onPick: (ServerInfo) -> Un
         }
         list.forEach { s ->
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onPick(s) }.padding(vertical = 8.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(s) }.padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconTile(Icons.Outlined.Computer, size = 38.dp)

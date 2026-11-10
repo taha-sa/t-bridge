@@ -321,7 +321,7 @@ private fun PowerPage() {
 @Composable
 private fun PowerTile(label: String, icon: ImageVector, danger: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = tb
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(16.dp)
     Column(
         modifier
             .heightIn(min = 112.dp)
@@ -363,7 +363,7 @@ internal fun Chip(label: String, onClick: () -> Unit) {
 private fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
     val view = LocalView.current
     val c = tb
-    val shape = RoundedCornerShape(24.dp)
+    val shape = RoundedCornerShape(16.dp)
     val scope = rememberCoroutineScope()
     val ripple = remember { Animatable(1f) }
     var rippleAt by remember { mutableStateOf(Offset.Zero) }

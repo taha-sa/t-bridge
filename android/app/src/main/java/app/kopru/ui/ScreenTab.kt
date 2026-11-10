@@ -215,7 +215,7 @@ private fun ToolItem(icon: ImageVector, label: String, desc: String, active: Boo
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (active) c.goldSoft else Color.Transparent).padding(horizontal = 14.dp, vertical = 3.dp)) {
+        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (active) c.goldSoft else Color.Transparent).padding(horizontal = 14.dp, vertical = 3.dp)) {
             Icon(icon, null, tint = fg, modifier = Modifier.size(22.dp))
         }
         Text(label, color = fg, style = MaterialTheme.typography.labelSmall, maxLines = 1, textAlign = TextAlign.Center)

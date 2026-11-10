@@ -408,7 +408,7 @@ internal fun LiveKeyboard(modifier: Modifier = Modifier, autoFocus: Boolean = fa
         },
         modifier = modifier.fillMaxWidth().focusRequester(focus),
         placeholder = { Text(stringResource(R.string.keys_placeholder), color = tb.faint) },
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = tb.gold, unfocusedBorderColor = tb.line2, cursorColor = tb.goldHi),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
         keyboardActions = KeyboardActions(onSend = { KeyPad.press(KeyCode.ENTER, SpecialKey.ENTER); text = "" }),

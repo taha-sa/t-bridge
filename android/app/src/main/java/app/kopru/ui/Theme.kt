@@ -54,25 +54,28 @@ data class TbColors(
 
 val DarkTb = TbColors(
     dark = true,
-    bg = Color(0xFF0A0A0B), s1 = Color(0xFF111113), s2 = Color(0xFF17171A), s3 = Color(0xFF1E1E22), s4 = Color(0xFF26262B),
-    line = Color(0x0FFFFFFF), line2 = Color(0x1AFFFFFF),
-    text = Color(0xFFF2F0EA), text2 = Color(0xFFC9C6BD), muted = Color(0xFF8F8C84), faint = Color(0xFF5D5B56),
-    gold = Color(0xFFE3A92B), goldHi = Color(0xFFF5C542), goldLo = Color(0xFFA86F00),
-    goldSoft = Color(0x1FE3A92B), goldLine = Color(0x52E3A92B), onGold = Color(0xFF1A1204),
+    bg = Color(0xFF0D0F12), s1 = Color(0xFF16191E), s2 = Color(0xFF1E2229), s3 = Color(0xFF272D36), s4 = Color(0xFF434C5E),
+    line = Color(0xFF2E3440), line2 = Color(0xFF434C5E),
+    text = Color(0xFFECEFF4), text2 = Color(0xFFC5CBD6), muted = Color(0xFF9CA3AF), faint = Color(0xFF6B7280),
+    gold = Color(0xFFE3A92B), goldHi = Color(0xFFEDB743), goldLo = Color(0xFFC9911C),
+    goldSoft = Color(0x1AE3A92B), goldLine = Color(0x52E3A92B), onGold = Color(0xFF121417),
     violet = Color(0xFF8B5CF6), violetSoft = Color(0x298B5CF6),
-    ok = Color(0xFF4ADE80), bad = Color(0xFFF87171), badSoft = Color(0x1FF87171),
+    ok = Color(0xFF10B981), bad = Color(0xFFEF4444), badSoft = Color(0x1AEF4444),
 )
 
 val LightTb = TbColors(
     dark = false,
-    bg = Color(0xFFF4F2EC), s1 = Color(0xFFFBFAF6), s2 = Color(0xFFFFFFFF), s3 = Color(0xFFF3F0E8), s4 = Color(0xFFE8E4D9),
-    line = Color(0x14141008), line2 = Color(0x24141008),
-    text = Color(0xFF17150F), text2 = Color(0xFF3C3830), muted = Color(0xFF77726A), faint = Color(0xFFA7A197),
-    gold = Color(0xFFB9800B), goldHi = Color(0xFFD99A0B), goldLo = Color(0xFF8A5A00),
-    goldSoft = Color(0x1AB9800B), goldLine = Color(0x59B9800B), onGold = Color(0xFF1A1204),
+    bg = Color(0xFFF8FAFC), s1 = Color(0xFFFFFFFF), s2 = Color(0xFFF1F5F9), s3 = Color(0xFFE2E8F0), s4 = Color(0xFFCBD5E1),
+    line = Color(0xFFCBD5E1), line2 = Color(0xFF94A3B8),
+    text = Color(0xFF0F172A), text2 = Color(0xFF334155), muted = Color(0xFF475569), faint = Color(0xFF94A3B8),
+    gold = Color(0xFF9E6B05), goldHi = Color(0xFF845802), goldLo = Color(0xFF684501),
+    goldSoft = Color(0x1A9E6B05), goldLine = Color(0x599E6B05), onGold = Color(0xFFFFFFFF),
     violet = Color(0xFF7C3AED), violetSoft = Color(0x1A7C3AED),
-    ok = Color(0xFF16A34A), bad = Color(0xFFDC2626), badSoft = Color(0x14DC2626),
+    ok = Color(0xFF047857), bad = Color(0xFFB91C1C), badSoft = Color(0x1AB91C1C),
 )
+
+/** T-Suite hareket eğrisi: cubic-bezier(.2, 0, 0, 1). */
+val TbEasing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 val LocalTb = staticCompositionLocalOf { DarkTb }
 

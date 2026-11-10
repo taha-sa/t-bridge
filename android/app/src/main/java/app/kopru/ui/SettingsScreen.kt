@@ -104,7 +104,7 @@ private fun ThemeCard() {
                     Text(
                         label,
                         Modifier
-                            .clip(RoundedCornerShape(9.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (sel) c.goldSoft else Color.Transparent)
                             .clickable { ThemePref.set(id) }
                             .padding(horizontal = 13.dp, vertical = 7.dp),
@@ -136,7 +136,7 @@ private fun LanguageCard() {
                     names.getValue(code),
                     Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (sel) c.goldSoft else Color.Transparent)
                         .clickable {
                             if (cur != code) {
