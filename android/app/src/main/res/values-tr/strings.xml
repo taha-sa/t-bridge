@@ -44,12 +44,6 @@
     <string name="set_security">Güvenlik</string>
     <string name="set_encrypted">Bağlantınız şifreli</string>
     <string name="set_encrypted_hint">Yalnızca eşleştirdiğiniz cihazlar bağlanabilir.</string>
-    <string name="set_crash">Hata kaydı</string>
-    <string name="set_crash_desc">Uygulama son açılışlardan birinde beklenmedik şekilde kapandı.</string>
-    <string name="set_crash_copy">Kaydı kopyala</string>
-    <string name="set_crash_delete">Sil</string>
-    <string name="set_crash_clip">T-Bridge hata kaydı</string>
-    <string name="set_crash_copied">Hata kaydı kopyalandı</string>
     <string name="set_link_failed">Bağlantı açılamadı. Daha sonra tekrar deneyin.</string>
     <string name="set_tagline">Telefon ile bilgisayar arasında köprü · %1$s</string>
     <string name="eco_title">Ekosistem</string>
@@ -164,4 +158,31 @@
         <item quantity="one">%1$d uygulama güncelleniyor</item>
         <item quantity="other">%1$d uygulama güncelleniyor</item>
     </plurals>
+    <string name="set_diagnostics">Tanılama</string>
+    <string name="about_title">Hakkında</string>
+    <string name="about_version">Sürüm %1$s</string>
+    <string name="about_family">T-Suite ailesinin parçası</string>
+    <string name="about_installed">Yüklü</string>
+    <string name="about_phone_app">Telefon uygulaması</string>
+    <string name="about_get_dl">T-Downloader\'ı edinin</string>
+    <string name="about_get_ram">T-RamCash\'i edinin</string>
+    <string name="about_get_tree">T-DeskTree\'yi edinin</string>
+    <string name="about_get_viewer">T-Desk Viewer\'ı edinin</string>
+    <string name="about_report_bug">Hata raporu gönder…</string>
+    <string name="about_legal">Yasal</string>
+    <string name="about_privacy">Gizlilik politikası</string>
+    <string name="about_license">Lisans (MIT)</string>
+    <string name="about_disclaimer">Kullanım notu ve sorumluluk reddi</string>
+    <string name="about_notices">Açık kaynak bildirimleri</string>
+    <string name="about_notices_count">%1$d bileşen</string>
+    <string name="crash_title">Kilitlenme tespit edildi</string>
+    <string name="crash_manual_title">Hata raporu</string>
+    <string name="crash_body">T-Bridge önceki oturumda beklenmedik şekilde kapandı. Aşağıdaki rapordan kişisel veriler çıkarıldı. Hiçbir şey kendiliğinden gönderilmez; göndermek isterseniz GitHub\'da açılır.</string>
+    <string name="crash_body_manual">Aşağıdaki rapor son günlük kayıtlarından hazırlandı ve kişisel verilerden arındırıldı. Hiçbir şey kendiliğinden gönderilmez; göndermek isterseniz GitHub\'da açılır.</string>
+    <string name="crash_send">Raporu gönder</string>
+    <string name="crash_copy">Kopyala</string>
+    <string name="crash_copied">Rapor kopyalandı</string>
+    <string name="crash_close">Kapat</string>
+    <string name="crash_auto">Hata raporlarını otomatik hazırla</string>
+    <string name="crash_auto_hint">Bir çökme olursa bir sonraki açılışta size gösterilecek bir rapor hazırlanır. Rapor yalnızca telefonunuzda kalır; göndermek sizin kararınızdır.</string>
 </resources>

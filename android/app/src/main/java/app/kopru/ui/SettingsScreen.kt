@@ -47,7 +47,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.BuildConfig
-import app.kopru.CrashLog
 import app.kopru.UiState
 import app.kopru.Updater
 
@@ -73,7 +72,8 @@ fun SettingsScreen(@Suppress("UNUSED_PARAMETER") ui: UiState) {
         LanguageCard()
         UpdateCard()
         SecurityCard()
-        CrashCard()
+        DiagnosticsCard()
+        AboutCard()
         About()
         SignatureFooter {
             val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://instagram.com/_u/tdesk.studio")).setPackage("com.instagram.android")
@@ -239,31 +239,6 @@ private fun SecurityCard() {
         Spacer(Modifier.height(12.dp))
         Text(stringResource(R.string.set_encrypted), color = c.text, style = MaterialTheme.typography.titleSmall)
         Text(stringResource(R.string.set_encrypted_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-/** Yalnızca kayıtlı bir çökme varsa görünür. */
-@Composable
-private fun CrashCard() {
-    val c = tb
-    val ctx = LocalContext.current
-    var log by remember { mutableStateOf(CrashLog.read()) }
-    val text = log ?: return
-    TbCard {
-        SectionTitle(stringResource(R.string.set_crash))
-        Spacer(Modifier.height(10.dp))
-        Text(stringResource(R.string.set_crash_desc), color = c.text2, style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            TbButton(stringResource(R.string.set_crash_copy), {
-                ctx.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(ctx.getString(R.string.set_crash_clip), text))
-                Toast.makeText(ctx, ctx.getString(R.string.set_crash_copied), Toast.LENGTH_SHORT).show()
-            }, Modifier.weight(1f), height = 44.dp)
-            TbButton(stringResource(R.string.set_crash_delete), {
-                CrashLog.clear()
-                log = null
-            }, Modifier.weight(1f), height = 44.dp)
-        }
     }
 }
 

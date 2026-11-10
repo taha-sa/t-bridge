@@ -44,12 +44,6 @@
     <string name="set_security">Security</string>
     <string name="set_encrypted">Your connection is encrypted</string>
     <string name="set_encrypted_hint">Only devices you have paired can connect.</string>
-    <string name="set_crash">Error log</string>
-    <string name="set_crash_desc">The app closed unexpectedly during a recent launch.</string>
-    <string name="set_crash_copy">Copy log</string>
-    <string name="set_crash_delete">Delete</string>
-    <string name="set_crash_clip">T-Bridge error log</string>
-    <string name="set_crash_copied">Error log copied</string>
     <string name="set_link_failed">Could not open the link. Try again later.</string>
     <string name="set_tagline">A bridge between your phone and PC · %1$s</string>
     <string name="eco_title">Ecosystem</string>
@@ -164,4 +158,31 @@
         <item quantity="one">%1$d app is updating</item>
         <item quantity="other">%1$d apps are updating</item>
     </plurals>
+    <string name="set_diagnostics">Diagnostics</string>
+    <string name="about_title">About</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_family">Part of the T-Suite family</string>
+    <string name="about_installed">Installed</string>
+    <string name="about_phone_app">Phone app</string>
+    <string name="about_get_dl">Get T-Downloader</string>
+    <string name="about_get_ram">Get T-RamCash</string>
+    <string name="about_get_tree">Get T-DeskTree</string>
+    <string name="about_get_viewer">Get T-Desk Viewer</string>
+    <string name="about_report_bug">Send error report…</string>
+    <string name="about_legal">Legal</string>
+    <string name="about_privacy">Privacy policy</string>
+    <string name="about_license">License (MIT)</string>
+    <string name="about_disclaimer">Disclaimer</string>
+    <string name="about_notices">Open-source notices</string>
+    <string name="about_notices_count">%1$d components</string>
+    <string name="crash_title">Crash detected</string>
+    <string name="crash_manual_title">Error report</string>
+    <string name="crash_body">T-Bridge closed unexpectedly last time. Personal data has been removed from the report below. Nothing is sent automatically; if you choose to send it, it opens on GitHub.</string>
+    <string name="crash_body_manual">The report below was prepared from the latest log entries, with personal data removed. Nothing is sent automatically; if you choose to send it, it opens on GitHub.</string>
+    <string name="crash_send">Send report</string>
+    <string name="crash_copy">Copy</string>
+    <string name="crash_copied">Report copied</string>
+    <string name="crash_close">Close</string>
+    <string name="crash_auto">Prepare error reports automatically</string>
+    <string name="crash_auto_hint">If a crash happens, a report is prepared and shown the next time you open the app. It stays on your phone; sending it is up to you.</string>
 </resources>

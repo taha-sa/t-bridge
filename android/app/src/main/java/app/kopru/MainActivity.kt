@@ -125,6 +125,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 BackHandler(Chrome.immersive) { Chrome.immersive = false }
+                app.kopru.ui.CrashPrompt()
                 Box(
                     Modifier
                         .fillMaxSize()

@@ -44,12 +44,6 @@
     <string name="set_security">Sicherheit</string>
     <string name="set_encrypted">Ihre Verbindung ist verschlüsselt</string>
     <string name="set_encrypted_hint">Nur von Ihnen gekoppelte Geräte können sich verbinden.</string>
-    <string name="set_crash">Fehlerprotokoll</string>
-    <string name="set_crash_desc">Die App wurde bei einem der letzten Starts unerwartet beendet.</string>
-    <string name="set_crash_copy">Protokoll kopieren</string>
-    <string name="set_crash_delete">Löschen</string>
-    <string name="set_crash_clip">T-Bridge-Fehlerprotokoll</string>
-    <string name="set_crash_copied">Fehlerprotokoll kopiert</string>
     <string name="set_link_failed">Der Link konnte nicht geöffnet werden. Versuchen Sie es später erneut.</string>
     <string name="set_tagline">Die Brücke zwischen Smartphone und PC · %1$s</string>
     <string name="eco_title">Ökosystem</string>
@@ -164,4 +158,31 @@
         <item quantity="one">%1$d App wird aktualisiert</item>
         <item quantity="other">%1$d Apps werden aktualisiert</item>
     </plurals>
+    <string name="set_diagnostics">Diagnose</string>
+    <string name="about_title">Über</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_family">Teil der T-Suite-Familie</string>
+    <string name="about_installed">Installiert</string>
+    <string name="about_phone_app">Smartphone-App</string>
+    <string name="about_get_dl">T-Downloader holen</string>
+    <string name="about_get_ram">T-RamCash holen</string>
+    <string name="about_get_tree">T-DeskTree holen</string>
+    <string name="about_get_viewer">T-Desk Viewer holen</string>
+    <string name="about_report_bug">Fehlerbericht senden…</string>
+    <string name="about_legal">Rechtliches</string>
+    <string name="about_privacy">Datenschutzerklärung</string>
+    <string name="about_license">Lizenz (MIT)</string>
+    <string name="about_disclaimer">Haftungsausschluss</string>
+    <string name="about_notices">Open-Source-Hinweise</string>
+    <string name="about_notices_count">%1$d Komponenten</string>
+    <string name="crash_title">Absturz festgestellt</string>
+    <string name="crash_manual_title">Fehlerbericht</string>
+    <string name="crash_body">T-Bridge wurde beim letzten Mal unerwartet beendet. Aus dem Bericht unten wurden persönliche Daten entfernt. Es wird nichts automatisch gesendet; wenn Sie ihn senden möchten, öffnet er sich auf GitHub.</string>
+    <string name="crash_body_manual">Der Bericht unten wurde aus den letzten Protokolleinträgen erstellt, persönliche Daten wurden entfernt. Es wird nichts automatisch gesendet; wenn Sie ihn senden möchten, öffnet er sich auf GitHub.</string>
+    <string name="crash_send">Bericht senden</string>
+    <string name="crash_copy">Kopieren</string>
+    <string name="crash_copied">Bericht kopiert</string>
+    <string name="crash_close">Schließen</string>
+    <string name="crash_auto">Fehlerberichte automatisch vorbereiten</string>
+    <string name="crash_auto_hint">Bei einem Absturz wird ein Bericht vorbereitet und beim nächsten Start angezeigt. Er bleibt auf Ihrem Smartphone; ob Sie ihn senden, entscheiden Sie.</string>
 </resources>
