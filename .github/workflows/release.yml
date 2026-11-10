@@ -32,7 +32,7 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: NDK
         shell: bash
-        run: sdkmanager --install "ndk;27.2.12479018"
+        run: sdkmanager --install "ndk;30.0.16248370"
       - name: cargo-ndk
         run: cargo install cargo-ndk --locked
       - name: Verify (tests, clippy, check)

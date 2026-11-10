@@ -59,7 +59,7 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: NDK
         shell: bash
-        run: sdkmanager --install "ndk;27.2.12479018"
+        run: sdkmanager --install "ndk;30.0.16248370"
       - name: cargo-ndk
         run: cargo install cargo-ndk --locked
       - uses: gradle/actions/setup-gradle@v4
@@ -69,5 +69,5 @@ jobs:
         shell: bash
         working-directory: android
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.16248370
         run: ./gradlew --no-daemon assembleDebug lintDebug
