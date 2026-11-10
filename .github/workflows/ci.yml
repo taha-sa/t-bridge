@@ -1,0 +1,73 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: never
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Clippy
+        run: cargo clippy --workspace --release -- -D warnings
+      - name: Tests (core)
+        run: cargo test -p kopru-core --release
+      - name: Tests (tlink)
+        run: cargo test -p tlink
+      - name: Tests (desktop)
+        working-directory: desktop/src-tauri
+        run: cargo test
+      - name: Frontend check
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run check
+
+  android:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: NDK
+        shell: bash
+        run: sdkmanager --install "ndk;27.2.12479018"
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
+      - name: Gradle (assembleDebug, lintDebug)
+        shell: bash
+        working-directory: android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: ./gradlew --no-daemon assembleDebug lintDebug

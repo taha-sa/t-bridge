@@ -1,0 +1,83 @@
+name: Release
+# v1.2.3 -> kararlı; v1.2.3-beta.1 -> ön sürüm (yalnızca elle indirme; güncelleyiciler latest.json/android.json'u izler).
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: NDK
+        shell: bash
+        run: sdkmanager --install "ndk;27.2.12479018"
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Verify (tests, clippy, check)
+        shell: bash
+        run: |
+          cargo test -p kopru-core --release
+          cargo test -p tlink
+          cargo clippy --workspace --release -- -D warnings
+          cd desktop && npm ci && npm run check
+      - name: Restore Android keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/kopru.keystore
+          {
+            echo "storeFile=kopru.keystore"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          git fetch --tags --force --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
+          n="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | head -c 4000)"
+          [ -n "$n" ] || n="T-Bridge ${GITHUB_REF_NAME#v}"
+          {
+            echo 'text<<NOTES_EOF'
+            echo "$n"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Build, sign and publish
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.text }}
+        run: node scripts/release.mjs "${GITHUB_REF_NAME#v}" "$NOTES" --ci
+      - name: Remove keystore
+        if: always()
+        shell: bash
+        run: rm -f android/kopru.keystore android/keystore.properties
