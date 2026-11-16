@@ -149,7 +149,7 @@ impl AutoState {
                 continue;
             }
             // Argümansız başlatma pencere açıp odağı çalar: bilinmeyen uygulamalar otomatik açılmaz.
-            if c.exe.is_none() || c.args.is_empty() {
+            if matches!(c.id.as_str(), "t-desktree" | "t-ramcash") || c.exe.is_none() || c.args.is_empty() {
                 continue;
             }
             if let Some((n, at)) = self.tries.get(&c.id) {
@@ -846,6 +846,17 @@ mod tests {
         let now = Instant::now();
         let got = st.pick(&[cand("a", true, false, &["--tray"]), cand("b", false, false, &["--x"]), cand("c", true, true, &["--x"]), cand("d", true, false, &[])], now);
         assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
+    }
+
+    #[test]
+    fn auto_start_skips_manual_tools_but_keeps_downloader() {
+        let mut st = AutoState::default();
+        let got = st.pick(&[
+            cand("t-desktree", true, false, &["--background"]),
+            cand("t-ramcash", true, false, &["--tray"]),
+            cand("t-downloader", true, false, &["--background"]),
+        ], Instant::now());
+        assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["t-downloader"]);
     }
 
     #[test]

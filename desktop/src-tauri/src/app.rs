@@ -82,7 +82,7 @@ impl Default for Settings {
         Self {
             clipboard_sync: true,
             notif_mirror: true,
-            notif_sound: true,
+            notif_sound: false,
             notif_toast: false,
             transfer_toast: true,
             low_battery_warn: true,
@@ -370,7 +370,7 @@ mod tests {
         assert!(s.migrate());
         assert!(!s.notif_toast);
         assert!(!s.clipboard_sync);
-        assert!(s.notif_sound && s.notif_mirror);
+        assert!(!s.notif_sound && s.notif_mirror);
         assert_eq!(s.settings_version, SETTINGS_VERSION);
         assert!(!s.migrate());
     }
