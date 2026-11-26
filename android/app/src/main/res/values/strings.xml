@@ -73,13 +73,9 @@
     <string name="eco_eta_h">%1$d h %2$d min</string>
     <string name="eco_eta_m">%1$d min %2$d s</string>
     <string name="eco_eta_s">%1$d s</string>
-    <string name="eco_ram_help_title">Memory cleaning</string>
-    <string name="eco_ram_help_smart">Smart: frees unneeded memory from background apps without touching your open work (recommended).</string>
-    <string name="eco_ram_help_full">Full: frees everything including cache; needs administrator permission and may briefly slow the PC.</string>
     <string name="eco_ram">RAM</string>
     <string name="eco_waiting_data">Waiting for data…</string>
-    <string name="eco_smart">Smart</string>
-    <string name="eco_full">Deep</string>
+    <string name="eco_ram_clean">Clean memory</string>
     <string name="eco_disk">Disk</string>
     <string name="eco_reading">Reading…</string>
     <string name="eco_free">%1$s free</string>
@@ -120,7 +116,7 @@
     <string name="suite_err_timeout">The PC did not respond in time. Try again.</string>
     <string name="suite_err_disk">Not enough space on your PC. Free up space and try again.</string>
     <string name="suite_err_disk_free">Not enough space on your PC (%1$s free). Free up space and try again.</string>
-    <string name="suite_ram_cleaned">+%1$s freed · %2$s</string>
+    <string name="suite_ram_cleaned">+%1$s freed</string>
     <string name="suite_clean_failed">Could not clean memory. Try again.</string>
     <string name="suite_update_failed">Could not start the update. Try again.</string>
     <string name="suite_launch_failed">Could not open the app on the PC. Open it manually and try again.</string>

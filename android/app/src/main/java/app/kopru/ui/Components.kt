@@ -241,9 +241,9 @@ fun TbSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
 fun GoldProgress(progress: Float, active: Boolean, tone: String = "gold", modifier: Modifier = Modifier) {
     val c = tb
     val p by animateFloatAsState(progress.coerceIn(0f, 1f), tween(250, easing = TbEasing), label = "p")
-    val sheen = if (active) {
+    val sheenState = if (active) {
         val t = rememberInfiniteTransition(label = "sheen")
-        t.animateFloat(-0.4f, 1.4f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "s").value
+        t.animateFloat(-0.4f, 1.4f, infiniteRepeatable(tween(1400, easing = LinearEasing)), label = "s")
     } else null
     Canvas(modifier.fillMaxWidth().height(6.dp)) {
         val r = CornerRadius(size.height / 2)
@@ -257,6 +257,7 @@ fun GoldProgress(progress: Float, active: Boolean, tone: String = "gold", modifi
             else -> Brush.horizontalGradient(listOf(Color(0xFFF7CF5A), Color(0xFFD99A0B), Color(0xFFB57A06)), endX = w)
         }
         drawRoundRect(brush, size = Size(w, size.height), cornerRadius = r)
+        val sheen = sheenState?.value
         if (sheen != null) {
             val cx = size.width * sheen
             if (cx in 0f..w) {
@@ -274,14 +275,22 @@ fun GoldProgress(progress: Float, active: Boolean, tone: String = "gold", modifi
 @Composable
 fun StatusOrb(state: ConnState, size: Dp = 64.dp) {
     val c = tb
-    val t = rememberInfiniteTransition(label = "orb")
-    val breathe by t.animateFloat(0.9f, 1.18f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b")
-    val spin by t.animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "r")
+    val breatheState = if (state == ConnState.CONNECTED) {
+        rememberInfiniteTransition(label = "orb_b").animateFloat(
+            0.9f, 1.18f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b",
+        )
+    } else null
+    val spinState = if (state == ConnState.CONNECTING) {
+        rememberInfiniteTransition(label = "orb_r").animateFloat(
+            0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "r",
+        )
+    } else null
     Canvas(Modifier.size(size)) {
         val r = this.size.minDimension / 2
         val center = Offset(r, r)
         when (state) {
             ConnState.CONNECTED -> {
+                val breathe = breatheState?.value ?: 1f
                 drawCircle(Brush.radialGradient(listOf(Color(0x5CF5C542), Color.Transparent), center, r * 0.95f * breathe), r * breathe, center)
                 drawCircle(c.goldLine, r * 0.92f, center, style = Stroke(1.5.dp.toPx()))
                 drawCircle(
@@ -291,6 +300,7 @@ fun StatusOrb(state: ConnState, size: Dp = 64.dp) {
                 )
             }
             ConnState.CONNECTING -> {
+                val spin = spinState?.value ?: 0f
                 drawCircle(c.line2, r * 0.92f, center, style = Stroke(1.5.dp.toPx()))
                 drawArc(
                     c.gold, spin, 100f, false,
@@ -308,33 +318,35 @@ fun StatusOrb(state: ConnState, size: Dp = 64.dp) {
     }
 }
 
-/** T-Bridge asma köprü logosu (t-suite/design/icons/t-bridge.svg ile birebir geometri). */
+/** T-Bridge işareti: siyah zemin üstünde altın kemerli T monogramı. */
 @Composable
 fun Logo(size: Dp = 40.dp, framed: Boolean = true) {
     Canvas(Modifier.size(size)) {
-        val k = this.size.minDimension / 1024f
+        val k = this.size.minDimension / 512f
+        val gold = Brush.linearGradient(
+            listOf(Color(0xFFF7CF5A), Color(0xFFD99A0B), Color(0xFF9C6400)),
+            Offset(110 * k, 90 * k),
+            Offset(400 * k, 430 * k),
+        )
         if (framed) {
-            val tile = Brush.linearGradient(
-                listOf(Color(0xFFF7C948), Color(0xFF9A6700)),
-                Offset(0f, 0f),
-                Offset(1024 * k, 1024 * k),
+            drawRoundRect(Color(0xFF0D0C0A), cornerRadius = CornerRadius(116 * k))
+            drawRoundRect(
+                gold,
+                topLeft = Offset(5 * k, 5 * k),
+                size = Size(502 * k, 502 * k),
+                cornerRadius = CornerRadius(111 * k),
+                alpha = 0.4f,
+                style = Stroke(6 * k),
             )
-            drawRoundRect(tile, cornerRadius = CornerRadius(225.28f * k))
-            val notchColor = Color.White.copy(alpha = 0.35f)
-            drawLine(notchColor, Offset(112 * k, 112 * k), Offset(176 * k, 112 * k), 20 * k, StrokeCap.Round)
-            drawLine(notchColor, Offset(144 * k, 112 * k), Offset(144 * k, 168 * k), 20 * k, StrokeCap.Round)
         }
-        val fg = Color.White
-        drawLine(fg, Offset(328 * k, 720 * k), Offset(328 * k, 336 * k), 64 * k, StrokeCap.Round)
-        drawLine(fg, Offset(696 * k, 720 * k), Offset(696 * k, 336 * k), 64 * k, StrokeCap.Round)
-        drawLine(fg, Offset(208 * k, 640 * k), Offset(816 * k, 640 * k), 64 * k, StrokeCap.Round)
-        val cable = Path().apply {
-            moveTo(208 * k, 392 * k)
-            quadraticTo(512 * k, 704 * k, 816 * k, 392 * k)
+        val arch = Path().apply {
+            moveTo(100 * k, 222 * k)
+            quadraticTo(256 * k, 92 * k, 412 * k, 222 * k)
         }
-        drawPath(cable, fg, style = Stroke(64 * k, cap = StrokeCap.Round))
-        drawLine(fg, Offset(448 * k, 538 * k), Offset(448 * k, 640 * k), 40 * k, StrokeCap.Round)
-        drawLine(fg, Offset(576 * k, 538 * k), Offset(576 * k, 640 * k), 40 * k, StrokeCap.Round)
+        drawPath(arch, gold, style = Stroke(46 * k, cap = StrokeCap.Round))
+        drawLine(gold, Offset(256 * k, 168 * k), Offset(256 * k, 404 * k), 54 * k, StrokeCap.Round)
+        drawLine(gold, Offset(120 * k, 226 * k), Offset(120 * k, 266 * k), 22 * k, StrokeCap.Round, alpha = 0.85f)
+        drawLine(gold, Offset(392 * k, 226 * k), Offset(392 * k, 266 * k), 22 * k, StrokeCap.Round, alpha = 0.85f)
     }
 }
 

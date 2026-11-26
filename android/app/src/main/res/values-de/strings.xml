@@ -73,13 +73,9 @@
     <string name="eco_eta_h">%1$d Std. %2$d Min.</string>
     <string name="eco_eta_m">%1$d Min. %2$d Sek.</string>
     <string name="eco_eta_s">%1$d Sek.</string>
-    <string name="eco_ram_help_title">Speicherbereinigung</string>
-    <string name="eco_ram_help_smart">Smart: Gibt unnötigen Speicher von Hintergrund-Apps frei, ohne Ihre offene Arbeit zu berühren (empfohlen).</string>
-    <string name="eco_ram_help_full">Vollständig: Gibt alles frei, auch den Cache; erfordert Administratorrechte und kann den PC kurz verlangsamen.</string>
     <string name="eco_ram">RAM</string>
     <string name="eco_waiting_data">Warten auf Daten…</string>
-    <string name="eco_smart">Smart</string>
-    <string name="eco_full">Vollständig</string>
+    <string name="eco_ram_clean">Speicher bereinigen</string>
     <string name="eco_disk">Festplatte</string>
     <string name="eco_reading">Wird gelesen…</string>
     <string name="eco_free">%1$s frei</string>
@@ -120,7 +116,7 @@
     <string name="suite_err_timeout">Der PC hat nicht rechtzeitig geantwortet. Versuchen Sie es erneut.</string>
     <string name="suite_err_disk">Auf dem PC ist nicht genügend Speicherplatz vorhanden. Geben Sie Speicherplatz frei und versuchen Sie es erneut.</string>
     <string name="suite_err_disk_free">Auf dem PC ist nicht genügend Speicherplatz vorhanden (%1$s frei). Geben Sie Speicherplatz frei und versuchen Sie es erneut.</string>
-    <string name="suite_ram_cleaned">+%1$s freigegeben · %2$s</string>
+    <string name="suite_ram_cleaned">+%1$s freigegeben</string>
     <string name="suite_clean_failed">Der Speicher konnte nicht bereinigt werden. Versuchen Sie es erneut.</string>
     <string name="suite_update_failed">Das Update konnte nicht gestartet werden. Versuchen Sie es erneut.</string>
     <string name="suite_launch_failed">Die App konnte am PC nicht geöffnet werden. Öffnen Sie sie manuell und versuchen Sie es erneut.</string>

@@ -280,26 +280,36 @@ object Screen {
     /** Rust olay iş parçacığı: HIZLI dönmeli (QUIC okumasını bekletmesin). Kareyi kuyruğa koyar. */
     fun onFrame(ptsUs: Long, recvUs: Long, key: Boolean, data: ByteArray) {
         val now = SystemClock.elapsedRealtime()
-        synchronized(st) { rx++ }
+        var dropped = 0
+        var queuedSize = -1
         qLock.withLock {
-            if (codec == null) return
+            if (codec == null) {
+                synchronized(st) { rx++ }
+                return
+            }
             if (needKey && !key) {
+                synchronized(st) { rx++ }
                 requestKey(now)
                 return
             }
             if (queue.size >= MAX_Q) {
                 // Çözücü yetişemiyor: bayat kareleri at; kuyrukta anahtar kare varsa ondan devam, yoksa yenisini bekle.
-                val dropped = dropStaleLocked()
-                synchronized(st) { late += dropped }
+                dropped = dropStaleLocked()
                 if (!key && queue.isEmpty()) {
+                    synchronized(st) { rx++; late += dropped }
                     needKey = true
                     requestKey(now)
                     return
                 }
             }
             queue.addLast(Frame(ptsUs, recvUs, key, data))
-            synchronized(st) { qMax = max(qMax, queue.size) }
+            queuedSize = queue.size
             qCond.signalAll()
+        }
+        synchronized(st) {
+            rx++
+            if (dropped > 0) late += dropped
+            if (queuedSize > qMax) qMax = queuedSize
         }
     }
 

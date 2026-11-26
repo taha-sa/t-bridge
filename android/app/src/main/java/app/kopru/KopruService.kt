@@ -85,7 +85,7 @@ class KopruService : Service() {
 
         fun onTransfer(t: TransferInfo) {
             instance?.apply {
-                updateLocks()
+                if (!(t.state == TransferState.ACTIVE && wakeLock != null)) updateLocks()
                 if (t.state == TransferState.DONE && t.direction == uniffi.kopru_core.Direction.INCOMING) notifyReceived(t)
             }
         }
@@ -117,6 +117,7 @@ class KopruService : Service() {
     private var wifiLock: WifiManager.WifiLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastBattery: Pair<Int, Boolean>? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = sendBattery(i)
@@ -125,7 +126,7 @@ class KopruService : Service() {
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             // Yeni ağda eski tarama soketleri işe yaramaz: MulticastLock ile taramayı baştan başlat.
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
+            mainHandler.post {
                 if (!Core.isConnected()) Core.rescan()
             }
         }
@@ -258,7 +259,7 @@ class KopruService : Service() {
         val uri = IncomingFiles.findByPath(path)
         val name = t.name.substringAfterLast('/')
         val autoOpen = uri != null && ViewerLink.consumeOpen(name)
-        if (autoOpen && uri != null) runCatching { ViewerLink.open(this, uri, name) }   // arka plandaysa Android engelleyebilir: bildirim yedek
+        if (autoOpen) runCatching { ViewerLink.open(this, uri!!, name) }   // arka plandaysa Android engelleyebilir: bildirim yedek
         val view = uri?.let {
             val i = if (autoOpen) ViewerLink.openIntent(this, it, name) else Intent(Intent.ACTION_VIEW).setDataAndType(it, contentResolver.getType(it) ?: "*/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)

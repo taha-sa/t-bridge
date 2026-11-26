@@ -18,10 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -237,46 +234,26 @@ private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 private fun RamCard(ram: app.kopru.RamInfo?, st: AppState) {
     val c = tb
-    var help by remember { mutableStateOf(false) }
-    if (help) {
-        ModalBottomSheet(onDismissRequest = { help = false }, sheetState = rememberModalBottomSheetState(), containerColor = c.s1) {
-            Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(stringResource(R.string.eco_ram_help_title), color = c.text, style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.eco_ram_help_smart), color = c.muted, style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(R.string.eco_ram_help_full), color = c.muted, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-    }
     TbCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { SectionTitle(stringResource(R.string.eco_ram)) }
-            Box(
-                Modifier.size(28.dp).clip(RoundedCornerShape(12.dp)).background(c.s4).clickable { help = true },
-                contentAlignment = Alignment.Center,
-            ) { Text("?", color = c.goldHi, style = MaterialTheme.typography.labelLarge) }
-        }
+        SectionTitle(stringResource(R.string.eco_ram))
         Spacer8()
         if (st != AppState.RUNNING && ram == null) { OffState("T-RamCash", "t-ramcash", st); return@TbCard }
         Row(verticalAlignment = Alignment.CenterVertically) {
             val pct = (ram?.usedPct ?: 0) / 100f
             Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(96.dp)) {
-                    val st = Stroke(10.dp.toPx(), cap = StrokeCap.Round)
-                    drawArc(c.s4, 135f, 270f, false, Offset(5.dp.toPx(), 5.dp.toPx()), Size(size.width - 10.dp.toPx(), size.height - 10.dp.toPx()), style = st)
-                    drawArc(c.goldBrush, 135f, 270f * pct, false, Offset(5.dp.toPx(), 5.dp.toPx()), Size(size.width - 10.dp.toPx(), size.height - 10.dp.toPx()), style = st)
+                    val stroke = Stroke(10.dp.toPx(), cap = StrokeCap.Round)
+                    drawArc(c.s4, 135f, 270f, false, Offset(5.dp.toPx(), 5.dp.toPx()), Size(size.width - 10.dp.toPx(), size.height - 10.dp.toPx()), style = stroke)
+                    drawArc(c.goldBrush, 135f, 270f * pct, false, Offset(5.dp.toPx(), 5.dp.toPx()), Size(size.width - 10.dp.toPx(), size.height - 10.dp.toPx()), style = stroke)
                 }
                 Text("%${ram?.usedPct ?: "—"}", color = c.text, style = MaterialTheme.typography.titleMedium)
             }
             Column(Modifier.padding(start = 16.dp).weight(1f)) {
                 Text(if (ram != null) "${Suite.fmtMb(ram.usedMb.toDouble())} / ${Suite.fmtMb(ram.totalMb.toDouble())}" else stringResource(R.string.eco_waiting_data), color = c.text, style = MaterialTheme.typography.bodyMedium)
                 Spacer8()
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TbButton(stringResource(R.string.eco_smart), { Suite.ramClean(false) }, Modifier.weight(1f))
-                    TbButton(stringResource(R.string.eco_full), { Suite.ramClean(true) }, Modifier.weight(1f))
-                }
+                TbButton(stringResource(R.string.eco_ram_clean), { Suite.ramClean() }, Modifier.fillMaxWidth())
             }
         }
     }

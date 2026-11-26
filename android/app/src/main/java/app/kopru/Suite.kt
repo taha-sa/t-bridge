@@ -51,8 +51,9 @@ object Suite {
     private val reqSeq = AtomicLong(1)
     private data class Reply(val ok: Boolean, val json: JSONObject?, val error: String?)
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val FREE_RE = Regex("""free=(\d+)""")
     private val pending = PendingRequests<Reply>(
-        schedule = { task, delay -> handler.postDelayed(task, delay); Unit },
+        schedule = { task, delay -> handler.postDelayed(task, delay) },
         cancel = { task -> handler.removeCallbacks(task) },
     )
     private var ramHighSince = 0L
@@ -110,21 +111,21 @@ object Suite {
         if (error == "phone_offline") return ctx.getString(R.string.suite_err_offline)
         if (error == "download_not_active" || error == "download_not_paused" || error == "download_not_started") return ctx.getString(R.string.suite_download_control_failed)
         if (error == null || !error.startsWith("disk_full")) return error
-        val free = Regex("""free=(\d+)""").find(error)?.groupValues?.get(1)?.toLongOrNull()
+        val free = FREE_RE.find(error)?.groupValues?.get(1)?.toLongOrNull()
         return if (free != null) ctx.getString(R.string.suite_err_disk_free, fmtMb(free / 1048576.0)) else ctx.getString(R.string.suite_err_disk)
     }
 
     fun onReply(req: Long, ok: Boolean, json: String, error: String?) {
         val err = friendlyError(error)
         val parsed = runCatching { JSONObject(json) }.getOrNull()
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
+        handler.post {
             pending.complete(req, Reply(ok, parsed, err))
         }
     }
 
-    fun ramClean(full: Boolean) = send("t-ramcash", "ram.clean", """{"mode":"${if (full) "full" else "smart"}"}""") { ok, r, err ->
+    fun ramClean(full: Boolean = true) = send("t-ramcash", "ram.clean", """{"mode":"${if (full) "full" else "smart"}"}""") { ok, r, err ->
         val mb = r?.optDouble("freedMb", 0.0) ?: 0.0
-        toast(if (ok) ctx.getString(R.string.suite_ram_cleaned, fmtMb(mb), ctx.getString(if (full) R.string.eco_full else R.string.eco_smart)) else (err ?: ctx.getString(R.string.suite_clean_failed)))
+        toast(if (ok) ctx.getString(R.string.suite_ram_cleaned, fmtMb(mb)) else (err ?: ctx.getString(R.string.suite_clean_failed)))
     }
 
     fun refreshDisks() = send("t-desktree", "disk.status") { ok, r, _ ->
@@ -174,7 +175,7 @@ object Suite {
                 _ui.update { it.copy(ram = r) }
                 trackRam(r.usedPct)
             }
-            name == "ram.cleaned" -> toast(ctx.getString(R.string.suite_ram_cleaned, fmtMb(o.optDouble("freedMb")), ctx.getString(if (o.optString("mode") == "full") R.string.eco_full else R.string.eco_smart)))
+            name == "ram.cleaned" -> toast(ctx.getString(R.string.suite_ram_cleaned, fmtMb(o.optDouble("freedMb"))))
             name == "disk.low" -> {
                 val row = DiskRow(o.optString("drive"), o.optLong("freeBytes"), o.optLong("totalBytes"))
                 _ui.update { it.copy(disks = it.disks.filter { d -> d.drive != row.drive } + row) }

@@ -324,14 +324,15 @@ private fun StartPanel(scr: app.kopru.ScreenUi, on: Boolean) {
             Spacer(Modifier.height(16.dp))
             Text(stringResource(R.string.scr_pc_screen), color = c.text, style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
+            val scrErr = scr.error
             Text(
                 when {
                     !on -> stringResource(R.string.scr_hint_offline)
                     !supported -> stringResource(R.string.scr_hint_unsupported)
                     scr.errorRes != 0 -> stringResource(scr.errorRes)
-                    scr.error != null -> scr.error
+                    scrErr != null -> scrErr
                     else -> stringResource(R.string.scr_hint_ready)
-                } ?: "",
+                },
                 color = if (scr.error != null || scr.errorRes != 0) c.bad else c.muted,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,

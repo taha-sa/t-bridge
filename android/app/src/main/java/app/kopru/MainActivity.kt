@@ -124,17 +124,18 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(Chrome.immersive) { Chrome.immersive = false }
                 app.kopru.ui.CrashPrompt()
+                val glowBrush = remember(c.dark, c.gold) {
+                    Brush.radialGradient(
+                        listOf(c.gold.copy(alpha = if (c.dark) 0.10f else 0.08f), Color.Transparent),
+                        center = Offset(900f, -120f),
+                        radius = 1100f,
+                    )
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
                         .background(c.bg)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(c.gold.copy(alpha = if (c.dark) 0.10f else 0.08f), Color.Transparent),
-                                center = Offset(900f, -120f),
-                                radius = 1100f,
-                            ),
-                        ),
+                        .background(glowBrush),
                 ) {
                     // imePadding: yazı alanı açılınca içerik klavyenin üstünde kalır (Ekran'da görüntü küçülür, durmaz).
                     Column(Modifier.fillMaxSize().imePadding()) {
@@ -235,13 +236,14 @@ private val more = listOf(
     NavItem(5, R.string.nav_settings, R.string.nav_settings_desc, Icons.Outlined.Settings),
 )
 
+private val navSlots = primary + NavItem(-1, R.string.nav_more, R.string.nav_more_desc, Icons.Outlined.MoreHoriz)
+
 /** Alt gezinme: seçili sekmede altın gösterge. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
     val c = tb
     var sheet by remember { mutableStateOf(false) }
-    val slots = primary + NavItem(-1, R.string.nav_more, R.string.nav_more_desc, Icons.Outlined.MoreHoriz)
     Column(
         Modifier
             .fillMaxWidth()
@@ -250,7 +252,7 @@ private fun NavBar(selected: Int, active: Int, onSelect: (Int) -> Unit) {
     ) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            slots.forEach { it ->
+            navSlots.forEach { it ->
                 val navDesc = stringResource(it.label) + ", " + stringResource(it.desc)
                 val sel = if (it.tab < 0) selected >= 4 else it.tab == selected
                 val w by animateDpAsState(if (sel) 22.dp else 0.dp, tween(260), label = "ind")

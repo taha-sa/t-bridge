@@ -295,11 +295,22 @@ class ViewerBridgeService : Service() {
         }
     }
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var cachedUid = -1
+    private var cachedUpdated = -1L
+    private var cachedAllowed = false
+
     private fun callerIsViewer(uid: Int): Boolean {
         if (uid <= 0) return false
         val pkgs = packageManager.getPackagesForUid(uid) ?: return false
         if (ViewerLink.PKG !in pkgs) return false
-        return ViewerLink.certAllowed(ViewerLink.signerDigests(this, ViewerLink.PKG), BuildConfig.VIEWER_CERT_SHA256, BuildConfig.DEBUG)
+        val updated = runCatching { packageManager.getPackageInfo(ViewerLink.PKG, 0).lastUpdateTime }.getOrDefault(-1L)
+        if (uid == cachedUid && updated >= 0L && updated == cachedUpdated) return cachedAllowed
+        val allowed = ViewerLink.certAllowed(ViewerLink.signerDigests(this, ViewerLink.PKG), BuildConfig.VIEWER_CERT_SHA256, BuildConfig.DEBUG)
+        cachedUid = uid
+        cachedUpdated = updated
+        cachedAllowed = allowed
+        return allowed
     }
 
     private fun handleSend(d: Bundle, reply: Messenger?) {
@@ -315,7 +326,7 @@ class ViewerBridgeService : Service() {
             startRegisteredPresentation(
                 register = { done ->
                     Suite.send("t-bridge", "file.present", JSONObject().put("name", pname).toString()) { ok, _, err ->
-                        Handler(Looper.getMainLooper()).post { done(ok, Suite.friendlyError(err)) }
+                        mainHandler.post { done(ok, Suite.friendlyError(err)) }
                     }
                 },
                 send = {
