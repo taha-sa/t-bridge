@@ -68,6 +68,7 @@ object Ringer {
 
 /** Telefonun medya oturumları: PC'den kontrol + çalan parça bilgisini PC'ye gönderme. */
 object MediaControl {
+    private val main = Handler(Looper.getMainLooper())
     private var controller: MediaController? = null
     private var last: NowPlaying? = null
     private val callback = object : MediaController.Callback() {
@@ -75,6 +76,7 @@ object MediaControl {
         override fun onPlaybackStateChanged(state: PlaybackState?) = publish()
         override fun onSessionDestroyed() {
             controller = null
+            KopruService.appCtx?.let { refreshController(it) }
             publish()
         }
     }
@@ -92,12 +94,24 @@ object MediaControl {
         }
     }
 
+    private fun refreshController(ctx: Context) {
+        val msm = ctx.getSystemService(MediaSessionManager::class.java) ?: return
+        val comp = ComponentName(ctx, NotifListener::class.java)
+        runCatching { pick(msm.getActiveSessions(comp)) }
+    }
+
+    private fun isActiveState(state: Int?): Boolean =
+        state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+
     private fun pick(list: List<MediaController>?) {
-        val best = list?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: list?.firstOrNull()
+        val best = list?.firstOrNull { isActiveState(it.playbackState?.state) }
+            ?: list?.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED && it.metadata != null }
+            ?: list?.firstOrNull { it.metadata != null }
+            ?: list?.firstOrNull()
         if (best?.sessionToken == controller?.sessionToken) return
         controller?.unregisterCallback(callback)
         controller = best
-        best?.registerCallback(callback, Handler(Looper.getMainLooper()))
+        best?.registerCallback(callback, main)
         publish()
     }
 
@@ -108,7 +122,7 @@ object MediaControl {
         val artist = md.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
             ?: md.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM_ARTIST) ?: ""
         val app = ctx?.let { NotifListener.appLabel(it, c.packageName) } ?: c.packageName
-        return NowPlaying(title, artist, c.playbackState?.state == PlaybackState.STATE_PLAYING, app)
+        return NowPlaying(title, artist, isActiveState(c.playbackState?.state), app)
     }
 
     fun publish(force: Boolean = false) {
@@ -119,26 +133,34 @@ object MediaControl {
     }
 
     fun media(ctx: Context, a: MediaAction) {
-        val tc = controller?.transportControls
+        // Komuttan önce canlı oturumu tazele: oynatıcı oturumu yenilediyse eski controller komutu yutmasın.
+        refreshController(ctx)
+        val c = controller
+        val tc = c?.transportControls
         if (tc != null) {
-            when (a) {
-                MediaAction.PLAY_PAUSE -> if (controller?.playbackState?.state == PlaybackState.STATE_PLAYING) tc.pause() else tc.play()
-                MediaAction.NEXT -> tc.skipToNext()
-                MediaAction.PREVIOUS -> tc.skipToPrevious()
-                MediaAction.STOP -> tc.stop()
+            runCatching {
+                when (a) {
+                    MediaAction.PLAY_PAUSE -> if (isActiveState(c.playbackState?.state)) tc.pause() else tc.play()
+                    MediaAction.NEXT -> tc.skipToNext()
+                    MediaAction.PREVIOUS -> tc.skipToPrevious()
+                    MediaAction.STOP -> tc.stop()
+                }
+            }.onSuccess {
+                main.postDelayed({ refreshController(ctx); publish(force = true) }, 350)
+                return
             }
-            return
         }
-        // Oturum yoksa sistem medya tuşu.
+        // Oturum yoksa veya yanıt vermediyse sistem medya tuşu.
         val code = when (a) {
             MediaAction.PLAY_PAUSE -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
             MediaAction.NEXT -> KeyEvent.KEYCODE_MEDIA_NEXT
             MediaAction.PREVIOUS -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
             MediaAction.STOP -> KeyEvent.KEYCODE_MEDIA_STOP
         }
-        val am = ctx.getSystemService(AudioManager::class.java)
+        val am = ctx.getSystemService(AudioManager::class.java) ?: return
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
         am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+        main.postDelayed({ refreshController(ctx); publish(force = true) }, 350)
     }
 
     fun volume(ctx: Context, a: VolumeAction) {

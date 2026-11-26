@@ -33,19 +33,23 @@ class NotifListener : NotificationListenerService() {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ReplyHandle>?) = size > 100
         }
 
-        /** SEMANTIC_ACTION_REPLY tercih edilir; yoksa serbest metin girişi olan ilk RemoteInput'lu eylem. */
+        /** SEMANTIC_ACTION_REPLY tercih edilir; yoksa serbest metin girişi olan ilk RemoteInput'lu eylem (WearableExtender dahil). */
         private fun findReply(n: Notification): Pair<Notification.Action, RemoteInput>? {
-            val actions = n.actions ?: return null
+            val allActions = buildList {
+                n.actions?.let { addAll(it) }
+                runCatching { Notification.WearableExtender(n).actions }.getOrNull()?.let { addAll(it) }
+            }
+            if (allActions.isEmpty()) return null
             fun freeForm(a: Notification.Action) = a.remoteInputs?.firstOrNull { it.allowFreeFormInput }
             if (Build.VERSION.SDK_INT >= 28) {
-                for (a in actions) {
+                for (a in allActions) {
                     if (a.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY && a.actionIntent != null) {
                         val ri = freeForm(a) ?: a.remoteInputs?.firstOrNull()
                         if (ri != null) return a to ri
                     }
                 }
             }
-            for (a in actions) {
+            for (a in allActions) {
                 if (a.actionIntent == null) continue
                 val ri = freeForm(a) ?: continue
                 return a to ri
@@ -123,7 +127,21 @@ class NotifListener : NotificationListenerService() {
         if (n.category == Notification.CATEGORY_TRANSPORT || n.category == Notification.CATEGORY_PROGRESS) return
         val ex = n.extras
         val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = (ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
+        val msgText = runCatching {
+            @Suppress("DEPRECATION")
+            val arr = ex.getParcelableArray(Notification.EXTRA_MESSAGES)
+            val last = arr?.lastOrNull() as? Bundle
+            val body = last?.getCharSequence("text")?.toString().orEmpty()
+            val sender = last?.getCharSequence("sender")?.toString().orEmpty()
+            when {
+                body.isBlank() -> ""
+                sender.isNotBlank() && !title.contains(sender) -> "$sender: $body"
+                else -> body
+            }
+        }.getOrDefault("")
+        val text = (ex.getCharSequence(Notification.EXTRA_BIG_TEXT)
+            ?: ex.getCharSequence(Notification.EXTRA_TEXT))
+            ?.toString().orEmpty().ifBlank { msgText }
         if (title.isBlank() && text.isBlank()) return
         // Yanıt eylemi her güncellemede tazelenir (PendingIntent yenilenmiş olabilir).
         val reply = findReply(n)
@@ -164,13 +182,16 @@ class NotifListener : NotificationListenerService() {
         val d = packageManager.getApplicationIcon(pkg)
         val size = 64
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        d.setBounds(0, 0, size, size)
-        d.draw(c)
-        ByteArrayOutputStream().use { out ->
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        try {
+            val c = Canvas(bmp)
+            d.setBounds(0, 0, size, size)
+            d.draw(c)
+            ByteArrayOutputStream().use { out ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                out.toByteArray()
+            }
+        } finally {
             bmp.recycle()
-            out.toByteArray()
         }
     }.getOrNull()
 }

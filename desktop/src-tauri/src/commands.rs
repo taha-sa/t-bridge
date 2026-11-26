@@ -7,7 +7,7 @@ use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
-    app::{Battery, Settings, Shared, lk},
+    app::{Battery, ReplyInfo, Settings, Shared, lk},
     win,
 };
 
@@ -28,6 +28,7 @@ pub struct Snapshot {
     peers: Vec<PeerInfo>,
     transfers: Vec<TransferInfo>,
     notifications: Vec<NotificationData>,
+    reply_info: std::collections::HashMap<String, ReplyInfo>,
     icons: std::collections::HashMap<String, String>,
     battery: Option<Battery>,
     now_playing: Option<NowPlaying>,
@@ -47,6 +48,7 @@ pub fn snapshot(s: S<'_>) -> Snapshot {
     let settings = lk(&s.settings).clone();
     let download_dir = crate::download_dir(&s.app, &settings).to_string_lossy().into();
     let notifications = lk(&s.notifications).iter().cloned().collect();
+    let reply_info = lk(&s.reply_info).clone();
     let icons = lk(&s.icons).clone();
     let battery = *lk(&s.battery);
     let now_playing = lk(&s.now_playing).clone();
@@ -59,6 +61,7 @@ pub fn snapshot(s: S<'_>) -> Snapshot {
         peers: n.map(|n| n.peers()).unwrap_or_default(),
         transfers: n.map(|n| n.transfers()).unwrap_or_default(),
         notifications,
+        reply_info,
         icons,
         battery,
         now_playing,
@@ -181,6 +184,7 @@ pub fn open_downloads(s: S<'_>) {
 #[tauri::command]
 pub fn dismiss_notification(s: S<'_>, key: String) -> Result<(), String> {
     lk(&s.notifications).retain(|n| n.key != key);
+    lk(&s.reply_info).remove(&key);
     node(&s)?.send_phone(PhoneCommand::DismissNotification { key });
     Ok(())
 }
@@ -257,94 +261,10 @@ pub async fn suite_check() -> Result<(), String> {
     Ok(())
 }
 
-/// Telefon kamerası durumu (arayüz 2 sn'de bir yoklar).
-#[tauri::command]
-pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {
-    let supported = win::camera::camera_allowed_now();
-    let hub = s.camera.get();
-    let phone = hub.and_then(|h| h.phone.lock().ok().map(|p| *p)).unwrap_or_default();
-    win::camera::CameraStatus {
-        supported,
-        installed: supported && win::camera::is_registered_for_me(),
-        update_needed: supported && win::camera::update_needed(),
-        running: hub.is_some_and(|h| h.running.load(std::sync::atomic::Ordering::SeqCst)),
-        phone_supports: s.node().is_some_and(|n| n.peer_supports_camera()),
-        phone,
-        in_use: hub.is_some_and(|h| h.in_use.load(std::sync::atomic::Ordering::SeqCst)),
-        decoded_frames: hub.map_or(0, |h| h.decoded.load(std::sync::atomic::Ordering::Relaxed)),
-    }
-}
-
-/// Kamerayı etkinleştir: gerekirse bir kerelik UAC ile DLL'i kaydeder, sonra sanal kamerayı başlatır.
-#[tauri::command]
-pub async fn camera_enable(s: S<'_>) -> Result<(), String> {
-    if !win::camera::camera_allowed_now() {
-        return Err(crate::i18n::t("err.win11"));
-    }
-    let sh = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        if !win::camera::is_installed_for_me() {
-            let sid = win::camera::current_user_sid().ok_or_else(|| crate::i18n::t("err.cam.sid"))?;
-            let code = match win::camera::run_elevated(&format!("--camera-register \"{sid}\"")) {
-                Ok(c) => c,
-                Err(e) if e == win::camera::UAC_CANCELLED => {
-                    return Err(crate::i18n::t("err.cam.uac"));
-                }
-                Err(e) => return Err(e),
-            };
-            if code != 0 || !win::camera::is_installed_for_me() {
-                return Err(crate::i18n::t("err.cam.reg"));
-            }
-        }
-        sh.camera.get().ok_or_else(|| crate::i18n::t("err.cam.hub"))?.enable()?;
-        lk(&sh.settings).camera_enabled = true;
-        sh.save_settings();
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Sanal kamerayı durdur (kayıt kalır; bir sonraki "Etkinleştir" izin istemez).
-#[tauri::command]
-pub async fn camera_disable(s: S<'_>) -> Result<(), String> {
-    let sh = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some(h) = sh.camera.get() {
-            h.disable();
-        }
-        lk(&sh.settings).camera_enabled = false;
-        sh.save_settings();
-    })
-    .await
-    .map_err(|e| e.to_string())
-}
-
-/// Kamerayı kaldır: sanal kamerayı durdurur, DLL kaydını ve dosyasını siler (UAC ister).
-#[tauri::command]
-pub async fn camera_uninstall(s: S<'_>) -> Result<(), String> {
-    let sh = s.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        if let Some(h) = sh.camera.get() {
-            h.disable();
-        }
-        lk(&sh.settings).camera_enabled = false;
-        sh.save_settings();
-        if win::camera::is_installed() {
-            let code = win::camera::run_elevated("--camera-unregister")?;
-            if code != 0 {
-                return Err(crate::i18n::t("err.cam.unreg"));
-            }
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 #[tauri::command]
 pub fn clear_notifications(s: S<'_>) -> Result<(), String> {
     let keys: Vec<String> = lk(&s.notifications).drain(..).map(|n| n.key).collect();
+    lk(&s.reply_info).clear();
     let n = node(&s)?;
     for key in keys {
         n.send_phone(PhoneCommand::DismissNotification { key });
@@ -362,7 +282,18 @@ pub fn mute_app(s: S<'_>, package: String, muted: bool) {
         }
     }
     if muted {
-        lk(&s.notifications).retain(|n| n.package != package);
+        let mut removed = Vec::new();
+        lk(&s.notifications).retain(|n| {
+            let keep = n.package != package;
+            if !keep {
+                removed.push(n.key.clone());
+            }
+            keep
+        });
+        let mut r = lk(&s.reply_info);
+        for k in removed {
+            r.remove(&k);
+        }
     }
     s.save_settings();
 }
@@ -380,11 +311,11 @@ pub fn set_settings(s: S<'_>, mut settings: Settings) -> Result<bool, String> {
         settings.settings_version = old.settings_version;
         // "Her zaman izin ver" listesi yalnızca onay penceresiyle değişir (arayüzdeki eski kopya ezmesin).
         settings.screen_allowed = old.screen_allowed.clone();
-        settings.camera_enabled = old.camera_enabled; // yalnızca kamera komutlarıyla değişir
         old.download_dir != settings.download_dir
     };
     if !settings.notif_mirror {
         lk(&s.notifications).clear();
+        lk(&s.reply_info).clear();
     }
     if settings.autostart != win::system::autostart_enabled() {
         win::system::set_autostart(settings.autostart);

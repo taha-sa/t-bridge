@@ -47,7 +47,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Mouse
@@ -84,7 +83,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kopru.ui.FilesScreen
 import app.kopru.ui.HomeScreen
-import app.kopru.ui.CameraTab
 import app.kopru.ui.Chrome
 import app.kopru.ui.RemoteScreen
 import app.kopru.ui.ScreenTab
@@ -154,8 +152,7 @@ class MainActivity : ComponentActivity() {
                                     1 -> FilesScreen(ui)
                                     TAB_SCREEN -> ScreenTab(ui)
                                     3 -> RemoteScreen(ui)
-                                    4 -> CameraTab(ui)
-                                    5 -> app.kopru.ui.EcosystemScreen(ui)
+                                    4 -> app.kopru.ui.EcosystemScreen(ui)
                                     else -> SettingsScreen(ui)
                                 }
                             }
@@ -234,9 +231,8 @@ private val primary = listOf(
     NavItem(3, R.string.nav_remote, R.string.nav_remote_desc, Icons.Outlined.Mouse),
 )
 private val more = listOf(
-    NavItem(4, R.string.nav_camera, R.string.nav_camera_desc, Icons.Outlined.Videocam),
-    NavItem(5, R.string.nav_eco, R.string.nav_eco_desc, Icons.Outlined.Hub),
-    NavItem(6, R.string.nav_settings, R.string.nav_settings_desc, Icons.Outlined.Settings),
+    NavItem(4, R.string.nav_eco, R.string.nav_eco_desc, Icons.Outlined.Hub),
+    NavItem(5, R.string.nav_settings, R.string.nav_settings_desc, Icons.Outlined.Settings),
 )
 
 /** Alt gezinme: seçili sekmede altın gösterge. */

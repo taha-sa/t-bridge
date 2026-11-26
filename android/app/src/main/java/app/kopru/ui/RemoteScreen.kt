@@ -71,7 +71,6 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import app.kopru.CameraService
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
@@ -147,7 +146,7 @@ private enum class Page(@StringRes val label: Int, val icon: ImageVector) {
 
 /**
  * Kumanda: üstte segmentli seçici, altta tek odaklı sayfa (büyük hedefler). Son seçilen sayfa hatırlanır; varsayılan Touchpad.
- * Ekran görüntüleme ve kamera artık kendi sekmelerinde (Ekran, Kamera).
+ * Ekran görüntüleme artık kendi sekmesinde (Ekran).
  */
 @Composable
 fun RemoteScreen(ui: UiState) {

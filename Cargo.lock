@@ -2327,12 +2327,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "kopru-camring"
-version = "0.1.0"
-
-[[package]]
 name = "kopru-core"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -2355,18 +2351,16 @@ dependencies = [
 
 [[package]]
 name = "kopru-desktop"
-version = "0.3.2"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "kopru-camring",
  "kopru-core",
  "log",
  "qrcode",
  "regex",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4786,15 +4780,6 @@ dependencies = [
  "thiserror 2.0.21",
  "windows",
  "windows-version",
-]
-
-[[package]]
-name = "tbridge-vcam"
-version = "0.1.0"
-dependencies = [
- "kopru-camring",
- "windows",
- "windows-core",
 ]
 
 [[package]]

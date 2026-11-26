@@ -24,10 +24,15 @@
   const s = $derived(app.s)
   let filter = $state('')
 
+  const appCounts = $derived.by(() => {
+    const m = new Map<string, number>()
+    for (const n of s.notifications) m.set(n.package, (m.get(n.package) ?? 0) + 1)
+    return m
+  })
   const apps = $derived(
     [...new Map(s.notifications.map((n) => [n.package, n.app_name])).entries()].sort((a, b) => a[1].localeCompare(b[1], locale())),
   )
-  const count = (pkg: string) => s.notifications.filter((n) => n.package === pkg).length
+  const count = (pkg: string) => appCounts.get(pkg) ?? 0
   const list = $derived(filter ? s.notifications.filter((n) => n.package === filter) : s.notifications)
 
   // Ardışık aynı uygulamanın bildirimleri tek grupta: başlık bir kez yazılır.
@@ -189,19 +194,21 @@
   .groups {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
   .group {
-    padding: 6px 8px 8px;
+    padding: 4px 6px 6px;
+    border-radius: 16px;
+    background: var(--s1);
   }
   .gh {
-    gap: 10px;
-    padding: 8px 8px 6px;
+    gap: 9px;
+    padding: 8px 10px 6px;
   }
   .appicon {
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
     flex: none;
     display: grid;
     place-items: center;
@@ -214,41 +221,53 @@
     height: 100%;
   }
   .an {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 650;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--muted);
+  }
+  .gh .ghost {
+    opacity: 0.65;
+  }
+  .group:hover .gh .ghost {
+    opacity: 1;
   }
   .item {
     display: flex;
     gap: 10px;
     align-items: flex-start;
-    padding: 10px 8px 10px 44px;
-    border-radius: 12px;
-    transition: background var(--t) var(--ease);
+    padding: 10px 10px 10px 43px;
+    border-radius: 11px;
+    transition: background 140ms var(--ease);
   }
   .item:hover {
-    background: rgba(255, 255, 255, 0.025);
+    background: rgba(255, 255, 255, 0.03);
   }
   .item + .item {
     border-top: 1px solid var(--line);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
   .item .x {
     opacity: 0;
-    transition: opacity var(--t) var(--ease);
+    transition: opacity 140ms var(--ease);
   }
-  .item:hover .x {
-    opacity: 1;
+  .item:hover .x,
+  .item:focus-within .x {
+    opacity: 0.85;
   }
   .top {
     gap: 10px;
   }
   .title {
-    font-weight: 620;
+    font-weight: 600;
+    font-size: 13.5px;
   }
   .text {
-    margin-top: 2px;
+    margin-top: 3px;
+    font-size: 13px;
+    line-height: 1.48;
     color: var(--text-2);
     white-space: pre-wrap;
     word-break: break-word;

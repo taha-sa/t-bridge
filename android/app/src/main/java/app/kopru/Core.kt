@@ -52,6 +52,7 @@ data class UiState(
 object Core : Host {
     private const val TAG = "kopru"
     private val main = Handler(Looper.getMainLooper())
+    private val replyExec = java.util.concurrent.Executors.newSingleThreadExecutor()
     private lateinit var ctx: Context
 
     @Volatile
@@ -75,7 +76,7 @@ object Core : Host {
         node?.let { return it }
         return try {
             initLogging()
-            setCameraCapability(true) // telefon kamera yeteneğini her zaman duyurur; PC yalnızca Windows 11'de
+            setCameraCapability(false)
             val n = Node(
                 NodeConfig(
                     dataDir = ctx.filesDir.resolve("core").absolutePath,
@@ -116,7 +117,7 @@ object Core : Host {
     override fun onEvent(event: Event) {
         when (event) {
             is Event.State -> {
-                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); main.post { app.kopru.ui.KeyPad.resetLocal() }; Suite.onDisconnected(); main.post { CameraService.onDisconnected(ctx) } }
+                if (event.state == ConnState.CONNECTED) sentIcons.clear() else { Screen.onDisconnected(); main.post { app.kopru.ui.KeyPad.resetLocal() }; Suite.onDisconnected() }
                 _ui.update { it.copy(conn = event.state, peer = event.peer, peers = node?.peers() ?: it.peers) }
                 main.post { KopruService.onConnState(event.state) }
             }
@@ -148,11 +149,10 @@ object Core : Host {
             is Event.SuiteReply -> Suite.onReply(event.req.toLong(), event.ok, event.json, event.error)
             is Event.SuiteCmd -> Unit
             is Event.PairCodeRotated -> Unit
-            is Event.Cam -> main.post { CameraService.onCmd(ctx, event.cmd) }
-            is Event.CamState, is Event.CamFrame -> Unit
+            is Event.Cam, is Event.CamState, is Event.CamFrame -> Unit
             // Telefon tarafında beklenmeyen (PC'ye yönelik) olaylar.
-            // PC bir bildirime yanıt yazdı: kaynak uygulamanın RemoteInput'una ilet (ana iş parçacığı dışında).
-            is Event.NotificationReply -> Thread { NotifListener.reply(ctx, event.key, event.text) }.start()
+            // PC bir bildirime yanıt yazdı: kaynak uygulamanın RemoteInput'una ilet (tek iş parçacıklı havuzda).
+            is Event.NotificationReply -> replyExec.execute { NotifListener.reply(ctx, event.key, event.text) }
             is Event.Notification, is Event.NotificationRemoved, is Event.NotificationExt, is Event.NotificationReplyResult,
             is Event.AppIcon, is Event.Battery, is Event.NowPlaying, is Event.PointerMove, is Event.Pc -> Unit
         }

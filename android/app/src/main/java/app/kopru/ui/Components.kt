@@ -308,24 +308,33 @@ fun StatusOrb(state: ConnState, size: Dp = 64.dp) {
     }
 }
 
-/** T-Bridge işareti (assets/logo.svg ile aynı geometri). */
+/** T-Bridge asma köprü logosu (t-suite/design/icons/t-bridge.svg ile birebir geometri). */
 @Composable
 fun Logo(size: Dp = 40.dp, framed: Boolean = true) {
     Canvas(Modifier.size(size)) {
-        val k = this.size.minDimension / 512f
-        val gold = Brush.linearGradient(listOf(Color(0xFFF7CF5A), Color(0xFFD99A0B), Color(0xFF9C6400)), Offset(110 * k, 90 * k), Offset(400 * k, 430 * k))
+        val k = this.size.minDimension / 1024f
         if (framed) {
-            drawRoundRect(Color(0xFF0D0C0A), cornerRadius = CornerRadius(116 * k))
-            drawRoundRect(gold, topLeft = Offset(5 * k, 5 * k), size = Size(502 * k, 502 * k), cornerRadius = CornerRadius(111 * k), alpha = 0.4f, style = Stroke(6 * k))
+            val tile = Brush.linearGradient(
+                listOf(Color(0xFFF7C948), Color(0xFF9A6700)),
+                Offset(0f, 0f),
+                Offset(1024 * k, 1024 * k),
+            )
+            drawRoundRect(tile, cornerRadius = CornerRadius(225.28f * k))
+            val notchColor = Color.White.copy(alpha = 0.35f)
+            drawLine(notchColor, Offset(112 * k, 112 * k), Offset(176 * k, 112 * k), 20 * k, StrokeCap.Round)
+            drawLine(notchColor, Offset(144 * k, 112 * k), Offset(144 * k, 168 * k), 20 * k, StrokeCap.Round)
         }
-        val arch = Path().apply {
-            moveTo(100 * k, 222 * k)
-            quadraticTo(256 * k, 92 * k, 412 * k, 222 * k)
+        val fg = Color.White
+        drawLine(fg, Offset(328 * k, 720 * k), Offset(328 * k, 336 * k), 64 * k, StrokeCap.Round)
+        drawLine(fg, Offset(696 * k, 720 * k), Offset(696 * k, 336 * k), 64 * k, StrokeCap.Round)
+        drawLine(fg, Offset(208 * k, 640 * k), Offset(816 * k, 640 * k), 64 * k, StrokeCap.Round)
+        val cable = Path().apply {
+            moveTo(208 * k, 392 * k)
+            quadraticTo(512 * k, 704 * k, 816 * k, 392 * k)
         }
-        drawPath(arch, gold, style = Stroke(46 * k, cap = StrokeCap.Round))
-        drawLine(gold, Offset(256 * k, 168 * k), Offset(256 * k, 404 * k), 54 * k, StrokeCap.Round)
-        drawLine(gold, Offset(120 * k, 226 * k), Offset(120 * k, 266 * k), 22 * k, StrokeCap.Round, alpha = 0.85f)
-        drawLine(gold, Offset(392 * k, 226 * k), Offset(392 * k, 266 * k), 22 * k, StrokeCap.Round, alpha = 0.85f)
+        drawPath(cable, fg, style = Stroke(64 * k, cap = StrokeCap.Round))
+        drawLine(fg, Offset(448 * k, 538 * k), Offset(448 * k, 640 * k), 40 * k, StrokeCap.Round)
+        drawLine(fg, Offset(576 * k, 538 * k), Offset(576 * k, 640 * k), 40 * k, StrokeCap.Round)
     }
 }
 

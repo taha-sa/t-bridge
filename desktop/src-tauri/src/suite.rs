@@ -1,7 +1,7 @@
 //! T-Suite merkezi (hub): T-Bridge, `%LOCALAPPDATA%\T-Suite\apps` kaydındaki diğer uygulamaları izler, T-Link ile bağlanır,
 //! beyaz listedeki olayları (download.*, ram.*, disk.*, scan.*, app.update.*) kısıtlayarak telefona iletir ve telefondan gelen
 //! genel komutları (SuiteCmd) ilgili uygulamaya yönlendirir. Kendisi de "t-bridge" kimliğiyle T-Link sunucusudur.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -123,52 +123,34 @@ pub struct AutoCand {
     pub args: Vec<String>,
 }
 
-const AUTO_BASE_DELAY: Duration = Duration::from_secs(30);
-const AUTO_MAX_DELAY: Duration = Duration::from_secs(300);
-const AUTO_MAX_TRIES: u32 = 5;
-
-/// Otomatik başlatma durumu: uygulama başına deneme sayısı ve son deneme anı (hız sınırı).
+/// Otomatik başlatma durumu: bir kerelik başlatma; kullanıcı PC'den kapattıysa asla kendiliğinden geri açmaz.
+/// Telefondan açıkça bir uygulama açıldığında veya komut gönderildiğinde `app_cmd` doğrudan bir kez başlatır.
 #[derive(Default)]
 pub struct AutoState {
-    tries: HashMap<String, (u32, Instant)>,
+    handled: HashSet<String>,
 }
 
 impl AutoState {
-    /// Yeni telefon oturumu: sayaçlar sıfırlanır.
-    pub fn reset(&mut self) {
-        self.tries.clear();
-    }
-
-    /// Şimdi başlatılacak adayları seçer ve denemeyi kaydeder. Kurulu + kapalı + argümanı bilinen olanlar;
-    /// önceki denemeden beri üstel bekleme (30 sn, 60 sn, ... en çok 5 dk) geçmiş ve en çok 5 deneme.
-    pub fn pick(&mut self, cands: &[AutoCand], now: Instant) -> Vec<AutoCand> {
+    /// Bir kerelik başlatılacak adayları seçer: daha önce çalıştığı görülen veya zaten bir kez
+    /// başlatılmış uygulamalar kullanıcı PC'den kapattıktan sonra asla otomatik geri açılmaz.
+    pub fn pick(&mut self, cands: &[AutoCand], _now: Instant) -> Vec<AutoCand> {
         let mut out = Vec::new();
         for c in cands {
             if c.running {
-                self.tries.remove(&c.id);
+                self.handled.insert(c.id.clone());
                 continue;
             }
-            // Argümansız başlatma pencere açıp odağı çalar: bilinmeyen uygulamalar otomatik açılmaz.
+            if self.handled.contains(&c.id) {
+                continue;
+            }
+            // Argümansız başlatma pencere açıp odağı çalar: manuel araçlar ve bilinmeyenler otomatik açılmaz.
             if matches!(c.id.as_str(), "t-desktree" | "t-ramcash") || c.exe.is_none() || c.args.is_empty() {
                 continue;
             }
-            if let Some((n, at)) = self.tries.get(&c.id) {
-                let wait = AUTO_BASE_DELAY.saturating_mul(1u32 << (*n - 1).min(8)).min(AUTO_MAX_DELAY);
-                if *n >= AUTO_MAX_TRIES || now.duration_since(*at) < wait {
-                    continue;
-                }
-            }
-            let n = self.tries.get(&c.id).map_or(0, |t| t.0);
-            self.tries.insert(c.id.clone(), (n + 1, now));
+            self.handled.insert(c.id.clone());
             out.push(c.clone());
         }
         out
-    }
-
-    /// Deneme hakkı tükendi mi.
-    #[cfg(test)]
-    pub fn failed(&self, id: &str) -> bool {
-        self.tries.get(id).is_some_and(|t| t.0 >= AUTO_MAX_TRIES)
     }
 }
 
@@ -575,7 +557,7 @@ pub fn start(app: &AppHandle) {
             h2.refresh_async().await;
             let h4 = h2.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || h4.auto_start()).await;
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
 }
@@ -593,7 +575,6 @@ pub fn on_phone_state(connected: bool) {
     h.server.publish(if connected { "phone.connected" } else { "phone.disconnected" }, Some(json!({})));
     if connected {
         *h.last_sent.lock().unwrap() = Vec::new(); // yeni oturum: listeyi baştan gönder
-        h.auto.lock().unwrap().reset();
         let h = h.clone();
         tauri::async_runtime::spawn_blocking(move || {
             h.refresh();
@@ -938,41 +919,28 @@ mod tests {
     }
 
     #[test]
-    fn auto_start_never_twice_and_rate_limited() {
+    fn auto_start_launches_at_most_once_and_never_reopens_after_close() {
         let mut st = AutoState::default();
         let t0 = Instant::now();
-        let a = [cand("a", true, false, &["--tray"])];
-        assert_eq!(st.pick(&a, t0).len(), 1);
-        assert!(st.pick(&a, t0 + Duration::from_secs(5)).is_empty());
-        assert_eq!(st.pick(&a, t0 + Duration::from_secs(31)).len(), 1);
-        assert!(st.pick(&a, t0 + Duration::from_secs(31 + 59)).is_empty());
-        assert_eq!(st.pick(&a, t0 + Duration::from_secs(31 + 61)).len(), 1);
+        let stopped = [cand("a", true, false, &["--tray"])];
+        let running = [cand("a", true, true, &["--tray"])];
+        // İlk seferde bir kez başlatılır
+        assert_eq!(st.pick(&stopped, t0).len(), 1);
+        // Tekrar başlatılmaz (bekleme sonrası bile)
+        assert!(st.pick(&stopped, t0 + Duration::from_secs(600)).is_empty());
+        // Çalıştığı görülüp kullanıcı PC'den kapatsa bile bir daha otomatik açılmaz
+        assert!(st.pick(&running, t0 + Duration::from_secs(610)).is_empty());
+        assert!(st.pick(&stopped, t0 + Duration::from_secs(620)).is_empty());
     }
 
     #[test]
-    fn auto_start_gives_up_after_max_tries_until_reset() {
+    fn auto_start_never_reopens_app_opened_manually_then_closed() {
         let mut st = AutoState::default();
-        let mut t = Instant::now();
-        let a = [cand("a", true, false, &["--tray"])];
-        let mut n = 0;
-        for _ in 0..20 {
-            n += st.pick(&a, t).len();
-            t += Duration::from_secs(400);
-        }
-        assert_eq!(n, AUTO_MAX_TRIES as usize);
-        assert!(st.failed("a"));
-        st.reset();
-        assert!(!st.failed("a"));
-        assert_eq!(st.pick(&a, t).len(), 1);
-    }
-
-    #[test]
-    fn auto_start_running_clears_counter() {
-        let mut st = AutoState::default();
-        let t = Instant::now();
-        assert_eq!(st.pick(&[cand("a", true, false, &["--tray"])], t).len(), 1);
-        assert!(st.pick(&[cand("a", true, true, &["--tray"])], t).is_empty());
-        assert_eq!(st.pick(&[cand("a", true, false, &["--tray"])], t).len(), 1);
+        let t0 = Instant::now();
+        // Kullanıcı uygulamayı zaten açıkken gördü veya telefondan açtı
+        assert!(st.pick(&[cand("t-downloader", true, true, &["--background"])], t0).is_empty());
+        // Kullanıcı PC'den kapattı: T-Bridge geri açmamalı
+        assert!(st.pick(&[cand("t-downloader", true, false, &["--background"])], t0 + Duration::from_secs(10)).is_empty());
     }
 
     #[test]

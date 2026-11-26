@@ -495,11 +495,15 @@
   }
   .grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
+  }
+  .grid > * {
+    min-width: 0;
   }
   .grid h3 {
     margin-bottom: 14px;
+    overflow-wrap: break-word;
   }
   .track {
     gap: 14px;

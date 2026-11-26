@@ -45,8 +45,6 @@ pub struct Settings {
     pub screen_share: bool,
     /// "Her zaman izin ver" denen telefon kimlikleri (ilk seferde onay sorulur).
     pub screen_allowed: Vec<String>,
-    /// Telefon kamerası etkin (sanal kamera uygulama açılışında başlatılır). Yalnızca Windows 11.
-    pub camera_enabled: bool,
     /// Telefon bağlanınca kurulu T-Suite uygulamalarını arka planda başlat.
     pub auto_ecosystem: bool,
     /// Arayüz dili: "system" | "tr" | "en" | "de".
@@ -58,8 +56,8 @@ pub struct Settings {
     pub settings_version: u32,
 }
 
-/// Güncel ayar şeması sürümü (1: Windows bildirimi varsayılanı kapalı).
-pub const SETTINGS_VERSION: u32 = 1;
+/// Güncel ayar şeması sürümü (1: Windows bildirimi kapalı, 2: bildirim sesi + Windows bildirimi varsayılanı kapalı).
+pub const SETTINGS_VERSION: u32 = 2;
 
 fn legacy_version() -> u32 {
     0
@@ -72,6 +70,10 @@ impl Settings {
             return false;
         }
         if self.settings_version < 1 {
+            self.notif_toast = false;
+        }
+        if self.settings_version < 2 {
+            self.notif_sound = false;
             self.notif_toast = false;
         }
         self.settings_version = SETTINGS_VERSION;
@@ -96,13 +98,19 @@ impl Default for Settings {
             beta_updates: false,
             screen_share: true,
             screen_allowed: Vec::new(),
-            camera_enabled: false,
             auto_ecosystem: true,
             language: "system".into(),
             auto_crash_report: true,
             settings_version: SETTINGS_VERSION,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyInfo {
+    pub can_reply: bool,
+    pub choices: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -116,6 +124,7 @@ pub struct Shared {
     pub settings_path: PathBuf,
     pub settings: Mutex<Settings>,
     pub notifications: Mutex<VecDeque<NotificationData>>,
+    pub reply_info: Mutex<HashMap<String, ReplyInfo>>,
     pub icons: Mutex<HashMap<String, String>>,
     pub battery: Mutex<Option<Battery>>,
     pub now_playing: Mutex<Option<NowPlaying>>,
@@ -128,8 +137,6 @@ pub struct Shared {
     pub node: OnceLock<Arc<Node>>,
     /// Uzaktan ekran görüntüleme oturumu.
     pub screen: Mutex<crate::screen_share::ScreenState>,
-    /// Telefon kamerası merkezi (yalnızca Windows 11'de oluşturulur).
-    pub camera: OnceLock<crate::win::camera::Hub>,
 }
 
 impl Shared {
@@ -185,23 +192,25 @@ impl Shared {
     pub fn set_tray_tint(&self, on: bool) {
         let Some(tray) = self.app.tray_by_id("tray") else { return };
         let Some(icon) = self.app.default_window_icon() else { return };
+        if !on {
+            let _ = tray.set_icon(Some(icon.clone()));
+            return;
+        }
         let (w, h) = (icon.width(), icon.height());
         let mut rgba = icon.rgba().to_vec();
-        if on {
-            let r = (w.min(h) as f32 * 0.22).max(3.0);
-            let (cx, cy) = (w as f32 - r - 1.0, h as f32 - r - 1.0);
-            for y in 0..h {
-                for x in 0..w {
-                    let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
-                    let d = (dx * dx + dy * dy).sqrt();
-                    if d <= r + 1.0 {
-                        let i = ((y * w + x) * 4) as usize;
-                        let (c, a): ([u8; 3], u8) = if d <= r - 1.0 { ([0xE3, 0xA9, 0x2B], 255) } else if d <= r { ([0x0A, 0x0A, 0x0B], 255) } else { ([0x0A, 0x0A, 0x0B], 160) };
-                        rgba[i] = c[0];
-                        rgba[i + 1] = c[1];
-                        rgba[i + 2] = c[2];
-                        rgba[i + 3] = a;
-                    }
+        let r = (w.min(h) as f32 * 0.22).max(3.0);
+        let (cx, cy) = (w as f32 - r - 1.0, h as f32 - r - 1.0);
+        for y in 0..h {
+            for x in 0..w {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d <= r + 1.0 {
+                    let i = ((y * w + x) * 4) as usize;
+                    let (c, a): ([u8; 3], u8) = if d <= r - 1.0 { ([0xE3, 0xA9, 0x2B], 255) } else if d <= r { ([0x0A, 0x0A, 0x0B], 255) } else { ([0x0A, 0x0A, 0x0B], 160) };
+                    rgba[i] = c[0];
+                    rgba[i + 1] = c[1];
+                    rgba[i + 2] = c[2];
+                    rgba[i + 3] = a;
                 }
             }
         }
@@ -223,18 +232,8 @@ impl Shared {
                 win::input::key_event(*key, *down);
                 return;
             }
-            Event::CamFrame { pts_us, key, data } => {
-                if let Some(h) = self.camera.get() {
-                    h.push_frame((*pts_us, *key, data.clone()));
-                }
-                return; // video kareleri arayüze gönderilmez
-            }
-            Event::CamState { active, w, h, fps, facing, mirror, rotation } => {
-                if let Some(hub) = self.camera.get()
-                    && let Ok(mut p) = hub.phone.lock()
-                {
-                    *p = crate::win::camera::PhoneCam { active: *active, w: *w, h: *h, fps: *fps, facing: *facing, mirror: *mirror, rotation: *rotation };
-                }
+            Event::CamFrame { .. } | Event::CamState { .. } => {
+                return;
             }
             Event::SuiteCmd { req, app, name, json } => {
                 crate::suite::on_phone_cmd(&self.app, *req, app.clone(), name.clone(), json.clone());
@@ -263,6 +262,7 @@ impl Shared {
                 if *state == ConnState::Connected {
                     // Telefon güncel listeyi baştan gönderecek: bağlantı yokken kalkanlar burada kalmasın.
                     lk(&self.notifications).clear();
+                    lk(&self.reply_info).clear();
                     *lk(&self.quiet_until) = Some(Instant::now() + Duration::from_secs(5));
                 } else {
                     *lk(&self.battery) = None;
@@ -319,6 +319,20 @@ impl Shared {
             }
             Event::NotificationRemoved { key } => {
                 lk(&self.notifications).retain(|x| &x.key != key);
+                lk(&self.reply_info).remove(key);
+            }
+            Event::NotificationExt { key, can_reply, choices } => {
+                let mut map = lk(&self.reply_info);
+                if *can_reply {
+                    if !map.contains_key(key.as_str()) && map.len() >= MAX_NOTIFS
+                        && let Some(old) = map.keys().next().cloned()
+                    {
+                        map.remove(&old);
+                    }
+                    map.insert(key.clone(), ReplyInfo { can_reply: true, choices: choices.iter().take(3).cloned().collect() });
+                } else {
+                    map.remove(key.as_str());
+                }
             }
             Event::AppIcon { package, png } => {
                 // Boyut ve PNG imzası sınırı: sınırsız bellek/önbellek büyümesini ve geçersiz veriyi önler.
@@ -384,10 +398,10 @@ mod tests {
 
     #[test]
     fn eski_dosya_bir_kez_goc_eder() {
-        // Eski sürüm: notifToast true, sürüm alanı yok.
-        let mut s: Settings = serde_json::from_str(r#"{"notifToast":true,"clipboardSync":false}"#).unwrap();
+        // Eski sürüm: notifToast & notifSound true, sürüm alanı yok.
+        let mut s: Settings = serde_json::from_str(r#"{"notifToast":true,"notifSound":true,"clipboardSync":false}"#).unwrap();
         assert_eq!(s.settings_version, 0);
-        assert!(s.notif_toast);
+        assert!(s.notif_toast && s.notif_sound);
         assert!(s.migrate());
         assert!(!s.notif_toast);
         assert!(!s.clipboard_sync);

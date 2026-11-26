@@ -1,6 +1,6 @@
 [package]
 name = "kopru-desktop"
-version = "0.3.2"
+version = "0.3.4"
 description = "T-Bridge masaüstü"
 edition = "2024"
 rust-version = "1.90"
@@ -11,12 +11,9 @@ crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.7.4", features = [] }
-sha2 = "0.10"
 
 [dependencies]
-sha2 = "0.10"
 kopru-core = { path = "../../core" }
-kopru-camring = { path = "../../camera/ring" }
 tlink = { path = "../../tlink" }
 tauri = { version = "2.12.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"

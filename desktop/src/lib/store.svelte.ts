@@ -20,9 +20,9 @@ const empty: Snapshot = {
   settings: {
     clipboardSync: true,
     notifMirror: true,
-    notifSound: true,
+    notifSound: false,
     notifToast: false,
-    settingsVersion: 1,
+    settingsVersion: 2,
     transferToast: true,
     lowBatteryWarn: true,
     autostart: true,
@@ -33,7 +33,6 @@ const empty: Snapshot = {
     betaUpdates: false,
     screenShare: true,
     screenAllowed: [],
-    cameraEnabled: false,
     autoEcosystem: true,
     language: 'system',
     autoCrashReport: true,
@@ -87,6 +86,7 @@ export function flash(msg: string) {
 
 export async function refresh() {
   app.s = await invoke<Snapshot>('snapshot')
+  app.reply = { ...(app.s.replyInfo ?? {}) }
   applyTheme(app.s.settings.theme)
   await syncLang()
   app.ready = true

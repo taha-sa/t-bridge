@@ -13,13 +13,12 @@
   import Files from './lib/Files.svelte'
   import Notifs from './lib/Notifs.svelte'
   import Remote from './lib/Remote.svelte'
-  import Camera from './lib/Camera.svelte'
   import Suite from './lib/Suite.svelte'
   import SettingsPage from './lib/SettingsPage.svelte'
   import ReportDialog, { type Preview } from './lib/ReportDialog.svelte'
   import { invoke } from '@tauri-apps/api/core'
 
-  type Tab = 'home' | 'files' | 'notifs' | 'remote' | 'camera' | 'suite' | 'settings'
+  type Tab = 'home' | 'files' | 'notifs' | 'remote' | 'suite' | 'settings'
   let tab = $state<Tab>('home')
   let dragging = $state(false)
   let mainEl = $state<HTMLElement>()
@@ -37,7 +36,6 @@
     { id: 'files', icon: 'files' },
     { id: 'notifs', icon: 'bell' },
     { id: 'remote', icon: 'remote' },
-    { id: 'camera', icon: 'video' },
     { id: 'suite', icon: 'sparkle' },
     { id: 'settings', icon: 'gear' },
   ]
@@ -138,8 +136,6 @@
               <Notifs />
             {:else if tab === 'remote'}
               <Remote />
-            {:else if tab === 'camera'}
-              <Camera />
             {:else if tab === 'suite'}
               <Suite />
             {:else}

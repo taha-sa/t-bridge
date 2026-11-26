@@ -73,7 +73,23 @@ pub fn release_all_keys() {
 fn is_extended(vk: VIRTUAL_KEY) -> bool {
     matches!(
         vk,
-        VK_UP | VK_DOWN | VK_LEFT | VK_RIGHT | VK_HOME | VK_END | VK_PRIOR | VK_NEXT | VK_INSERT | VK_DELETE
+        VK_UP
+            | VK_DOWN
+            | VK_LEFT
+            | VK_RIGHT
+            | VK_HOME
+            | VK_END
+            | VK_PRIOR
+            | VK_NEXT
+            | VK_INSERT
+            | VK_DELETE
+            | VK_MEDIA_PLAY_PAUSE
+            | VK_MEDIA_NEXT_TRACK
+            | VK_MEDIA_PREV_TRACK
+            | VK_MEDIA_STOP
+            | VK_VOLUME_UP
+            | VK_VOLUME_DOWN
+            | VK_VOLUME_MUTE
     )
 }
 

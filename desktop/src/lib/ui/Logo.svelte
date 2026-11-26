@@ -1,20 +1,18 @@
 <script lang="ts">
-  // T-Bridge işareti: T'nin üst çizgisi köprü kemeri (assets/logo.svg ile aynı geometri).
+  // T-Bridge asma köprü logosu (t-suite/design/icons/t-bridge.svg ile birebir geometri).
   let { size = 32 }: { size?: number } = $props()
   const id = `lg${Math.random().toString(36).slice(2, 8)}`
 </script>
 
-<svg width={size} height={size} viewBox="0 0 512 512" aria-label="T-Bridge">
+<svg width={size} height={size} viewBox="0 0 1024 1024" aria-label="T-Bridge">
   <defs>
-    <linearGradient {id} gradientUnits="userSpaceOnUse" x1="110" y1="90" x2="400" y2="430">
-      <stop offset="0" stop-color="#F7CF5A" />
-      <stop offset="0.55" stop-color="#D99A0B" />
-      <stop offset="1" stop-color="#9C6400" />
+    <linearGradient {id} x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F7C948" />
+      <stop offset="100%" stop-color="#9A6700" />
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="116" fill="#0d0c0a" />
-  <rect x="5" y="5" width="502" height="502" rx="111" fill="none" stroke="url(#{id})" stroke-opacity="0.4" stroke-width="6" />
-  <path d="M100 222 Q256 92 412 222" fill="none" stroke="url(#{id})" stroke-width="46" stroke-linecap="round" />
-  <path d="M256 168 V404" stroke="url(#{id})" stroke-width="54" stroke-linecap="round" />
-  <path d="M120 226 V266 M392 226 V266" stroke="url(#{id})" stroke-width="22" stroke-linecap="round" opacity="0.85" />
+  <rect width="1024" height="1024" rx="225.28" ry="225.28" fill="url(#{id})" />
+  <path d="M 112 112 H 176 M 144 112 V 168" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="20" stroke-linecap="round" fill="none" />
+  <path d="M 328 720 V 336 M 696 720 V 336 M 208 640 H 816 M 208 392 Q 512 704 816 392" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  <path d="M 448 538 V 640 M 576 538 V 640" stroke="#FFFFFF" stroke-width="40" stroke-linecap="round" fill="none" />
 </svg>

@@ -61,7 +61,6 @@ export interface Settings {
   betaUpdates: boolean
   screenShare: boolean
   screenAllowed: string[]
-  cameraEnabled: boolean
   autoEcosystem: boolean
   language: 'system' | 'tr' | 'en' | 'de'
   autoCrashReport: boolean
@@ -87,6 +86,7 @@ export interface Snapshot {
   peers: PeerInfo[]
   transfers: TransferInfo[]
   notifications: NotificationData[]
+  replyInfo?: Record<string, { canReply: boolean; choices: string[] }>
   icons: Record<string, string>
   battery: Battery | null
   nowPlaying: NowPlaying | null

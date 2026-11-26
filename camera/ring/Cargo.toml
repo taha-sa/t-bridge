@@ -1,8 +1,0 @@
-[package]
-name = "kopru-camring"
-version = "0.1.0"
-edition = "2024"
-description = "T-Bridge sanal kamera: NV12 paylasimli bellek halkasi (yazici: uygulama, okuyucu: Frame Server kaynagi)"
-
-[lib]
-name = "kopru_camring"

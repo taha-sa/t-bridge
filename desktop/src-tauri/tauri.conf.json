@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "T-Bridge",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "identifier": "app.kopru.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build && node scripts/build-vcam.mjs"
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [],
@@ -39,10 +39,7 @@
         "installerHooks": "./installer-hooks.nsh"
       }
     },
-    "createUpdaterArtifacts": true,
-    "resources": {
-      "camera/tbridge_vcam.dll": "camera/tbridge_vcam.dll"
-    }
+    "createUpdaterArtifacts": true
   },
   "mainBinaryName": "t-bridge",
   "plugins": {
