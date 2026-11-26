@@ -60,10 +60,9 @@ jobs:
           java-version: 21
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
-      - name: NDK
-        shell: bash
-        run: sdkmanager --install "ndk;30.0.16248370"
+          packages: |
+            platform-tools
+            ndk;30.0.16248370
       - name: cargo-ndk
         run: cargo install cargo-ndk --locked
       - uses: gradle/actions/setup-gradle@v4
