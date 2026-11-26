@@ -17,7 +17,7 @@ import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
-import android.util.Log
+import app.kopru.AppLog as Log
 import android.util.Size
 import android.view.OrientationEventListener
 import android.view.Surface
@@ -68,6 +68,7 @@ class CameraService : Service(), LifecycleOwner {
     private var enc: Encoder? = null
     private var preview: Preview? = null
     private var orient: OrientationEventListener? = null
+    private var generation = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -89,7 +90,17 @@ class CameraService : Service(), LifecycleOwner {
             .setOngoing(true)
             .setContentIntent(open)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA) else startForeground(ID, n)
+        try {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA) else startForeground(ID, n)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "kamera ön plan izni yok: $e")
+            fail(R.string.cam_err_permission)
+            return START_NOT_STICKY
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "kamera ön plan hizmeti başlatılamadı: $e")
+            fail(R.string.cam_err_open)
+            return START_NOT_STICKY
+        }
         startCamera()
         return START_NOT_STICKY
     }
@@ -113,8 +124,10 @@ class CameraService : Service(), LifecycleOwner {
             fail(R.string.cam_err_permission)
             return
         }
+        val session = ++generation
         val fut = ProcessCameraProvider.getInstance(this)
         fut.addListener({
+            if (session != generation) return@addListener
             try {
                 val p = fut.get()
                 provider = p
@@ -134,18 +147,30 @@ class CameraService : Service(), LifecycleOwner {
                     val size = req.resolution
                     val fps = 30
                     val kbps = if (size.height >= 1000) 6000 else 3000
-                    val e = Encoder(size.width, size.height, fps, kbps)
+                    if (session != generation) {
+                        req.willNotProvideSurface()
+                        return@setSurfaceProvider
+                    }
+                    val e = try {
+                        Encoder(size.width, size.height, fps, kbps)
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "kamera kodlayıcısı başlatılamadı: $ex")
+                        req.willNotProvideSurface()
+                        fail(R.string.cam_err_open)
+                        return@setSurfaceProvider
+                    }
                     enc = e
                     req.provideSurface(e.surface, exec) { e.release() }
                     // Cihaz yönüne göre dik görünmesi için gereken dönüş; PC döndürür (kodlayıcı boyutu değişmez).
                     req.setTransformationInfoListener(exec) { info ->
+                        if (session != generation) return@setTransformationInfoListener
                         _ui.update { it.copy(rotation = info.rotationDegrees) }
                         publishState(size.width, size.height)
                     }
                     publishState(size.width, size.height)
                 }
                 val sel = if (ui.front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
-                p.unbindAll()
+                this.preview?.let { runCatching { p.unbind(it) } }
                 val cam = p.bindToLifecycle(this, sel, preview)
                 camera = cam
                 val ev = cam.cameraInfo.exposureState
@@ -181,9 +206,11 @@ class CameraService : Service(), LifecycleOwner {
     }
 
     private fun stopCamera() {
+        generation++
         orient?.disable()
         orient = null
-        try { provider?.unbindAll() } catch (_: Exception) {}
+        preview?.let { try { provider?.unbind(it) } catch (_: Exception) {} }
+        preview = null
         camera = null
         enc?.release()
         enc = null
@@ -216,31 +243,59 @@ class CameraService : Service(), LifecycleOwner {
         private val codec: MediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         val surface: Surface
         @Volatile private var running = true
+        private val codecLock = Any()
         private var csd: ByteArray = ByteArray(0)
         private val th: Thread
 
         init {
-            val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, kbps * 1000)
-                setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2) // GOP ~2 sn
-                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-                setInteger(MediaFormat.KEY_PRIORITY, 0)
-                if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            var createdSurface: Surface? = null
+            var lastErr: Exception? = null
+            for (full in listOf(true, false)) {
+                val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    setInteger(MediaFormat.KEY_BIT_RATE, kbps * 1000)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2) // GOP ~2 sn
+                    if (full) {
+                        setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                        setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+                        setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    }
+                }
+                try {
+                    codec.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    val s = codec.createInputSurface()
+                    try {
+                        codec.start()
+                        createdSurface = s
+                        lastErr = null
+                        break
+                    } catch (e: Exception) {
+                        s.release()
+                        throw e
+                    }
+                } catch (e: Exception) {
+                    lastErr = e
+                    runCatching { codec.reset() }
+                }
             }
-            codec.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            surface = codec.createInputSurface()
-            codec.start()
+            if (createdSurface == null) {
+                runCatching { codec.release() }
+                throw lastErr ?: IllegalStateException("encoder init failed")
+            }
+            surface = createdSurface
             th = Thread({ drain() }, "cam-encode")
             th.start()
         }
 
         fun requestKey() {
-            try {
-                codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) })
-            } catch (_: Exception) {}
+            synchronized(codecLock) {
+                if (!running) return
+                try {
+                    codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) })
+                } catch (_: Exception) {}
+            }
         }
 
         private fun adapt(backlogMs: Long) {
@@ -252,7 +307,10 @@ class CameraService : Service(), LifecycleOwner {
             }.coerceAtMost(target)
             if (kotlin.math.abs(next - kbps) * 20 > kbps) {
                 kbps = next
-                try { codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, kbps * 1000) }) } catch (_: Exception) {}
+                synchronized(codecLock) {
+                    if (!running) return
+                    try { codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, kbps * 1000) }) } catch (_: Exception) {}
+                }
             }
         }
 
@@ -290,11 +348,17 @@ class CameraService : Service(), LifecycleOwner {
             }
         }
 
-        fun release() {
+        @Synchronized fun release() {
+            if (!running) return
             running = false
-            try { codec.stop() } catch (_: Exception) {}
-            try { codec.release() } catch (_: Exception) {}
-            try { surface.release() } catch (_: Exception) {}
+            if (Thread.currentThread() !== th) {
+                runCatching { th.join(500) }
+            }
+            synchronized(codecLock) {
+                try { codec.stop() } catch (_: Exception) {}
+                try { codec.release() } catch (_: Exception) {}
+                try { surface.release() } catch (_: Exception) {}
+            }
         }
     }
 
@@ -309,9 +373,22 @@ class CameraService : Service(), LifecycleOwner {
 
         fun supported(): Boolean = Core.node?.peerSupportsCamera() == true
 
+        fun permissionDenied() {
+            _ui.update { it.copy(error = R.string.cam_err_permission) }
+        }
+
         fun start(ctx: Context) {
             if (instance != null) return
-            ctx.startForegroundService(Intent(ctx, CameraService::class.java))
+            try {
+                _ui.update { it.copy(error = null) }
+                ctx.startForegroundService(Intent(ctx, CameraService::class.java))
+            } catch (e: SecurityException) {
+                Log.w(TAG, "kamera hizmeti izni yok: $e")
+                _ui.update { it.copy(error = R.string.cam_err_permission) }
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "kamera hizmeti başlatılamadı: $e")
+                _ui.update { it.copy(error = R.string.cam_err_open) }
+            }
         }
 
         fun stop(ctx: Context) {

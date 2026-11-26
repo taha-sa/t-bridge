@@ -1,5 +1,5 @@
 name: Release
-# v1.2.3 -> kararlı; v1.2.3-beta.1 -> ön sürüm (yalnızca elle indirme; güncelleyiciler latest.json/android.json'u izler).
+# v1.2.3 -> stable; v1.2.3-beta.1 -> opt-in preview with rolling beta feed assets.
 on:
   push:
     tags:
@@ -30,6 +30,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: NDK
         shell: bash
         run: sdkmanager --install "ndk;30.0.16248370"
@@ -50,7 +52,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/kopru.keystore
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 secret is empty" >&2
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > android/kopru.keystore
+          test -s android/kopru.keystore
           {
             echo "storeFile=kopru.keystore"
             echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
@@ -62,16 +69,18 @@ jobs:
         shell: bash
         run: |
           git fetch --tags --force --depth=1 origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" || true
-          n="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | head -c 4000)"
+          n="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")"
           [ -n "$n" ] || n="T-Bridge ${GITHUB_REF_NAME#v}"
+          delim="NOTES_EOF_$(date +%s)_$$"
           {
-            echo 'text<<NOTES_EOF'
-            echo "$n"
-            echo 'NOTES_EOF'
+            echo "text<<${delim}"
+            printf '%s\n' "$n"
+            echo "${delim}"
           } >> "$GITHUB_OUTPUT"
       - name: Build, sign and publish
         shell: bash
         env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.16248370
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}

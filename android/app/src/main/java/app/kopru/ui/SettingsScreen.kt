@@ -162,6 +162,7 @@ private fun UpdateCard() {
     val ctx = LocalContext.current
     val st by Updater.state.collectAsStateWithLifecycle()
     var auto by remember { mutableStateOf(Updater.auto) }
+    var beta by remember { mutableStateOf(Updater.beta) }
     var tick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
     @Suppress("UNUSED_EXPRESSION") tick
@@ -226,6 +227,17 @@ private fun UpdateCard() {
             TbSwitch(auto) {
                 auto = it
                 Updater.auto = it
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.set_beta), color = c.text, style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.set_beta_hint), color = c.muted, style = MaterialTheme.typography.bodySmall)
+            }
+            Spacer(Modifier.width(10.dp))
+            TbSwitch(beta) {
+                Updater.beta = it
+                beta = Updater.beta
             }
         }
     }

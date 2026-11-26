@@ -164,6 +164,7 @@ impl Server {
 }
 
 fn create_pipe(name: &str, first: bool, sddl: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
     use windows::Win32::Security::{Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1}, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
     use windows::core::PCWSTR;
     let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
@@ -174,7 +175,9 @@ fn create_pipe(name: &str, first: bool, sddl: &str) -> std::io::Result<tokio::ne
         let mut sa = SECURITY_ATTRIBUTES { nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: sd.0, bInheritHandle: false.into() };
         let mut opts = ServerOptions::new();
         opts.first_pipe_instance(first).reject_remote_clients(true);
-        opts.create_with_security_attributes_raw(name, &mut sa as *mut _ as *mut std::ffi::c_void)
+        let res = opts.create_with_security_attributes_raw(name, &mut sa as *mut _ as *mut std::ffi::c_void);
+        let _ = LocalFree(Some(HLOCAL(sd.0)));
+        res
     }
 }
 

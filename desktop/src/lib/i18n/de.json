@@ -294,5 +294,7 @@
   "title.closeTitle": "Im Infobereich minimieren",
   "title.max": "Maximieren",
   "title.min": "Minimieren",
-  "unit.perSec": "/s"
+  "unit.perSec": "/s",
+  "set.betaUpdates": "Beta-Updates",
+  "set.betaUpdatesHint": "Vorschauversionen erhalten. Diese können weniger stabil sein. Deaktivieren Sie die Option, um künftige stabile Versionen zu erhalten."
 }

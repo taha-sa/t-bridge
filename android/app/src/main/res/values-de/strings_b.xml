@@ -120,4 +120,16 @@
     <string name="cam_notif_text">Die Telefonkamera wird an den Computer übertragen</string>
     <string name="cam_err_permission">Die Kamera-Berechtigung wurde nicht erteilt. Erlauben Sie sie in den App-Einstellungen und versuchen Sie es erneut.</string>
     <string name="cam_err_open">Die Kamera konnte nicht geöffnet werden. Schließen Sie andere Apps, die sie verwenden, und versuchen Sie es erneut.</string>
+    <string name="scr_stop_short">Stoppen</string>
+    <string name="scr_stop_confirm">Bildschirmfreigabe beenden?</string>
+    <string name="scr_stop_confirm_hint">Die Verbindung zum Computer bleibt bestehen.</string>
+    <string name="cam_group_camera">Kamera</string>
+    <string name="cam_group_quality">Auflösung</string>
+    <string name="cam_group_image">Bildeinstellungen</string>
+    <string name="remote_help">Touchpad-Hilfe</string>
+    <string name="remote_close">Schließen</string>
+    <string name="eco_queued">Für die Übertragung vorgemerkt: %1$s</string>
+    <string name="suite_download_unavailable">Dieser Download ist nicht mehr verfügbar. Schließen Sie ihn erneut ab und versuchen Sie es noch einmal.</string>
+    <string name="suite_download_control_failed">Der Downloadstatus hat sich geändert oder die Aktion konnte nicht gestartet werden.</string>
+    <string name="eco_action_waiting">Bitte warten…</string>
 </resources>

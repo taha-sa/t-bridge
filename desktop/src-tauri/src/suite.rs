@@ -149,7 +149,7 @@ impl AutoState {
                 continue;
             }
             // Argümansız başlatma pencere açıp odağı çalar: bilinmeyen uygulamalar otomatik açılmaz.
-            if c.exe.is_none() || c.args.is_empty() {
+            if matches!(c.id.as_str(), "t-desktree" | "t-ramcash") || c.exe.is_none() || c.args.is_empty() {
                 continue;
             }
             if let Some((n, at)) = self.tries.get(&c.id) {
@@ -258,8 +258,12 @@ impl Hub {
                 let id = m.id.clone();
                 let pf = forward_prefixes(&m);
                 let e = g.entry(id.clone()).or_insert_with(|| Entry { m: m.clone(), running, update: None, client: None, prefixes: pf.clone() });
+                let ver_changed = e.m.version != m.version;
                 e.m = m;
                 e.running = running;
+                if ver_changed {
+                    e.update = None;
+                }
                 if e.prefixes != pf {
                     e.prefixes = pf; // manifest önekleri değişti: istemci yeni aboneliklerle yeniden açılır
                     e.client = None;
@@ -268,7 +272,6 @@ impl Hub {
                     e.client = Some(ReconnectingClient::spawn(&id, e.prefixes.clone(), self.ev_tx.clone(), Duration::from_secs(2)));
                 } else if !running {
                     e.client = None;
-                    e.update = e.update.take().filter(|_| false);
                 }
             }
         }
@@ -300,6 +303,9 @@ impl Hub {
             en.update = Some(v.to_string());
         }
         if let Some(n) = shared(&self.app).node() {
+            if n.state() == ConnState::Connected {
+                RECENT_DOWNLOADS.lock().unwrap().record(&app, &name, &data);
+            }
             n.send_suite_event(app, name, data.to_string());
         }
     }
@@ -430,6 +436,12 @@ impl Hub {
                 PENDING_PRESENT.lock().unwrap().add(name, Instant::now());
                 Ok(json!({}))
             }
+            "download.send" => {
+                let id = data.as_ref().and_then(|d| d.get("id")).and_then(Value::as_str).ok_or("id gerekli")?;
+                let connected = sh.node().is_some_and(|n| n.state() == ConnState::Connected);
+                let path = resolve_download_request(&RECENT_DOWNLOADS.lock().unwrap(), id, connected)?;
+                self.local_cmd("file.send", Some(json!({ "path": path })))
+            }
             "file.send" => {
                 let path = data.as_ref().and_then(|d| d.get("path")).and_then(Value::as_str).ok_or("path gerekli")?;
                 let open = data.as_ref().and_then(|d| d.get("open")).and_then(Value::as_bool).unwrap_or(false);
@@ -446,6 +458,7 @@ impl Hub {
                     n.send_suite_event("t-bridge".into(), "file.open".into(), json!({ "name": name }).to_string());
                 }
                 let ids = n.send_paths(vec![path.to_string()]).map_err(|e| e.to_string())?;
+                if ids.is_empty() { return Err("transfer_not_accepted".into()); }
                 Ok(json!({ "ids": ids }))
             }
             "phone.status" => {
@@ -575,6 +588,7 @@ pub fn shutdown() {
 
 /// Telefon bağlantı durumu değişti: olayı yayınla, listeyi gönder.
 pub fn on_phone_state(connected: bool) {
+    RECENT_DOWNLOADS.lock().unwrap().0.clear();
     let Some(h) = HUB.get() else { return };
     h.server.publish(if connected { "phone.connected" } else { "phone.disconnected" }, Some(json!({})));
     if connected {
@@ -687,9 +701,46 @@ pub fn on_incoming_done(name: &str, path: Option<&str>, recv_dir: &std::path::Pa
     });
 }
 
+/// Only completed downloads observed in this phone session may be requested by id.
+/// Store file identity at completion so deleted, replaced or modified files are rejected.
+#[derive(Default)]
+struct RecentDownloads(Vec<(String, std::path::PathBuf, u64, std::time::SystemTime)>);
+
+impl RecentDownloads {
+    fn record(&mut self, app: &str, name: &str, data: &Value) {
+        if app != "t-downloader" || name != "download.completed" { return; }
+        let (Some(id), Some(path)) = (data.get("id").and_then(Value::as_str), data.get("path").and_then(Value::as_str)) else { return };
+        if id.is_empty() || id.len() > 128 { return; }
+        // Invalidate old entries even when the new completion cannot be inspected.
+        self.0.retain(|(old, _, _, _)| old != id);
+        let Ok(canonical) = std::fs::canonicalize(path) else { return };
+        let Ok(meta) = std::fs::metadata(&canonical) else { return };
+        if !meta.is_file() { return; }
+        let Ok(modified) = meta.modified() else { return };
+        self.0.insert(0, (id.to_string(), canonical, meta.len(), modified));
+        self.0.truncate(10);
+    }
+
+    fn resolve(&self, id: &str) -> Option<&std::path::Path> {
+        let (_, path, len, modified) = self.0.iter().find(|(key, _, _, _)| key == id)?;
+        let canonical = std::fs::canonicalize(path).ok()?;
+        if canonical != *path { return None; }
+        let meta = std::fs::metadata(&canonical).ok()?;
+        if !meta.is_file() || meta.len() != *len || meta.modified().ok()? != *modified { return None; }
+        Some(path)
+    }
+}
+
+fn resolve_download_request(recent: &RecentDownloads, id: &str, connected: bool) -> Result<String, String> {
+    if !connected { return Err("phone_offline".into()); }
+    recent.resolve(id).map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| "download_unavailable".into())
+}
+
+static RECENT_DOWNLOADS: Mutex<RecentDownloads> = Mutex::new(RecentDownloads(Vec::new()));
+
 /// Telefon kaynaklı komut izin listesi. `file.send` (ve listede olmayan her şey) telefondan çağrılamaz.
 pub fn phone_cmd_allowed(app_id: &str, name: &str) -> bool {
-    if matches!(name, "file.present" | "suite.update" | "suite.check") {
+    if matches!(name, "file.present" | "download.send" | "suite.update" | "suite.check") {
         return app_id == "t-bridge";
     }
     matches!(
@@ -764,12 +815,39 @@ mod tests {
         assert!(phone_cmd_allowed("t-downloader", "download.add"));
         assert!(phone_cmd_allowed("t-ramcash", "ram.clean"));
         assert!(phone_cmd_allowed("t-bridge", "file.present"));
+        assert!(phone_cmd_allowed("t-bridge", "download.send"));
+        assert!(!phone_cmd_allowed("t-downloader", "download.send"));
         assert!(phone_cmd_allowed("t-bridge", "suite.update"));
         assert!(!phone_cmd_allowed("t-bridge", "file.send"));
         assert!(!phone_cmd_allowed("t-downloader", "file.send"));
         assert!(!phone_cmd_allowed("t-ramcash", "file.present"));
         assert!(!phone_cmd_allowed("t-bridge", "phone.status"));
         assert!(!phone_cmd_allowed("t-x", "anything"));
+    }
+
+    #[test]
+    fn only_current_completed_downloads_can_be_resolved() {
+        let dir = std::env::temp_dir().join(format!("kopru_recent_downloads_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("completed.txt");
+        std::fs::write(&path, b"first").unwrap();
+        let event = json!({"id": "download-1", "path": path});
+        let mut recent = RecentDownloads::default();
+        recent.record("other-app", "download.completed", &event);
+        recent.record("t-downloader", "download.progress", &event);
+        assert!(recent.resolve("download-1").is_none());
+        recent.record("t-downloader", "download.completed", &event);
+        assert!(resolve_download_request(&recent, "download-1", true).is_ok());
+        assert!(resolve_download_request(&recent, "download-1", false).is_err());
+        assert!(resolve_download_request(&recent, "unknown", true).is_err());
+        std::fs::write(&path, b"changed length").unwrap();
+        assert!(recent.resolve("download-1").is_none());
+        recent.record("t-downloader", "download.completed", &event);
+        std::fs::remove_file(&path).unwrap();
+        assert!(recent.resolve("download-1").is_none());
+        recent.0.clear();
+        assert!(recent.resolve("download-1").is_none());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -846,6 +924,17 @@ mod tests {
         let now = Instant::now();
         let got = st.pick(&[cand("a", true, false, &["--tray"]), cand("b", false, false, &["--x"]), cand("c", true, true, &["--x"]), cand("d", true, false, &[])], now);
         assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
+    }
+
+    #[test]
+    fn auto_start_skips_manual_tools_but_keeps_downloader() {
+        let mut st = AutoState::default();
+        let got = st.pick(&[
+            cand("t-desktree", true, false, &["--background"]),
+            cand("t-ramcash", true, false, &["--tray"]),
+            cand("t-downloader", true, false, &["--background"]),
+        ], Instant::now());
+        assert_eq!(got.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["t-downloader"]);
     }
 
     #[test]

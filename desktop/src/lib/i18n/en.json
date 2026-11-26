@@ -294,5 +294,7 @@
   "title.closeTitle": "Minimize to tray",
   "title.max": "Maximize",
   "title.min": "Minimize",
-  "unit.perSec": "/s"
+  "unit.perSec": "/s",
+  "set.betaUpdates": "Beta updates",
+  "set.betaUpdatesHint": "Receive preview releases. They may be less stable. Turn off to receive future stable releases."
 }

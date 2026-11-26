@@ -26,3 +26,6 @@ Bir çökme veya hata meydana geldiğinde otomatik rapor gönderilmez. Kullanıc
 ### 6. Çocukların Gizliliği ve İletişim
 T-Suite 13 yaşın (veya yargı bölgesine göre ilgili yaş sınırının) altındaki çocuklara yönelik değildir. Soru ve bildirimleriniz için iletişim adresi:  
 GitHub Issues / Discussions: [https://github.com/taha-sa](https://github.com/taha-sa)
+
+
+Android günlükleri uygulamanın özel dosya alanında sınırlı ve dönen dosyalar halinde saklanır. Yazılmadan önce kişisel bilgi maskelemesi uygulanır; bu işlem tüm gizli bilgilerin kaldırılacağını garanti etmez. Hata raporu yalnızca uygulamanın en fazla 200 yerel günlük satırını kullanır ve kullanıcı incelemesinden sonra gönderilir. Uygulama verilerini temizlemek günlükleri kaldırır.

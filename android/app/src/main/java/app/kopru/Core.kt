@@ -7,7 +7,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import app.kopru.AppLog as Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

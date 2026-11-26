@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.Switch
@@ -185,8 +186,12 @@ private fun OffState(name: String, id: String, st: AppState) {
 @Composable
 private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState) {
     val c = tb
-    val sendingTpl = stringResource(R.string.eco_sending, "%s")
+    val sendingTpl = stringResource(R.string.eco_queued, "%s")
     val sendFailed = stringResource(R.string.eco_send_failed)
+    val controlFailed = stringResource(R.string.suite_download_control_failed)
+    val waiting = stringResource(R.string.eco_action_waiting)
+    val pending = remember { mutableStateMapOf<String, Boolean>() }
+    val handler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     TbCard {
         SectionTitle(stringResource(R.string.eco_downloads))
         Spacer8()
@@ -203,7 +208,12 @@ private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("%${d.pct.toInt()}" + (if (d.etaSec >= 0) " · ${eta(d.etaSec)}" else ""), Modifier.weight(1f), color = c.faint, style = MaterialTheme.typography.labelSmall)
-                    Chip(if (d.paused) stringResource(R.string.eco_resume) else stringResource(R.string.eco_pause)) { Suite.send("t-downloader", if (d.paused) "download.resume" else "download.pause", """{"id":"${d.id}"}""") }
+                    Chip(if (pending[d.id] == true) waiting else if (d.paused) stringResource(R.string.eco_resume) else stringResource(R.string.eco_pause), enabled = pending[d.id] != true) {
+                        pending[d.id] = true
+                        Suite.send("t-downloader", if (d.paused) "download.resume" else "download.pause", org.json.JSONObject().put("id", d.id).toString()) { ok, _, error ->
+                            handler.post { pending.remove(d.id); if (!ok) Suite.toast(error ?: controlFailed) }
+                        }
+                    }
                 }
             }
         }
@@ -213,7 +223,13 @@ private fun DownloadsCard(active: List<DlItem>, done: List<DlDone>, st: AppState
             done.forEach { d ->
                 Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(d.name, Modifier.weight(1f), color = c.text, maxLines = 1, style = MaterialTheme.typography.bodySmall)
-                    Chip(stringResource(R.string.eco_get_on_phone)) { Suite.send("t-bridge", "file.send", org.json.JSONObject().put("path", d.path).toString()) { ok, _, e -> Suite.toast(if (ok) sendingTpl.format(d.name) else (e ?: sendFailed)) } }
+                    Chip(if (pending[d.id] == true) waiting else stringResource(R.string.eco_get_on_phone), enabled = pending[d.id] != true) {
+                        pending[d.id] = true
+                        Suite.send("t-bridge", "download.send", org.json.JSONObject().put("id", d.id).toString()) { ok, result, e ->
+                            val accepted = ok && (result?.optJSONArray("ids")?.length() ?: 0) > 0
+                            handler.post { pending.remove(d.id); Suite.toast(if (accepted) sendingTpl.format(d.name) else (e ?: sendFailed)) }
+                        }
+                    }
                 }
             }
         }
@@ -318,7 +334,7 @@ private fun AppsCard(s: app.kopru.SuiteUi, viewer: app.kopru.ViewerState) {
         }
         val n = s.apps.count { it.updateAvailable != null }
         Spacer8()
-        TbButton(if (n > 0) stringResource(R.string.eco_update_all_n, n) else stringResource(R.string.eco_update_all), { Suite.updateAll() }, Modifier.fillMaxWidth(), enabled = n > 0)
+        TbButton(if (s.updating) stringResource(R.string.eco_action_waiting) else if (n > 0) stringResource(R.string.eco_update_all_n, n) else stringResource(R.string.eco_update_all), { Suite.updateAll() }, Modifier.fillMaxWidth(), enabled = n > 0 && !s.updating)
     }
 }
 

@@ -265,7 +265,7 @@ pub fn camera_status(s: S<'_>) -> win::camera::CameraStatus {
     let phone = hub.and_then(|h| h.phone.lock().ok().map(|p| *p)).unwrap_or_default();
     win::camera::CameraStatus {
         supported,
-        installed: supported && win::camera::is_installed_for_me(),
+        installed: supported && win::camera::is_registered_for_me(),
         update_needed: supported && win::camera::update_needed(),
         running: hub.is_some_and(|h| h.running.load(std::sync::atomic::Ordering::SeqCst)),
         phone_supports: s.node().is_some_and(|n| n.peer_supports_camera()),

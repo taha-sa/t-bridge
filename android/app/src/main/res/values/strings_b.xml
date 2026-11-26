@@ -120,4 +120,16 @@
     <string name="cam_notif_text">Your phone camera is being streamed to your computer</string>
     <string name="cam_err_permission">Camera permission was not granted. Allow it in the app settings and try again.</string>
     <string name="cam_err_open">Could not open the camera. Close other apps that use it and try again.</string>
+    <string name="scr_stop_short">Stop</string>
+    <string name="scr_stop_confirm">Stop screen sharing?</string>
+    <string name="scr_stop_confirm_hint">The computer connection will stay active.</string>
+    <string name="cam_group_camera">Camera</string>
+    <string name="cam_group_quality">Resolution</string>
+    <string name="cam_group_image">Image adjustments</string>
+    <string name="remote_help">Touchpad help</string>
+    <string name="remote_close">Close</string>
+    <string name="eco_queued">Queued for transfer: %1$s</string>
+    <string name="suite_download_unavailable">This download is no longer available. Complete it again and retry.</string>
+    <string name="suite_download_control_failed">The download state changed or the action could not be started.</string>
+    <string name="eco_action_waiting">Waiting…</string>
 </resources>

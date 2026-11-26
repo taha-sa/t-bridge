@@ -52,14 +52,17 @@ class KopruService : Service() {
          * vererek izni servisin ömrüne bağlarız: bilgisayar sonradan bağlansa da kuyruktaki dosya okunabilir.
          */
         fun startHolding(ctx: Context, uris: List<android.net.Uri>) {
-            if (uris.isEmpty()) return start(ctx)
+            if (uris.isEmpty()) {
+                runCatching { start(ctx) }
+                return
+            }
             val clip = android.content.ClipData.newRawUri("kopru", uris[0])
             uris.drop(1).forEach { clip.addItem(android.content.ClipData.Item(it)) }
             val i = Intent(ctx, KopruService::class.java).apply {
                 clipData = clip
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            ctx.startForegroundService(i)
+            runCatching { ctx.startForegroundService(i) }
         }
 
         /** mDNS tarama penceresi için MulticastLock tut/bırak (Core.rescan / Scanning(false) olayı). */
@@ -121,8 +124,10 @@ class KopruService : Service() {
 
     private val netCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // Yeni ağda eski tarama soketleri işe yaramaz: taramayı baştan başlat.
-            Core.node?.rescan()
+            // Yeni ağda eski tarama soketleri işe yaramaz: MulticastLock ile taramayı baştan başlat.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (!Core.isConnected()) Core.rescan()
+            }
         }
     }
 
@@ -204,7 +209,7 @@ class KopruService : Service() {
 
     @SuppressLint("WakelockTimeout")
     fun updateMulticast(on: Boolean) {
-        val wm = applicationContext.getSystemService(WifiManager::class.java)
+        val wm = applicationContext.getSystemService(WifiManager::class.java) ?: return
         if (on && multicast == null) {
             multicast = wm.createMulticastLock("kopru-mdns").apply { setReferenceCounted(false); acquire() }
         } else if (!on) {
@@ -220,9 +225,9 @@ class KopruService : Service() {
         if (active && wakeLock == null) {
             val wm = applicationContext.getSystemService(WifiManager::class.java)
             @Suppress("DEPRECATION")
-            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "kopru-transfer").apply { setReferenceCounted(false); acquire() }
+            wifiLock = wm?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "kopru-transfer")?.apply { setReferenceCounted(false); acquire() }
             wakeLock = getSystemService(PowerManager::class.java)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kopru:transfer").apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kopru:transfer")?.apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
         } else if (!active) {
             releaseLocks()
         }

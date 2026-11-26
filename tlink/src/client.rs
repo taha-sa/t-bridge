@@ -34,12 +34,17 @@ impl Client {
                 }
             }
         });
-        // hello (en çok 5 sn)
+        // hello (en çok 5 sn ve MAX_LINE bayt)
         let mut hello = Value::Null;
         let mut line = Vec::new();
-        let first = tokio::time::timeout(Duration::from_secs(5), rd.read_until(b'\n', &mut line)).await;
+        let first = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut lim = (&mut rd).take(MAX_LINE as u64 + 1);
+            lim.read_until(b'\n', &mut line).await
+        })
+        .await;
         if let Ok(Ok(n)) = first
             && n > 0
+            && line.len() <= MAX_LINE
             && let Some(e) = Envelope::parse(&line)
             && e.typ == "hello"
         {

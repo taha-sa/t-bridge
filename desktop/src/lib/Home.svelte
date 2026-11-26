@@ -15,6 +15,8 @@
   let now = $state(Date.now())
   let showPair = $state(false)
   let ticker: ReturnType<typeof setInterval> | undefined
+  let refreshing = false
+  let seenCodeRev = app.codeRev
 
   const s = $derived(app.s)
   const paired = $derived(s.peers.length > 0)
@@ -23,8 +25,16 @@
   const digits = $derived((pairing?.code ?? '······').split(''))
 
   async function refreshCode() {
-    pairing = (await call<Pairing>('pairing')) ?? null
-    issued = Date.now()
+    if (refreshing) return
+    refreshing = true
+    try {
+      pairing = (await call<Pairing>('pairing')) ?? null
+      const ts = Date.now()
+      issued = ts
+      now = ts
+    } finally {
+      refreshing = false
+    }
   }
 
   async function openPairing() {
@@ -34,7 +44,7 @@
     ticker = setInterval(() => {
       now = Date.now()
       // Süre bitmeden yenile: ekrandaki kod her zaman geçerli olsun.
-      if (showPair && left <= 20) refreshCode()
+      if (showPair && left <= 20) void refreshCode()
     }, 1000)
   }
 
@@ -44,7 +54,10 @@
   }
 
   $effect(() => {
-    if (app.codeRev > 0 && showPair) refreshCode()
+    if (app.codeRev !== seenCodeRev) {
+      seenCodeRev = app.codeRev
+      if (showPair) void refreshCode()
+    }
   })
   $effect(() => {
     if (app.ready && !paired && !showPair) openPairing()

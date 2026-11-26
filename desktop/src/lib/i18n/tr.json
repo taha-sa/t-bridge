@@ -294,5 +294,7 @@
   "title.closeTitle": "Tepsiye küçült",
   "title.max": "Büyüt",
   "title.min": "Küçült",
-  "unit.perSec": "/sn"
+  "unit.perSec": "/sn",
+  "set.betaUpdates": "Beta güncellemeleri",
+  "set.betaUpdatesHint": "Önizleme sürümlerini alın. Bu sürümler daha az kararlı olabilir. Gelecekteki kararlı sürümleri almak için kapatın."
 }

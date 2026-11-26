@@ -17,7 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.util.Log
+import app.kopru.AppLog as Log
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +39,7 @@ import java.util.concurrent.Executors
 object Updater {
     private const val TAG = "kopru-upd"
     const val MANIFEST_URL = "https://github.com/taha-sa/t-bridge-releases/releases/latest/download/android.json"
+    private const val BETA_MANIFEST_URL = "https://github.com/taha-sa/t-bridge-releases/releases/download/beta/android-beta.json"
     private const val CH_UPDATE = "update"
     private const val ID_UPDATE = 3
     private const val DAY = 24 * 60 * 60 * 1000L
@@ -70,6 +71,16 @@ object Updater {
     var auto: Boolean
         get() = prefs.getBoolean("auto", true)
         set(v) = prefs.edit().putBoolean("auto", v).apply()
+
+    var beta: Boolean
+        get() = prefs.getBoolean("beta", false)
+        set(value) {
+            if (_state.value is State.Checking || _state.value is State.Downloading || _state.value is State.Installing) return
+            prefs.edit().putBoolean("beta", value).apply()
+            apk().delete()
+            lastReady = null
+            _state.value = State.Idle
+        }
 
     private fun apk() = File(ctx.cacheDir, "update.apk")
 
@@ -131,14 +142,23 @@ object Updater {
     }
 
     private fun fetchManifest(): Info {
-        val c = open(MANIFEST_URL)
+        val c = open(if (beta) BETA_MANIFEST_URL else MANIFEST_URL)
         try {
             if (c.responseCode == 404) throw IllegalStateException(ctx.getString(R.string.upd_err_no_release))
             if (c.responseCode !in 200..299) throw IllegalStateException(ctx.getString(R.string.upd_err_server, c.responseCode))
             val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
             val url = j.getString("url")
-            require(url.startsWith("https://")) { ctx.getString(R.string.upd_err_insecure) }
-            return Info(j.getInt("versionCode"), j.getString("versionName"), url, j.getString("sha256").lowercase(), j.optString("notes"))
+            val parsedUrl = runCatching { URL(url) }.getOrNull()
+            val allowedHost = parsedUrl?.host?.lowercase() in setOf(
+                "github.com",
+                "objects.githubusercontent.com",
+                "release-assets.githubusercontent.com",
+                "github-releases.githubusercontent.com",
+            )
+            require(url.startsWith("https://") && allowedHost) { ctx.getString(R.string.upd_err_insecure) }
+            val sha = j.getString("sha256").lowercase()
+            require(sha.length == 64 && sha.all { it in '0'..'9' || it in 'a'..'f' }) { ctx.getString(R.string.upd_err_verify) }
+            return Info(j.getInt("versionCode"), j.getString("versionName"), url, sha, j.optString("notes"))
         } finally {
             c.disconnect()
         }
@@ -180,6 +200,9 @@ object Updater {
             }
             out.delete()
             if (!tmp.renameTo(out)) throw IllegalStateException(ctx.getString(R.string.upd_err_move))
+        } catch (e: Exception) {
+            tmp.delete()
+            throw e
         } finally {
             c.disconnect()
         }
@@ -236,27 +259,39 @@ object Updater {
         }
         ctx.getSystemService(NotificationManager::class.java)?.cancel(ID_UPDATE)
         _state.value = State.Installing
-        try {
+        val actRef = java.lang.ref.WeakReference(a)
+        io.execute {
+            var sessionId = -1
             val pi = ctx.packageManager.packageInstaller
-            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-                setAppPackageName(ctx.packageName)
-                if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-            }
-            val id = pi.createSession(params)
-            pi.openSession(id).use { session ->
-                session.openWrite("base.apk", 0, apk().length()).use { o ->
-                    apk().inputStream().use { it.copyTo(o) }
-                    session.fsync(o)
+            try {
+                val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                    setAppPackageName(ctx.packageName)
+                    if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                 }
-                val cb = PendingIntent.getActivity(
-                    ctx, 8, Intent(ctx, UpdateActivity::class.java).setAction(UpdateActivity.ACTION_STATUS),
-                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-                session.commit(cb.intentSender)
+                sessionId = pi.createSession(params)
+                pi.openSession(sessionId).use { session ->
+                    session.openWrite("base.apk", 0, apk().length()).use { o ->
+                        apk().inputStream().use { it.copyTo(o) }
+                        session.fsync(o)
+                    }
+                    val cb = PendingIntent.getActivity(
+                        ctx, 8, Intent(ctx, UpdateActivity::class.java).setAction(UpdateActivity.ACTION_STATUS),
+                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                    session.commit(cb.intentSender)
+                }
+            } catch (e: Exception) {
+                if (sessionId >= 0) runCatching { pi.abandonSession(sessionId) }
+                Log.w(TAG, "oturumla yükleme başarısız, sistem yükleyicisi deneniyor", e)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    val act = actRef.get()
+                    if (act != null && !act.isFinishing && !act.isDestroyed) {
+                        fallback(act)
+                    } else {
+                        _state.value = lastReady ?: State.Idle
+                    }
+                }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "oturumla yükleme başarısız, sistem yükleyicisi deneniyor", e)
-            fallback(a)
         }
     }
 

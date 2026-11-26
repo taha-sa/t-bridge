@@ -192,6 +192,7 @@ pub(crate) struct Inner {
     inc_persist: Mutex<IncPersist>,
     transfers: Mutex<BTreeMap<(u8, u64), TransferInfo>>,
     port: Mutex<u16>,
+    stopped: AtomicBool,
 }
 
 fn dir_key(d: Direction) -> u8 {
@@ -266,6 +267,7 @@ impl Inner {
             inc_persist: Mutex::new(inc_persist),
             transfers: Mutex::new(transfers),
             port: Mutex::new(0),
+            stopped: AtomicBool::new(false),
             cfg,
         }))
     }
@@ -317,7 +319,7 @@ impl Inner {
     fn upsert_peer(&self, p: PeerInfo) {
         let list = {
             let mut g = lk(&self.peers);
-            g.retain(|x| x.fingerprint != p.fingerprint && x.id != p.id);
+            g.retain(|x| x.fingerprint != p.fingerprint);
             g.insert(0, p);
             g.clone()
         };
@@ -462,9 +464,9 @@ impl Inner {
                 bail!("{why}");
             }
             paired_now = true;
-            *lk(&self.pair_code) = None;
         }
-        let peer = PeerInfo { id, name, platform, fingerprint: fp, addrs: vec![conn.remote_address().to_string()] };
+        let safe_id = sanitize_peer_id(&id, &fp);
+        let peer = PeerInfo { id: safe_id, name, platform, fingerprint: fp, addrs: vec![conn.remote_address().to_string()] };
         self.upsert_peer(peer.clone());
         send.write_all(&proto::encode(&Msg::Welcome {
             id: self.ident.id.clone(),
@@ -500,6 +502,8 @@ impl Inner {
             None => false,
         };
         if matched {
+            // Tek kullanımlık: kilidi bırakmadan tüket (eşzamanlı ikinci el sıkışma aynı kodu kullanamaz).
+            *code = None;
             guard.on_success(ip);
             log::info!("eşleştirme: {ip} doğru kod ile eşleşti");
             return (true, String::new(), false);
@@ -641,7 +645,7 @@ impl Inner {
 
     async fn client_loop(self: Arc<Self>, ep: Endpoint) {
         let mut backoff = SILENT_FIRST;
-        loop {
+        while !self.stopped.load(Ordering::SeqCst) {
             // Bekleyen eşleştirme isteği öncelikli (kullanıcı tetikledi: görünür).
             let pending = lk(&self.pending_pair).take();
             if let Some((srv, code)) = pending {
@@ -888,9 +892,11 @@ impl Inner {
             });
         }
         self.set_state(ConnState::Disconnected);
-        // İstemci: bağlantı koptu -> sınırlı tarama penceresi + hemen deneme. Sunucu: yalnızca dürtme.
-        self.rescan();
-        self.nudge.notify_one();
+        if !self.stopped.load(Ordering::SeqCst) {
+            // İstemci: bağlantı koptu -> sınırlı tarama penceresi + hemen deneme. Sunucu: yalnızca dürtme.
+            self.rescan();
+            self.nudge.notify_one();
+        }
     }
 
     async fn dispatch(self: &Arc<Self>, s: &Arc<Session>, m: Msg) {
@@ -1473,6 +1479,17 @@ impl Inner {
     }
 
     async fn on_offer(self: &Arc<Self>, s: &Arc<Session>, id: u64, name: String, size: u64) -> Result<()> {
+        if id == crate::screen::VIDEO_MAGIC || id == crate::camera::CAM_MAGIC {
+            s.send(Msg::FileCancel { id });
+            return Ok(());
+        }
+        {
+            let inc = lk(&self.inc_open);
+            if inc.contains_key(&id) || inc.len() >= 64 || lk(&self.active_in).contains_key(&id) {
+                s.send(Msg::FileCancel { id });
+                return Ok(());
+            }
+        }
         let key = inc_key(&s.peer.id, id);
         {
             let mut p = lk(&self.inc_persist);
@@ -1491,7 +1508,16 @@ impl Inner {
         let me = self.clone();
         let (k2, n2) = (key.clone(), name.clone());
         let (file, existing) = tokio::task::spawn_blocking(move || me.open_target(&k2, &n2, size)).await??;
-        lk(&self.inc_open).insert(id, IncOpen { file, key, name: name.clone(), size, offset: existing });
+        {
+            let mut inc = lk(&self.inc_open);
+            if inc.contains_key(&id) || inc.len() >= 64 || lk(&self.active_in).contains_key(&id) {
+                drop(inc);
+                drop(file);
+                s.send(Msg::FileCancel { id });
+                return Ok(());
+            }
+            inc.insert(id, IncOpen { file, key, name: name.clone(), size, offset: existing });
+        }
         self.put_transfer(TransferInfo {
             id,
             direction: Direction::Incoming,
@@ -1507,18 +1533,22 @@ impl Inner {
     }
 
     fn cancel_in_local(&self, _s: &Arc<Session>, id: u64) {
-        if let Some(ctl) = lk(&self.active_in).get(&id) {
+        let was_active = if let Some(ctl) = lk(&self.active_in).get(&id) {
             ctl.store(CANCEL, Ordering::SeqCst);
-        }
-        // Akış etkin değilse yarım dosyayı hemen sil.
-        let open = lk(&self.inc_open).remove(&id);
-        let active = lk(&self.active_in).contains_key(&id);
-        if !active {
-            let (key, name) = match open {
-                Some(o) => (o.key, o.name),
-                None => (inc_key(&_s.peer.id, id), String::new()),
-            };
-            self.discard_partial(&key, &name);
+            true
+        } else {
+            false
+        };
+        // Akış etkin değilse yarım dosyayı hemen sil (etkinse receive_stream temizler).
+        if !was_active {
+            let open = lk(&self.inc_open).remove(&id);
+            if !lk(&self.active_in).contains_key(&id) {
+                let (key, name) = match open {
+                    Some(o) => (o.key, o.name),
+                    None => (inc_key(&_s.peer.id, id), String::new()),
+                };
+                self.discard_partial(&key, &name);
+            }
         }
         self.patch_transfer(Direction::Incoming, id, |t| {
             t.state = TransferState::Cancelled;
@@ -1717,13 +1747,14 @@ impl Inner {
         if id == crate::camera::CAM_MAGIC {
             return self.receive_video(s, recv, true).await;
         }
+        let ctl = Arc::new(AtomicU8::new(RUN));
+        lk(&self.active_in).insert(id, ctl.clone());
         let Some(open) = lk(&self.inc_open).remove(&id) else {
+            lk(&self.active_in).remove(&id);
             let _ = recv.stop(RESET_CANCEL.into());
             bail!("bilinmeyen aktarım {id}");
         };
         let IncOpen { file, key, name, size, offset } = open;
-        let ctl = Arc::new(AtomicU8::new(RUN));
-        lk(&self.active_in).insert(id, ctl.clone());
         // Dosya tanıtıcısı receive_body içinde kapanır (Windows'ta yeniden adlandırma için şart).
         let r = self.receive_body(&mut recv, file, size, offset, id, &ctl).await;
         lk(&self.active_in).remove(&id);
@@ -1846,6 +1877,8 @@ impl Inner {
     /// Kapatır ve kapatılan uç noktayı döndürür; çağıran `wait_idle` ile CONNECTION_CLOSE'un
     /// gerçekten gönderilmesini bekleyebilir.
     pub(crate) fn shutdown_endpoint(&self) -> Option<Endpoint> {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.nudge.notify_one();
         if let Some(s) = lk(&self.session).take() {
             s.conn.close(0u32.into(), b"shutdown");
         }
@@ -1881,6 +1914,19 @@ async fn dial(
     match timeout(CONNECT_TIMEOUT, attempt).await {
         Ok(r) => r,
         Err(_) => Err(anyhow!("{addr}: zaman aşımı")),
+    }
+}
+
+fn sanitize_peer_id(raw: &str, fp: &str) -> String {
+    let clean: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    if clean.is_empty() {
+        fp.chars().take(16).collect()
+    } else {
+        clean
     }
 }
 

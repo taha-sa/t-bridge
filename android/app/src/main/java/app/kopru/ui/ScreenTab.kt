@@ -5,14 +5,20 @@ package app.kopru.ui
 import app.kopru.R
 import androidx.compose.ui.res.stringResource
 import android.content.Context
+import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
@@ -20,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.isImeVisible
@@ -38,8 +45,11 @@ import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.KeyboardAlt
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -60,7 +70,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -101,8 +112,10 @@ fun ScreenTab(ui: UiState) {
     var kbOpen by rememberSaveable { mutableStateOf(false) }
     var keysOpen by rememberSaveable { mutableStateOf(false) }
     var qualityOpen by rememberSaveable { mutableStateOf(false) }
+    var stopConfirm by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
     val imeUp = WindowInsets.isImeVisible
-    val density = LocalDensity.current
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     ScreenLifecycle()
 
@@ -119,21 +132,42 @@ fun ScreenTab(ui: UiState) {
         return
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .onSizeChanged { sz ->
-                // PC'ye bildirilen alan: klavyesiz tam yükseklik − araç çubuğu. Klavye açıkken güncellenmez (yeniden kodlama yok).
-                if (!imeUp) Screen.setViewport(sz.width, sz.height - with(density) { ToolbarHeight.roundToPx() })
-            },
-    ) {
+    BackHandler {
+        when {
+            kbOpen -> { keyboard?.hide(); kbOpen = false }
+            keysOpen -> { keysOpen = false; KeyPad.releaseAll() }
+            Chrome.immersive -> Chrome.immersive = false
+            else -> stopConfirm = true
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            ScreenViewer(scr, mode, onClose = { Screen.stopViewing() }, modifier = Modifier.fillMaxSize())
+            val viewer: @Composable (Modifier) -> Unit = { modifier ->
+                Box(modifier.onSizeChanged { sz ->
+                    if (!imeUp) Screen.setViewport(sz.width, sz.height)
+                }) {
+                    ScreenViewer(scr, mode, onClose = { stopConfirm = true }, modifier = Modifier.fillMaxSize())
+                }
+            }
+            val pad: @Composable (Modifier) -> Unit = { modifier ->
+                Touchpad(prefs.getFloat("sens", 1.6f), modifier.padding(6.dp))
+            }
+            if (landscape) {
+                Row(Modifier.fillMaxSize()) {
+                    viewer(Modifier.weight(0.62f).fillMaxHeight())
+                    pad(Modifier.weight(0.38f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    viewer(Modifier.weight(if (imeUp) 0.7f else 0.52f).fillMaxWidth())
+                    pad(Modifier.weight(if (imeUp) 0.3f else 0.48f).fillMaxWidth())
+                }
+            }
         }
         AnimatedVisibility(keysOpen, enter = expandVertically(), exit = shrinkVertically()) {
             Column(Modifier.fillMaxWidth().background(Color(0xFF0E0E10))) {
-                SpecialKeysPanel(maxHeightFraction = 0.42f)
+                SpecialKeysPanel(maxHeightFraction = if (landscape) 0.25f else 0.32f)
             }
         }
         AnimatedVisibility(kbOpen, enter = expandVertically(), exit = shrinkVertically()) {
@@ -150,13 +184,21 @@ fun ScreenTab(ui: UiState) {
                 mode = if (mode == ControlMode.TAP) ControlMode.PAD else ControlMode.TAP
                 prefs.edit().putString("screen_mode", mode.name).apply()
             },
-            onKeyboard = { kbOpen = !kbOpen },
-            onKeys = { keysOpen = !keysOpen },
-            onQuality = { qualityOpen = true },
+            onKeyboard = { keysOpen = false; KeyPad.releaseAll(); kbOpen = !kbOpen },
+            onKeys = { keyboard?.hide(); kbOpen = false; keysOpen = !keysOpen; if (!keysOpen) KeyPad.releaseAll() },
+            onQuality = { keyboard?.hide(); kbOpen = false; keysOpen = false; KeyPad.releaseAll(); qualityOpen = true },
+            onStop = { stopConfirm = true },
             onFull = { Chrome.immersive = !Chrome.immersive },
         )
     }
 
+    if (stopConfirm) AlertDialog(
+        onDismissRequest = { stopConfirm = false },
+        title = { Text(stringResource(R.string.scr_stop_confirm)) },
+        text = { Text(stringResource(R.string.scr_stop_confirm_hint)) },
+        confirmButton = { TextButton(onClick = { stopConfirm = false; Screen.stopViewing() }) { Text(stringResource(R.string.scr_stop_sharing)) } },
+        dismissButton = { TextButton(onClick = { stopConfirm = false }) { Text(stringResource(R.string.remote_cancel)) } },
+    )
     if (qualityOpen) QualitySheet(scr.preset, onPick = { Screen.setPreset(it); qualityOpen = false }, onDismiss = { qualityOpen = false })
 }
 
@@ -170,12 +212,15 @@ private fun Toolbar(
     onKeyboard: () -> Unit,
     onKeys: () -> Unit,
     onQuality: () -> Unit,
+    onStop: () -> Unit,
     onFull: () -> Unit,
 ) {
     val c = tb
     Column(Modifier.fillMaxWidth().background(Color(0xFF0E0E10))) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.goldLine))
-        Row(Modifier.fillMaxWidth().height(ToolbarHeight), verticalAlignment = Alignment.CenterVertically) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val itemWidth = maxOf(maxWidth / 6, 48.dp)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).height(ToolbarHeight), verticalAlignment = Alignment.CenterVertically) {
             val pad = mode == ControlMode.PAD
             ToolItem(
                 if (pad) Icons.Outlined.Mouse else Icons.Outlined.TouchApp,
@@ -183,17 +228,19 @@ private fun Toolbar(
                 stringResource(if (pad) R.string.scr_mode_to_tap else R.string.scr_mode_to_pad, stringResource(mode.label)),
                 active = false,
                 onClick = onMode,
-                Modifier.weight(1f),
+                Modifier.width(itemWidth),
             )
-            ToolItem(Icons.Outlined.Keyboard, stringResource(R.string.scr_tool_keyboard), stringResource(R.string.scr_tool_keyboard), kbOpen, onKeyboard, Modifier.weight(1f))
-            ToolItem(Icons.Outlined.KeyboardAlt, stringResource(R.string.scr_tool_keys), stringResource(R.string.scr_tool_keys_desc), keysOpen, onKeys, Modifier.weight(1f))
-            ToolItem(Icons.Outlined.Speed, stringResource(R.string.scr_tool_quality), stringResource(R.string.scr_tool_quality_desc), false, onQuality, Modifier.weight(1f))
+            ToolItem(Icons.Outlined.Keyboard, stringResource(R.string.scr_tool_keyboard), stringResource(R.string.scr_tool_keyboard), kbOpen, onKeyboard, Modifier.width(itemWidth))
+            ToolItem(Icons.Outlined.KeyboardAlt, stringResource(R.string.scr_tool_keys), stringResource(R.string.scr_tool_keys_desc), keysOpen, onKeys, Modifier.width(itemWidth))
+            ToolItem(Icons.Outlined.Speed, stringResource(R.string.scr_tool_quality), stringResource(R.string.scr_tool_quality_desc), false, onQuality, Modifier.width(itemWidth))
             ToolItem(
                 if (full) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
                 stringResource(if (full) R.string.scr_tool_shrink else R.string.scr_full),
                 stringResource(if (full) R.string.scr_full_exit else R.string.scr_full),
-                full, onFull, Modifier.weight(1f),
+                full, onFull, Modifier.width(itemWidth),
             )
+            ToolItem(Icons.Outlined.Stop, stringResource(R.string.scr_stop_short), stringResource(R.string.scr_stop_sharing), false, onStop, Modifier.width(itemWidth))
+        }
         }
     }
 }
@@ -265,14 +312,14 @@ private fun StartPanel(scr: app.kopru.ScreenUi, on: Boolean) {
     val c = tb
     val supported = on && Screen.supported()
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp, vertical = 16.dp),
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.scr_title), Modifier.weight(1f), color = c.text, style = MaterialTheme.typography.headlineMedium)
             Pill(if (on) stringResource(R.string.remote_pill_live) else stringResource(R.string.remote_pill_offline), if (on) "violet" else "muted")
         }
-        Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             IconTile(Icons.Outlined.Cast, size = 72.dp)
             Spacer(Modifier.height(16.dp))
             Text(stringResource(R.string.scr_pc_screen), color = c.text, style = MaterialTheme.typography.titleLarge)

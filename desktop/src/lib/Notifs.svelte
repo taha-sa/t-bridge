@@ -43,17 +43,25 @@
 
   async function dismiss(key: string) {
     s.notifications = s.notifications.filter((n) => n.key !== key)
+    delete app.reply[key]
+    delete app.replyState[key]
     await call('dismiss_notification', { key })
   }
 
   async function dismissGroup(items: NotificationData[]) {
     const keys = new Set(items.map((n) => n.key))
     s.notifications = s.notifications.filter((n) => !keys.has(n.key))
-    for (const k of keys) await call('dismiss_notification', { key: k })
+    for (const k of keys) {
+      delete app.reply[k]
+      delete app.replyState[k]
+      await call('dismiss_notification', { key: k })
+    }
   }
 
   async function clearAll() {
     s.notifications = []
+    app.reply = {}
+    app.replyState = {}
     filter = ''
     await call('clear_notifications')
   }
@@ -61,6 +69,12 @@
   async function mute(pkg: string, name: string) {
     if (!confirm(t('notifs.muteConfirm', { name }))) return
     s.settings.mutedApps = [...s.settings.mutedApps, pkg]
+    for (const n of s.notifications) {
+      if (n.package === pkg) {
+        delete app.reply[n.key]
+        delete app.replyState[n.key]
+      }
+    }
     s.notifications = s.notifications.filter((n) => n.package !== pkg)
     if (filter === pkg) filter = ''
     await call('mute_app', { package: pkg, muted: true })

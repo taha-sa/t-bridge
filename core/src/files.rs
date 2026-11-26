@@ -93,8 +93,14 @@ fn walk(dir: &Path, rel: &str, out: &mut Vec<FileSource>) -> Result<()> {
 }
 
 /// Masaüstü: yarım dosyaların tutulduğu gizli klasör.
+/// `key` yalnızca güvenli dosya adı karakterlerine indirgenir (dizin dışına taşma önlenir).
 pub fn part_path(download_dir: &Path, key: &str) -> PathBuf {
-    download_dir.join(".kopru-part").join(format!("{key}.part"))
+    let safe: String = key
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let safe = if safe.is_empty() { "_".to_string() } else { safe };
+    download_dir.join(".kopru-part").join(format!("{safe}.part"))
 }
 
 pub fn open_part(download_dir: &Path, key: &str, size: u64) -> Result<(fs::File, u64)> {

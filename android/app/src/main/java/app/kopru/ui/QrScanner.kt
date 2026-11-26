@@ -164,6 +164,7 @@ private fun CameraPreview(onClose: () -> Unit, onResult: (String) -> Unit) {
         val decoder = QrDecoder()
         var done = false
         var disposed = false
+        var boundCases: List<androidx.camera.core.UseCase> = emptyList()
         future.addListener({
             if (disposed) return@addListener
             try {
@@ -185,8 +186,9 @@ private fun CameraPreview(onClose: () -> Unit, onResult: (String) -> Unit) {
                         main.execute { result(text) }
                     }
                 }
-                provider.unbindAll()
+                provider.unbind(preview, analysis)
                 provider.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                boundCases = listOf(preview, analysis)
             } catch (_: Exception) {
                 Toast.makeText(ctx, ctx.getString(R.string.qr_toast_camera_failed), Toast.LENGTH_LONG).show()
                 close()
@@ -195,7 +197,9 @@ private fun CameraPreview(onClose: () -> Unit, onResult: (String) -> Unit) {
         onDispose {
             disposed = true
             done = true
-            if (future.isDone) runCatching { future.get().unbindAll() }
+            if (future.isDone && boundCases.isNotEmpty()) {
+                runCatching { future.get().unbind(*boundCases.toTypedArray()) }
+            }
             exec.shutdown()
         }
     }

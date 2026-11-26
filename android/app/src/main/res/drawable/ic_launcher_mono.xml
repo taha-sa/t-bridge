@@ -1,9 +1,7 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <!-- T-Bridge işareti (assets/logo.svg): T'nin üst çizgisi köprü kemeri. -->
-    <group android:scaleX="0.112" android:scaleY="0.112" android:translateX="25.33" android:translateY="25.33">
-        <path android:pathData="M100,222 Q256,92 412,222" android:strokeWidth="46" android:strokeLineCap="round" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" />
-        <path android:pathData="M256,168 V404" android:strokeWidth="54" android:strokeLineCap="round" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" />
-        <path android:pathData="M120,226 V266 M392,226 V266" android:strokeWidth="22" android:strokeLineCap="round" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" />
+    <!-- Same suspension bridge silhouette as the shared SVG, within the adaptive safe circle. -->
+    <group android:scaleX="0.072" android:scaleY="0.072" android:translateX="17.136" android:translateY="17.136">
+        <path android:pathData="M328,720 V336 M696,720 V336 M208,640 H816 M208,392 Q512,704 816,392" android:strokeWidth="64" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" />
     </group>
 </vector>

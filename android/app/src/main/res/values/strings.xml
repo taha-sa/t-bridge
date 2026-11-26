@@ -185,4 +185,6 @@
     <string name="crash_close">Close</string>
     <string name="crash_auto">Prepare error reports automatically</string>
     <string name="crash_auto_hint">If a crash happens, a report is prepared and shown the next time you open the app. It stays on your phone; sending it is up to you.</string>
+    <string name="set_beta">Beta updates</string>
+    <string name="set_beta_hint">Receive preview releases. They may be less stable. Turn off to receive future stable releases.</string>
 </resources>

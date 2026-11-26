@@ -9,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
-import android.util.Log
+import app.kopru.AppLog as Log
 import android.view.Surface
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,9 +79,11 @@ object Screen {
     private val lock = Any()
     private var surface: Surface? = null
     @Volatile private var codec: MediaCodec? = null
+    private var feedThread: Thread? = null
+    private var drainThread: Thread? = null
 
     @Volatile private var needKey = true
-    private var lastKeyReq = 0L
+    @Volatile private var lastKeyReq = 0L
 
     // ---------------------------------------------------------------- görüntü alanı
     private var viewW = 0
@@ -89,7 +91,7 @@ object Screen {
     private var zoom = 1f
     private var sentW = 0
     private var sentH = 0
-    private var pendingStart = false
+    @Volatile private var pendingStart = false
     private var startAfterViewport: Runnable? = null
     private var configJob: Runnable? = null
 
@@ -383,8 +385,8 @@ object Screen {
                     throw e
                 }
                 codec = c
-                Thread({ feedLoop(c) }, "screen-feed").apply { start() }
-                Thread({ drainLoop(c) }, "screen-drain").apply { start() }
+                feedThread = Thread({ feedLoop(c) }, "screen-feed").apply { start() }
+                drainThread = Thread({ drainLoop(c) }, "screen-drain").apply { start() }
                 Log.i(TAG, "çözücü hazır: ${c.name} (gerçek zamanlı ayarlar=$full)")
                 return
             } catch (e: Exception) {
@@ -398,7 +400,14 @@ object Screen {
     private fun stopCodecLocked() {
         val c = codec ?: return
         codec = null
+        val ft = feedThread
+        val dt = drainThread
+        feedThread = null
+        drainThread = null
         qLock.withLock { queue.clear(); qCond.signalAll() }
+        val cur = Thread.currentThread()
+        if (ft != null && ft !== cur) runCatching { ft.join(300) }
+        if (dt != null && dt !== cur) runCatching { dt.join(300) }
         try { c.stop() } catch (_: Exception) {}
         try { c.release() } catch (_: Exception) {}
     }

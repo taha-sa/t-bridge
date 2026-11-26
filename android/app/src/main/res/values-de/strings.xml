@@ -185,4 +185,6 @@
     <string name="crash_close">Schließen</string>
     <string name="crash_auto">Fehlerberichte automatisch vorbereiten</string>
     <string name="crash_auto_hint">Bei einem Absturz wird ein Bericht vorbereitet und beim nächsten Start angezeigt. Er bleibt auf Ihrem Smartphone; ob Sie ihn senden, entscheiden Sie.</string>
+    <string name="set_beta">Beta-Updates</string>
+    <string name="set_beta_hint">Vorschauversionen erhalten. Diese können weniger stabil sein. Deaktivieren Sie die Option, um künftige stabile Versionen zu erhalten.</string>
 </resources>

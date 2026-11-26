@@ -33,15 +33,17 @@ object Ringer {
         runCatching { am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0) }
         val uri = RingtoneManager.getActualDefaultRingtoneUri(ctx, RingtoneManager.TYPE_ALARM)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        player = runCatching {
-            MediaPlayer().apply {
-                setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-                setDataSource(ctx, uri)
-                isLooping = true
-                prepare()
-                start()
-            }
-        }.getOrNull()
+        player = if (uri != null) {
+            val mp = MediaPlayer()
+            runCatching {
+                mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                mp.setDataSource(ctx, uri)
+                mp.isLooping = true
+                mp.prepare()
+                mp.start()
+                mp
+            }.onFailure { runCatching { mp.release() } }.getOrNull()
+        } else null
         runCatching { ctx.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0)) }
         KopruService.showRinging(ctx, true)
         main.removeCallbacks(autoStop)
@@ -77,12 +79,15 @@ object MediaControl {
         }
     }
 
+    private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { list -> pick(list) }
+
     /** NotifListener bağlanınca çağrılır (oturum listesi bildirim erişimi ister). */
     fun attach(ctx: Context) {
         val msm = ctx.getSystemService(MediaSessionManager::class.java) ?: return
         val comp = ComponentName(ctx, NotifListener::class.java)
         runCatching {
-            msm.addOnActiveSessionsChangedListener({ list -> pick(list) }, comp)
+            msm.removeOnActiveSessionsChangedListener(sessionsListener)
+            msm.addOnActiveSessionsChangedListener(sessionsListener, comp)
             pick(msm.getActiveSessions(comp))
         }
     }

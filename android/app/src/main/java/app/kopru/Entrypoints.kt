@@ -94,6 +94,8 @@ class ClipWidget : AppWidgetProvider() {
 
 /** Paylaş menüsünden gelen dosyaları/metni PC'ye gönderir. */
 class ShareActivity : Activity() {
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(Lang.wrap(newBase))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Core.start()
@@ -108,27 +110,45 @@ class ShareActivity : Activity() {
                 intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let(uris::addAll)
             }
         }
-        KopruService.startHolding(this, uris)
-        val msg = if (uris.isNotEmpty()) {
-            // Kalıcı izin verilmişse al (çoğu uygulama vermez; o durumda izni servis tutar).
-            val files = uris.mapNotNull { OutgoingFiles.describe(this, it, persist = true) }
-            val n = Core.sendFiles(files)
-            when {
-                n == 0 -> getString(R.string.share_failed)
-                Core.isConnected() -> resources.getQuantityString(R.plurals.share_sending, n, n)
-                else -> resources.getQuantityString(R.plurals.share_queued, n, n)
-            }
-        } else {
-            val text = intent?.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
-            when {
-                text.isNullOrEmpty() -> getString(R.string.share_nothing)
-                !Core.isConnected() -> getString(R.string.clip_not_connected)
-                Core.sendClipboardText(text) -> getString(R.string.share_text_sent)
-                else -> getString(R.string.clip_already_sent)
-            }
+        val text = if (uris.isEmpty()) intent?.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
+        if (uris.isEmpty() && text.isNullOrEmpty()) {
+            Toast.makeText(applicationContext, getString(R.string.share_nothing), Toast.LENGTH_SHORT).show()
+            finish()
+            return
         }
-        Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
-        finish()
+        val preview = if (uris.isNotEmpty()) {
+            resources.getQuantityString(R.plurals.share_sending, uris.size, uris.size)
+        } else {
+            val t = text!!
+            if (t.length > 160) t.take(157) + "…" else t
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage(preview)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                KopruService.startHolding(this, uris)
+                val msg = if (uris.isNotEmpty()) {
+                    // Kalıcı izin verilmişse al (çoğu uygulama vermez; o durumda izni servis tutar).
+                    val files = uris.mapNotNull { OutgoingFiles.describe(this, it, persist = true) }
+                    val n = Core.sendFiles(files)
+                    when {
+                        n == 0 -> getString(R.string.share_failed)
+                        Core.isConnected() -> resources.getQuantityString(R.plurals.share_sending, n, n)
+                        else -> resources.getQuantityString(R.plurals.share_queued, n, n)
+                    }
+                } else {
+                    when {
+                        !Core.isConnected() -> getString(R.string.clip_not_connected)
+                        Core.sendClipboardText(text!!) -> getString(R.string.share_text_sent)
+                        else -> getString(R.string.clip_already_sent)
+                    }
+                }
+                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                finish()
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
+            .setOnCancelListener { finish() }
+            .show()
     }
 }
 

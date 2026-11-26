@@ -3,6 +3,8 @@ import { listen } from '@tauri-apps/api/event'
 import type { CoreEvent, Snapshot, Theme, TransferInfo, UpdateState } from './types'
 import { fmtNum, locale, syncLang, t } from './i18n/index.svelte'
 
+const notifGen = new Map<string, number>()
+
 const empty: Snapshot = {
   deviceName: '',
   fingerprint: '',
@@ -28,6 +30,7 @@ const empty: Snapshot = {
     mutedApps: [],
     theme: 'dark',
     autoUpdate: true,
+    betaUpdates: false,
     screenShare: true,
     screenAllowed: [],
     cameraEnabled: false,
@@ -144,13 +147,16 @@ function onEvent(e: CoreEvent) {
     case 'notification': {
       const d = (e as Extract<CoreEvent, { type: 'notification' }>).data
       if (!s.settings.notifMirror || s.settings.mutedApps.includes(d.package)) break
+      notifGen.set(d.key, (notifGen.get(d.key) ?? 0) + 1)
       s.notifications = [d, ...s.notifications.filter((n) => n.key !== d.key)].slice(0, 200)
       break
     }
     case 'notificationRemoved': {
       const k = (e as Extract<CoreEvent, { type: 'notificationRemoved' }>).key
+      const gen = notifGen.get(k) ?? 0
       const rs = app.replyState[k]
       const drop = () => {
+        if ((notifGen.get(k) ?? 0) !== gen) return
         s.notifications = s.notifications.filter((n) => n.key !== k)
         delete app.reply[k]
         delete app.replyState[k]

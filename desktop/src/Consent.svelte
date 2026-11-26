@@ -24,23 +24,30 @@
 
   onMount(() => {
     syncLang()
+    let disposed = false
     let timer: ReturnType<typeof setInterval> | undefined
-    invoke<Info | null>('consent_info').then((i) => {
-      if (!i) {
-        // Bekleyen istek yok (bayat pencere): kapat.
-        getCurrentWindow().close()
-        return
-      }
-      info = i
-      left = i.timeout_secs
-      const end = Date.now() + i.timeout_secs * 1000
-      timer = setInterval(() => {
-        left = Math.max(0, Math.ceil((end - Date.now()) / 1000))
-      }, 250)
-      // Güvenlik: varsayılan odak "Reddet" (yanlışlıkla Enter izin vermesin).
-      denyBtn?.focus()
-    })
-    return () => timer && clearInterval(timer)
+    invoke<Info | null>('consent_info')
+      .then((i) => {
+        if (disposed) return
+        if (!i) {
+          // Bekleyen istek yok (bayat pencere): kapat.
+          void getCurrentWindow().close()
+          return
+        }
+        info = i
+        left = i.timeout_secs
+        const end = Date.now() + i.timeout_secs * 1000
+        timer = setInterval(() => {
+          left = Math.max(0, Math.ceil((end - Date.now()) / 1000))
+        }, 250)
+        // Güvenlik: varsayılan odak "Reddet" (yanlışlıkla Enter izin vermesin).
+        denyBtn?.focus()
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      if (timer) clearInterval(timer)
+    }
   })
 
   function onKey(e: KeyboardEvent) {

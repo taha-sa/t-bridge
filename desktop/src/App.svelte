@@ -47,10 +47,11 @@
   let crash = $state<Preview | null>(null)
 
   onMount(() => {
-    init()
+    void init().catch(() => {})
     invoke<Preview | null>('crash_pending')
       .then((p) => (crash = p))
       .catch(() => {})
+    let disposed = false
     let unlisten: (() => void) | undefined
     getCurrentWebview()
       .onDragDropEvent(async (e) => {
@@ -71,8 +72,15 @@
           if (n) flash(tn('files.queued', n))
         }
       })
-      .then((u) => (unlisten = u))
-    return () => unlisten?.()
+      .then((u) => {
+        if (disposed) u()
+        else unlisten = u
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
   })
 </script>
 

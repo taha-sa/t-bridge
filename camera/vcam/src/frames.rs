@@ -10,10 +10,21 @@ pub fn rgb_to_yuv(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
     (y.round().clamp(16.0, 235.0) as u8, u.round().clamp(16.0, 240.0) as u8, v.round().clamp(16.0, 240.0) as u8)
 }
 
-/// En yakın komşu NV12 ölçekleme (boyutlar çift sayı varsayılır). Aynı boyutsa kopya.
+/// En yakın komşu NV12 ölçekleme (boyutlar >= 2 ve çift sayı olmalı). Aynı boyutsa kopya.
 pub fn scale_nv12(src: &[u8], sw: usize, sh: usize, dst: &mut [u8], dw: usize, dh: usize) {
-    debug_assert_eq!(src.len(), sw * sh * 3 / 2);
-    debug_assert_eq!(dst.len(), dw * dh * 3 / 2);
+    if sw < 2
+        || sh < 2
+        || dw < 2
+        || dh < 2
+        || !sw.is_multiple_of(2)
+        || !sh.is_multiple_of(2)
+        || !dw.is_multiple_of(2)
+        || !dh.is_multiple_of(2)
+        || src.len() != sw * sh * 3 / 2
+        || dst.len() != dw * dh * 3 / 2
+    {
+        return;
+    }
     if sw == dw && sh == dh {
         dst.copy_from_slice(src);
         return;

@@ -54,7 +54,12 @@ object IncomingFiles {
         }
         val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: error(ctx.getString(R.string.files_err_write))
-        val pfd = cr.openFileDescriptor(uri, "rw") ?: error(ctx.getString(R.string.files_err_open))
+        val pfd = try {
+            cr.openFileDescriptor(uri, "rw") ?: error(ctx.getString(R.string.files_err_open))
+        } catch (e: Exception) {
+            runCatching { cr.delete(uri, null, null) }
+            throw e
+        }
         prefs.edit().putString(key, uri.toString()).apply()
         return OpenedFd(pfd.detachFd(), 0u)
     }
@@ -63,14 +68,16 @@ object IncomingFiles {
     fun complete(key: String, ok: Boolean): String? {
         val saved = prefs.getString(key, null) ?: return null
         prefs.edit().remove(key).apply()
-        val uri = Uri.parse(saved)
+        val uri = runCatching { Uri.parse(saved) }.getOrNull() ?: return null
         val cr = ctx.contentResolver
         return if (ok) {
-            cr.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-            // Görünen yol: İndirilenler/T-Bridge/…/ad
-            cr.query(uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) "${c.getString(0)}${c.getString(1)}" else null
-            } ?: uri.toString()
+            runCatching {
+                cr.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                // Görünen yol: İndirilenler/T-Bridge/…/ad
+                cr.query(uri, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) "${c.getString(0)}${c.getString(1)}" else null
+                } ?: uri.toString()
+            }.getOrNull()
         } else {
             runCatching { cr.delete(uri, null, null) }
             null

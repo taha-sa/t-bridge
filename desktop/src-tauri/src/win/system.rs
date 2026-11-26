@@ -80,11 +80,15 @@ pub fn reveal_url(url: &str) {
 
 /// Dosyayı Gezgin'de seçili göster; klasörse aç.
 pub fn reveal(path: &str) {
+    if path.is_empty() || path.contains('"') || path.contains('\0') {
+        return;
+    }
+    let clean = path.trim_end_matches('\\');
     let p = std::path::Path::new(path);
     if p.is_dir() {
         let _ = Command::new("explorer").arg(path).spawn();
-    } else {
-        let _ = Command::new("explorer").raw_arg(format!("/select,\"{path}\"")).spawn();
+    } else if !clean.is_empty() {
+        let _ = Command::new("explorer").raw_arg(format!("/select,\"{clean}\"")).spawn();
     }
 }
 

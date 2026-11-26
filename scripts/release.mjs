@@ -4,22 +4,27 @@
 //   node scripts/release.mjs 0.2.1 "Sürüm notu" --no-publish → yalnızca derle ve dist-release/ altına koy
 //   node scripts/release.mjs 0.3.0-beta.1 "not" --ci        → CI modu (bkz. docs/CI.md): doğrulamayı atlar (CI yaptı),
 //     anahtarları ortamdan okur (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]), git commit/tag yapmaz, `gh` PATH'ten çalışır.
-//     Beta (-beta.N): ön sürüm olarak yayınlanır; latest.json/android.json YÜKLENMEZ (güncelleyiciler yalnızca kararlı kanalı izler).
+//     Beta (-beta.N): opt-in beta feed assets are also mirrored to the rolling `beta` pre-release.
 // Gerekenler: ~/.tauri/tbridge.key + tbridge.pass (güncelleme imzası), android/keystore.properties (APK imzası), gh girişi.
 import { execSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { releaseVersion } from './release-version.mjs'
 
 const REPO = 'taha-sa/t-bridge-releases'
 const ci = process.argv.includes('--ci')
 const GH = process.env.GH_BIN || (ci ? 'gh' : 'C:\\Program Files\\GitHub CLI\\gh.exe')
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-const [tagVersion, notes = ''] = process.argv.slice(2).filter((a) => !a.startsWith('--'))
-const publish = !process.argv.includes('--no-publish')
+const rawArgs = process.argv.slice(2)
+const flags = new Set(['--ci', '--no-publish'])
+const posArgs = rawArgs.filter((a) => !flags.has(a))
+const [tagVersion, argNotes = ''] = posArgs
+const notes = (argNotes || process.env.NOTES || '').slice(0, 4000)
+const publish = !rawArgs.includes('--no-publish')
 const m = /^(\d+\.\d+\.\d+)(-beta\.?\d+)?$/.exec(tagVersion ?? '')
 if (!m) {
   console.error('Kullanım: node scripts/release.mjs <x.y.z | x.y.z-beta.N> "not" [--no-publish] [--ci]')
@@ -27,7 +32,10 @@ if (!m) {
 }
 const version = m[1] // dosyalara ve manifestlere yazılan x.y.z
 const beta = Boolean(m[2])
+const parsedVersion = releaseVersion(tagVersion)
 const tag = `v${tagVersion}` // GitHub etiketi (beta son eki dahil)
+const out = join(root, 'dist-release', tagVersion)
+mkdirSync(out, { recursive: true })
 
 const run = (cmd, cwd = root, env = {}) => {
   console.log(`\n$ ${cmd}`)
@@ -39,19 +47,18 @@ const edit = (path, fn) => {
 }
 const sha256 = (p) => createHash('sha256').update(readFileSync(p)).digest('hex')
 
-// Eski sürüm yayınlanmasın: telefon ve PC yalnızca daha yeni sürüme geçer.
+// Eski sürüm yayınlanmasın: telefon ve PC yalnızca daha yeni sürüme geçer (beta dahil).
 const prev = readFileSync(join(root, 'version.txt'), 'utf8').trim()
-const code = (v) => v.split('.').reduce((a, n, i) => a + Number(n) * [10000, 100, 1][i], 0)
-if (code(version) < code(prev)) {
-  console.error(`Sürüm geriye gidemez: ${prev} → ${version}`)
+if (parsedVersion.versionCode < releaseVersion(prev).versionCode) {
+  console.error(`Sürüm geriye gidemez: ${prev} → ${tagVersion}`)
   process.exit(1)
 }
 
 // 1) Sürüm numarasını tek kaynaktan her yere yaz.
 writeFileSync(join(root, 'version.txt'), `${version}\n`)
-edit('desktop/src-tauri/tauri.conf.json', (s) => s.replace(/"version":\s*"[^"]+"/, `"version": "${version}"`))
+edit('desktop/src-tauri/tauri.conf.json', (s) => s.replace(/"version":\s*"[^"]+"/, `"version": "${tagVersion}"`))
 for (const f of ['core/Cargo.toml', 'desktop/src-tauri/Cargo.toml']) {
-  edit(f, (s) => s.replace(/^version = "[^"]+"/m, `version = "${version}"`))
+  edit(f, (s) => s.replace(/^version = "[^"]+"/m, `version = "${tagVersion}"`))
 }
 
 // 2) Doğrulama: kırık sürüm yayınlanmaz.
@@ -69,31 +76,29 @@ run('npx tauri build', join(root, 'desktop'), {
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ci ? (process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? '') : readFileSync(passPath, 'utf8'),
 })
 const nsisDir = join(root, 'target', 'release', 'bundle', 'nsis')
-const setupName = `T-Bridge_${version}_x64-setup.exe`
+const setupName = `T-Bridge_${tagVersion}_x64-setup.exe`
 const setup = join(nsisDir, setupName)
 const sig = `${setup}.sig`
 if (!existsSync(setup) || !existsSync(sig)) throw new Error(`Kurulum veya imza bulunamadı: ${setup}`)
+// Preserve the completed desktop package even if the Android stage fails.
+copyFileSync(setup, join(out, setupName))
+copyFileSync(sig, join(out, `${setupName}.sig`))
 
 // 4) Android: imzalı APK
 if (!existsSync(join(root, 'android', 'keystore.properties'))) throw new Error('android/keystore.properties yok: APK güncellenebilir imzalanamaz')
-run(`"${join(root, 'android', 'gradlew.bat')}" --no-daemon -q lintRelease assembleRelease`, join(root, 'android'))
+run(`"${join(root, 'android', 'gradlew.bat')}" --no-daemon -q -PreleaseVersion=${tagVersion} lintRelease assembleRelease`, join(root, 'android'))
 const apkSrc = join(root, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk')
 
 // 5) Yayın klasörü ve bildirim dosyaları
-const out = join(root, 'dist-release', tagVersion)
-rmSync(out, { recursive: true, force: true })
-mkdirSync(out, { recursive: true })
 const apkName = `T-Bridge-${version}.apk`
-copyFileSync(setup, join(out, setupName))
-copyFileSync(sig, join(out, `${setupName}.sig`))
 copyFileSync(apkSrc, join(out, apkName))
 
 const base = `https://github.com/${REPO}/releases/download/${tag}`
-if (!beta) writeFileSync(
-  join(out, 'latest.json'),
+writeFileSync(
+  join(out, beta ? 'latest-beta.json' : 'latest.json'),
   JSON.stringify(
     {
-      version,
+      version: tagVersion,
       notes,
       pub_date: new Date().toISOString(),
       platforms: { 'windows-x86_64': { signature: readFileSync(sig, 'utf8').trim(), url: `${base}/${setupName}` } },
@@ -102,10 +107,10 @@ if (!beta) writeFileSync(
     2,
   ),
 )
-if (!beta) writeFileSync(
-  join(out, 'android.json'),
+writeFileSync(
+  join(out, beta ? 'android-beta.json' : 'android.json'),
   JSON.stringify(
-    { versionCode: code(version), versionName: version, url: `${base}/${apkName}`, sha256: sha256(join(out, apkName)), notes },
+    { versionCode: parsedVersion.versionCode, versionName: tagVersion, url: `${base}/${apkName}`, sha256: sha256(join(out, apkName)), notes },
     null,
     2,
   ),
@@ -124,6 +129,13 @@ if (!ci) try {
 if (!ci) run(`git tag -f ${tag}`)
 const notesFile = join(out, 'NOTES.txt')
 writeFileSync(notesFile, notes || `T-Bridge ${tagVersion}`)
-const assets = [setupName, `${setupName}.sig`, apkName, ...(beta ? [] : ['latest.json', 'android.json'])].map((f) => `"${join(out, f)}"`).join(' ')
+const feedAssets = beta ? ['latest-beta.json', 'android-beta.json'] : ['latest.json', 'android.json']
+const assets = [setupName, `${setupName}.sig`, apkName, ...feedAssets].map((f) => `"${join(out, f)}"`).join(' ')
 run(`"${GH}" release create ${tag} ${assets} --repo ${REPO} --title "T-Bridge ${tagVersion}" --notes-file "${notesFile}" ${beta ? '--prerelease' : '--latest'}`)
+if (beta) {
+  try { execSync(`"${GH}" release view beta --repo ${REPO}`, { cwd: root, stdio: 'ignore' }) }
+  catch { run(`"${GH}" release create beta --repo ${REPO} --title "T-Bridge beta channel" --notes "Opt-in preview update feed" --prerelease`) }
+  const feeds = feedAssets.map((file) => `"${join(out, file)}"`).join(' ')
+  run(`"${GH}" release upload beta ${feeds} --repo ${REPO} --clobber`)
+}
 console.log(`\nYayınlandı: https://github.com/${REPO}/releases/tag/${tag}`)

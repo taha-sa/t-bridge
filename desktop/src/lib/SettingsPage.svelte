@@ -20,19 +20,25 @@
   let checking = $state(false)
 
   async function save(patch: Partial<Settings>) {
-    const next = { ...s.settings, ...patch }
+    const prev = s.settings
+    const next = { ...prev, ...patch }
     s.settings = next
-    if (patch.notifMirror === false) s.notifications = []
     if (patch.theme) applyTheme(patch.theme)
     const r = await call<boolean>('set_settings', { settings: next })
+    if (r === undefined) {
+      s.settings = prev
+      if (patch.theme) applyTheme(prev.theme)
+      return false
+    }
+    if (patch.notifMirror === false) s.notifications = []
     if (r) restartNeeded = true
     if (patch.language) await syncLang()
+    return true
   }
 
   async function pickDir() {
     const d = await call<string | null>('pick_download_dir')
-    if (d) {
-      await save({ downloadDir: d })
+    if (d && (await save({ downloadDir: d }))) {
       s.downloadDir = d
     }
   }
@@ -229,6 +235,7 @@
       <div class="notes small selectable">{u.notes}</div>
     {/if}
     {@render item(t('set.autoUpdate'), t('set.autoUpdateHint'), 'autoUpdate')}
+    {@render item(t('set.betaUpdates'), t('set.betaUpdatesHint'), 'betaUpdates')}
   </section>
 
   <section class="card group">

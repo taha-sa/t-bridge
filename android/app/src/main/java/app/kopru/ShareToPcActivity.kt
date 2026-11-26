@@ -80,7 +80,16 @@ class ShareToPcActivity : ComponentActivity() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
     }.getOrNull()
 
-    private fun toast(m: String) = Toast.makeText(applicationContext, m, Toast.LENGTH_LONG).show()
+    private fun toast(m: String) {
+        val app = applicationContext
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            Toast.makeText(app, m, Toast.LENGTH_LONG).show()
+        } else {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Toast.makeText(app, m, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     companion object {
         private val URL_RE = Regex("""https?://[^\s<>"']+""")

@@ -81,9 +81,9 @@ object ViewerLink {
         _state.update { it.copy(installed = true, version = v, update = if (it.version == v) it.update else null) }
         val now = System.currentTimeMillis()
         if (!force && now - lastCheck < CHECK_TTL_MS) return
-        lastCheck = now
         io.execute {
             val latest = runCatching { fetchLatestTag() }.getOrNull() ?: return@execute
+            lastCheck = System.currentTimeMillis()
             val newer = if (compare(latest, v) > 0) latest else null
             _state.update { it.copy(update = newer) }
         }
@@ -199,6 +199,17 @@ object ViewerLink {
         if (failed) finishPresent(name, false, s(R.string.viewer_send_failed))
     }
 
+    /** PC bağlantısı koptuğunda bekleyen sunum isteklerini başarısız olarak sonlandır. */
+    fun onDisconnected() {
+        val pending = synchronized(presentWait) {
+            val copy = presentWait.values.toList()
+            presentWait.clear()
+            copy
+        }
+        val msg = s(R.string.viewer_pc_off)
+        pending.forEach { sendPresentState(it.reply, "failed", msg) }
+    }
+
     private fun sendPresentState(to: Messenger, state: String, text: String) {
         val m = Message.obtain(null, ViewerBridgeService.WHAT_PRESENT_STATE)
         m.data = Bundle().apply {
@@ -296,22 +307,38 @@ class ViewerBridgeService : Service() {
         if (uri == null) { respond(reply, false, s(R.string.viewer_no_file)); return }
         val file = OutgoingFiles.describe(this, uri, persist = false)
         if (file == null) { respond(reply, false, s(R.string.viewer_unreadable)); return }
-        KopruService.startHolding(this, listOf(uri))
         val present = d.getBoolean("present", false)
         if (present) {
             if (!Core.isConnected() || !Suite.supported()) { respond(reply, false, s(R.string.viewer_pc_off_or_old)); return }
-            // PC önce adı öğrenir; dosya bitince tam ekran açar.
             val pname = file.name.substringAfterLast('/')
             ViewerLink.trackPresent(pname, reply)
-            Suite.send("t-bridge", "file.present", JSONObject().put("name", pname).toString()) { ok, _, err ->
-                if (!ok) ViewerLink.finishPresent(pname, false, Suite.friendlyError(err) ?: s(R.string.viewer_rejected))
-            }
+            startRegisteredPresentation(
+                register = { done ->
+                    Suite.send("t-bridge", "file.present", JSONObject().put("name", pname).toString()) { ok, _, err ->
+                        Handler(Looper.getMainLooper()).post { done(ok, Suite.friendlyError(err)) }
+                    }
+                },
+                send = {
+                    if (!Core.isConnected()) false else {
+                        KopruService.startHolding(this, listOf(uri))
+                        val sent = Core.sendFiles(listOf(file)) > 0
+                        if (sent) respond(reply, true, s(R.string.viewer_present_sending))
+                        sent
+                    }
+                },
+                failed = { err ->
+                    val message = err ?: s(R.string.viewer_send_fail_nopc)
+                    ViewerLink.finishPresent(pname, false, message)
+                    respond(reply, false, message)
+                },
+            )
+            return
         }
+        KopruService.startHolding(this, listOf(uri))
         val n = Core.sendFiles(listOf(file))
-        if (present && n == 0) ViewerLink.finishPresent(file.name, false, s(R.string.viewer_send_fail_short))
         when {
             n == 0 -> respond(reply, false, s(R.string.viewer_send_fail_nopc))
-            Core.isConnected() -> respond(reply, true, if (present) s(R.string.viewer_present_sending) else s(R.string.viewer_sending_file))
+            Core.isConnected() -> respond(reply, true, s(R.string.viewer_sending_file))
             else -> respond(reply, true, s(R.string.viewer_queued))
         }
     }

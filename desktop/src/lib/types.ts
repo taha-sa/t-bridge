@@ -58,6 +58,7 @@ export interface Settings {
   mutedApps: string[]
   theme: Theme
   autoUpdate: boolean
+  betaUpdates: boolean
   screenShare: boolean
   screenAllowed: string[]
   cameraEnabled: boolean

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -56,7 +57,7 @@ fun CameraTab(ui: UiState) {
     var granted by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         granted = ok
-        if (ok) CameraService.start(ctx)
+        if (ok) CameraService.start(ctx) else CameraService.permissionDenied()
     }
     val on = ui.conn == ConnState.CONNECTED
     val supported = on && CameraService.supported()
@@ -70,7 +71,7 @@ fun CameraTab(ui: UiState) {
             Pill(if (on) stringResource(R.string.remote_pill_live) else stringResource(R.string.remote_pill_offline), if (on) "violet" else "muted")
         }
 
-        if (!supported) {
+        if (!supported && !cam.streaming) {
             // Kilitli durum: Windows 10 veya eski PC sürümü (ya da bağlı değil)
             TbCard {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -119,13 +120,22 @@ fun CameraTab(ui: UiState) {
         TbCard {
             SectionTitle(stringResource(R.string.cam_settings))
             Spacer(Modifier.height(12.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip(chipText(R.string.cam_front, cam.front)) { CameraService.setFront(true) }
-                Chip(chipText(R.string.cam_back, !cam.front)) { CameraService.setFront(false) }
-                Chip(if (cam.res == 720) "720p ✓" else "720p") { CameraService.setRes(720) }
-                Chip(if (cam.res == 1080) "1080p ✓" else "1080p") { CameraService.setRes(1080) }
-                Chip(chipText(R.string.cam_mirror, cam.mirror)) { CameraService.setMirror(!cam.mirror) }
-                Chip(chipText(R.string.cam_torch, cam.torch)) { CameraService.setTorch(!cam.torch) }
+            Text(stringResource(R.string.cam_group_camera), color = c.text2, style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(selected = cam.front, onClick = { CameraService.setFront(true) }, label = { Text(stringResource(R.string.cam_front) + if (cam.front) " ✓" else "") })
+                FilterChip(selected = !cam.front, onClick = { CameraService.setFront(false) }, label = { Text(stringResource(R.string.cam_back) + if (!cam.front) " ✓" else "") })
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.cam_group_quality), color = c.text2, style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(selected = cam.res == 720, onClick = { CameraService.setRes(720) }, label = { Text("720p" + if (cam.res == 720) " ✓" else "") })
+                FilterChip(selected = cam.res == 1080, onClick = { CameraService.setRes(1080) }, label = { Text("1080p" + if (cam.res == 1080) " ✓" else "") })
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.cam_group_image), color = c.text2, style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(selected = cam.mirror, onClick = { CameraService.setMirror(!cam.mirror) }, label = { Text(stringResource(R.string.cam_mirror) + if (cam.mirror) " ✓" else "") })
+                FilterChip(selected = cam.torch, onClick = { CameraService.setTorch(!cam.torch) }, label = { Text(stringResource(R.string.cam_torch) + if (cam.torch) " ✓" else "") })
             }
             if (cam.exposureRange.last > cam.exposureRange.first) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -153,7 +163,3 @@ fun CameraTab(ui: UiState) {
         }
     }
 }
-
-@Composable
-private fun chipText(@StringRes id: Int, on: Boolean): String =
-    if (on) stringResource(R.string.cam_chip_on, stringResource(id)) else stringResource(id)

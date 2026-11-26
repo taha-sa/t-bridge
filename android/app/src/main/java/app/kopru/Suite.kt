@@ -34,6 +34,7 @@ data class SuiteUi(
     val events: Map<String, List<String>> = emptyMap(),
     val message: String? = null,
     val notify: Boolean = true,
+    val updating: Boolean = false,
 )
 
 /**
@@ -48,12 +49,21 @@ object Suite {
 
     private lateinit var ctx: Context
     private val reqSeq = AtomicLong(1)
-    private val callbacks = HashMap<Long, (Boolean, JSONObject?, String?) -> Unit>()
+    private data class Reply(val ok: Boolean, val json: JSONObject?, val error: String?)
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val pending = PendingRequests<Reply>(
+        schedule = { task, delay -> handler.postDelayed(task, delay); Unit },
+        cancel = { task -> handler.removeCallbacks(task) },
+    )
     private var ramHighSince = 0L
     private var ramLastNotified = 0L
 
     /** Bağlantı koptu: bayat indirme ilerlemesini temizle (PC bağlanınca SuiteEvent ile yeniden dolar). */
-    fun onDisconnected() = _ui.update { it.copy(downloads = emptyMap()) }
+    fun onDisconnected() {
+        _ui.update { it.copy(downloads = emptyMap(), completed = emptyList()) }
+        pending.failAll(Reply(false, null, appCtx().getString(R.string.suite_err_offline)))
+        ViewerLink.onDisconnected()
+    }
 
     fun init(c: Context) {
         ctx = c.applicationContext
@@ -79,33 +89,37 @@ object Suite {
 
     // ---------------------------------------------------------------- komutlar (telefon -> PC -> uygulama)
 
-    /** Genel komut: sonuç [cb]'ye (ok, result, hata) döner; 15 sn içinde yanıt gelmezse zaman aşımı. */
+    /** App launch + T-Link may take 20 seconds; keep a bounded transport allowance. */
     fun send(app: String, name: String, json: String = "{}", cb: ((Boolean, JSONObject?, String?) -> Unit)? = null) {
         val n = Core.node
-        if (n == null || !n.peerSupportsSuite()) { cb?.invoke(false, null, appCtx().getString(R.string.suite_err_offline)); return }
+        if (n == null || !Core.isConnected() || !n.peerSupportsSuite()) { cb?.invoke(false, null, appCtx().getString(R.string.suite_err_offline)); return }
         val req = reqSeq.getAndIncrement()
         if (cb != null) {
-            synchronized(callbacks) { callbacks[req] = cb }
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                val c = synchronized(callbacks) { callbacks.remove(req) }
-                c?.invoke(false, null, appCtx().getString(R.string.suite_err_timeout))
-            }, 15_000)
+            pending.add(req, suiteCommandTimeout(app, name, _ui.value.apps.size), Reply(false, null, appCtx().getString(R.string.suite_err_timeout))) {
+                cb(it.ok, it.json, it.error)
+            }
         }
-        n.sendSuiteCmd(req.toULong(), app, name, json)
+        if (!n.sendSuiteCmd(req.toULong(), app, name, json)) {
+            pending.complete(req, Reply(false, null, appCtx().getString(R.string.suite_err_offline)))
+        }
     }
 
     /** "disk_full;free=..;needed=.." gibi makine hatalarını kullanıcı metnine çevirir. */
     fun friendlyError(error: String?): String? {
+        if (error == "download_unavailable") return ctx.getString(R.string.suite_download_unavailable)
+        if (error == "phone_offline") return ctx.getString(R.string.suite_err_offline)
+        if (error == "download_not_active" || error == "download_not_paused" || error == "download_not_started") return ctx.getString(R.string.suite_download_control_failed)
         if (error == null || !error.startsWith("disk_full")) return error
         val free = Regex("""free=(\d+)""").find(error)?.groupValues?.get(1)?.toLongOrNull()
         return if (free != null) ctx.getString(R.string.suite_err_disk_free, fmtMb(free / 1048576.0)) else ctx.getString(R.string.suite_err_disk)
     }
 
     fun onReply(req: Long, ok: Boolean, json: String, error: String?) {
-        val cb = synchronized(callbacks) { callbacks.remove(req) } ?: return
         val err = friendlyError(error)
-        if (!ok && error != null && error.startsWith("disk_full")) toast(err ?: ctx.getString(R.string.suite_err_disk))
-        cb(ok, runCatching { JSONObject(json) }.getOrNull(), err)
+        val parsed = runCatching { JSONObject(json) }.getOrNull()
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            pending.complete(req, Reply(ok, parsed, err))
+        }
     }
 
     fun ramClean(full: Boolean) = send("t-ramcash", "ram.clean", """{"mode":"${if (full) "full" else "smart"}"}""") { ok, r, err ->
@@ -120,8 +134,13 @@ object Suite {
         _ui.update { it.copy(disks = rows) }
     }
 
-    fun updateAll() = send("t-bridge", "suite.update") { ok, r, err ->
-        toast(if (ok) (r?.optInt("started", 0) ?: 0).let { ctx.resources.getQuantityString(R.plurals.suite_updating, it, it) } else (err ?: ctx.getString(R.string.suite_update_failed)))
+    fun updateAll() {
+        if (_ui.value.updating) return
+        _ui.update { it.copy(updating = true) }
+        send("t-bridge", "suite.update") { ok, r, err ->
+            _ui.update { it.copy(updating = false) }
+            toast(if (ok) (r?.optInt("started", 0) ?: 0).let { ctx.resources.getQuantityString(R.plurals.suite_updating, it, it) } else (err ?: ctx.getString(R.string.suite_update_failed)))
+        }
     }
 
     fun launch(app: String) = send(app, "app.launch") { ok, _, err -> if (!ok) toast(err ?: ctx.getString(R.string.suite_launch_failed)) }
@@ -137,16 +156,16 @@ object Suite {
         when {
             app == "t-bridge" && name == "file.presented" -> ViewerLink.onPresented(o.optString("name"), o.optBoolean("ok"))
             app == "t-bridge" && name == "file.open" -> ViewerLink.expectOpen(o.optString("name"))
-            name == "download.progress" -> _ui.update {
+            app == "t-downloader" && (name == "download.progress" || name == "download.state") -> _ui.update {
                 val id = o.optString("id")
                 it.copy(downloads = it.downloads + (id to DlItem(id, o.optString("name"), o.optDouble("pct"), o.optDouble("speed"), o.optLong("bytes"), o.optLong("total"), o.optString("state") == "paused")))
             }
-            name == "download.completed" -> {
+            app == "t-downloader" && name == "download.completed" -> {
                 val d = DlDone(o.optString("id"), o.optString("fileName"), o.optString("path"), o.optLong("size"))
                 _ui.update { it.copy(downloads = it.downloads - d.id, completed = (listOf(d) + it.completed.filter { x -> x.id != d.id }).take(10)) }
                 notify(ctx.getString(R.string.suite_dl_done), d.name, 1001)
             }
-            name == "download.failed" -> {
+            app == "t-downloader" && name == "download.failed" -> {
                 _ui.update { it.copy(downloads = it.downloads - o.optString("id")) }
                 notify(ctx.getString(R.string.suite_dl_failed), "${o.optString("name")} · ${o.optString("error")}", 1002)
             }

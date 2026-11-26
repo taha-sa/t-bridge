@@ -120,4 +120,16 @@
     <string name="cam_notif_text">Telefon kamerası bilgisayara aktarılıyor</string>
     <string name="cam_err_permission">Kamera izni verilmedi. Uygulama ayarlarından izin verip yeniden deneyin.</string>
     <string name="cam_err_open">Kamera açılamadı. Kamerayı kullanan diğer uygulamaları kapatıp yeniden deneyin.</string>
+    <string name="scr_stop_short">Durdur</string>
+    <string name="scr_stop_confirm">Ekran paylaşımı durdurulsun mu?</string>
+    <string name="scr_stop_confirm_hint">Bilgisayar bağlantısı açık kalır.</string>
+    <string name="cam_group_camera">Kamera</string>
+    <string name="cam_group_quality">Çözünürlük</string>
+    <string name="cam_group_image">Görüntü ayarları</string>
+    <string name="remote_help">Touchpad yardımı</string>
+    <string name="remote_close">Kapat</string>
+    <string name="eco_queued">Aktarım sırasına alındı: %1$s</string>
+    <string name="suite_download_unavailable">Bu indirme artık kullanılamıyor. İndirmeyi yeniden tamamlayıp tekrar deneyin.</string>
+    <string name="suite_download_control_failed">İndirme durumu değişti veya işlem başlatılamadı.</string>
+    <string name="eco_action_waiting">Bekleniyor…</string>
 </resources>

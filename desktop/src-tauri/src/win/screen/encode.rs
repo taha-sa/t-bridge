@@ -358,6 +358,13 @@ impl Encoder {
                 gpu.ctx.CopyResource(st, nv12);
                 let mut m = D3D11_MAPPED_SUBRESOURCE::default();
                 gpu.ctx.Map(st, 0, D3D11_MAP_READ, 0, Some(&mut m))?;
+                struct UnmapGuard<'a>(&'a ID3D11DeviceContext, &'a ID3D11Texture2D);
+                impl Drop for UnmapGuard<'_> {
+                    fn drop(&mut self) {
+                        unsafe { self.0.Unmap(self.1, 0) };
+                    }
+                }
+                let _unmap = UnmapGuard(&gpu.ctx, st);
                 let (w, h) = (self.w as usize, self.h as usize);
                 let size = w * h * 3 / 2;
                 let buf = MFCreateMemoryBuffer(size as u32)?;
@@ -373,7 +380,7 @@ impl Encoder {
                     std::ptr::copy_nonoverlapping(uv_src.add(y * pitch), dst.add(w * h + y * w), w);
                 }
                 buf.Unlock()?;
-                gpu.ctx.Unmap(st, 0);
+                drop(_unmap);
                 buf.SetCurrentLength(size as u32)?;
                 sample.AddBuffer(&buf)?;
             }

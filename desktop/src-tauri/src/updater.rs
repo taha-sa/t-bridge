@@ -32,6 +32,7 @@ pub struct Updater {
     pub state: Mutex<UpdateState>,
     /// İndirilmiş, kurulmayı bekleyen paket.
     ready: Mutex<Option<(Update, Vec<u8>)>>,
+    ready_beta: Mutex<Option<bool>>,
     busy: tokio::sync::Mutex<()>,
 }
 
@@ -59,8 +60,14 @@ fn transfers_active(sh: &Shared) -> bool {
 /// Denetle ve varsa indir. `auto` ise indirilen paket uygun anda kendiliğinden kurulur.
 pub async fn check(sh: Arc<Shared>, auto: bool) -> Result<bool, String> {
     let _guard = sh.updater.busy.lock().await;
+    let beta = lk(&sh.settings).beta_updates;
+    if *lk(&sh.updater.ready_beta) != Some(beta) {
+        *lk(&sh.updater.ready) = None;
+        *lk(&sh.updater.ready_beta) = None;
+    }
     if lk(&sh.updater.ready).is_some() {
         if auto {
+            drop(_guard);
             install_when_idle(sh.clone()).await;
         }
         return Ok(true);
@@ -69,7 +76,14 @@ pub async fn check(sh: Arc<Shared>, auto: bool) -> Result<bool, String> {
         s.phase = "checking";
         s.error = None;
     });
-    let updater = match sh.app.updater_builder().on_before_exit({
+    let endpoint = if beta {
+        "https://github.com/taha-sa/t-bridge-releases/releases/download/beta/latest-beta.json"
+    } else {
+        "https://github.com/taha-sa/t-bridge-releases/releases/latest/download/latest.json"
+    };
+    let builder = sh.app.updater_builder().endpoints(vec![endpoint.parse().map_err(|e| format!("Invalid update endpoint: {e}"))?])
+        .map_err(|e| e.to_string())?;
+    let updater = match builder.on_before_exit({
         let sh = sh.clone();
         move || {
             if let Some(n) = sh.node() {
@@ -120,6 +134,7 @@ pub async fn check(sh: Arc<Shared>, auto: bool) -> Result<bool, String> {
         Err(e) => return fail(&sh, e.to_string()),
     };
     *lk(&sh.updater.ready) = Some((update, bytes));
+    *lk(&sh.updater.ready_beta) = Some(beta);
     set(&sh, |s| {
         s.phase = "ready";
         s.progress = 1.0;
@@ -143,13 +158,25 @@ fn fail(sh: &Shared, e: String) -> Result<bool, String> {
 /// Aktarım bitene kadar bekler, sonra kurar (uygulama kapanıp yeni sürümle açılır).
 async fn install_when_idle(sh: Arc<Shared>) {
     while transfers_active(&sh) {
+        if !lk(&sh.settings).auto_update {
+            return;
+        }
         tokio::time::sleep(Duration::from_secs(20)).await;
+    }
+    if !lk(&sh.settings).auto_update {
+        return;
     }
     let _ = install_now(&sh);
 }
 
 /// İndirilmiş paketi hemen kurar. Başarılı olursa süreç çıkar ve kurulum sonrası yeniden açılır.
 pub fn install_now(sh: &Shared) -> Result<(), String> {
+    if *lk(&sh.updater.ready_beta) != Some(lk(&sh.settings).beta_updates) {
+        *lk(&sh.updater.ready) = None;
+        *lk(&sh.updater.ready_beta) = None;
+        set(sh, |state| *state = UpdateState { phase: "idle", ..Default::default() });
+        return Err(crate::i18n::t("err.update.none"));
+    }
     let Some((update, bytes)) = lk(&sh.updater.ready).take() else { return Err(crate::i18n::t("err.update.none")) };
     set(sh, |s| s.phase = "installing");
     // Windows'ta install() kurulum dosyasını başlatıp süreci sonlandırır.

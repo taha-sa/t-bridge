@@ -8,7 +8,7 @@ use std::{
 
 use windows::{
     Win32::{
-        Foundation::{HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM},
         System::{
             DataExchange::{
                 AddClipboardFormatListener, CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable,
@@ -96,12 +96,17 @@ pub fn set_text(s: &str) -> bool {
             let mem = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2)?;
             let p = GlobalLock(mem) as *mut u16;
             if p.is_null() {
-                return Err(windows::core::Error::from_thread());
+                let err = windows::core::Error::from_thread();
+                let _ = GlobalFree(Some(mem));
+                return Err(err);
             }
             std::ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
             let _ = GlobalUnlock(mem);
-            // Başarılı olursa bellek sahipliği sisteme geçer.
-            SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(mem.0)))?;
+            // Başarılı olursa bellek sahipliği sisteme geçer; başarısızsa biz serbest bırakırız.
+            if let Err(e) = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(mem.0))) {
+                let _ = GlobalFree(Some(mem));
+                return Err(e);
+            }
             Ok(())
         })()
         .is_ok()

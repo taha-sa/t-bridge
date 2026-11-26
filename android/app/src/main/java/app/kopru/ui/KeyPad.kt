@@ -326,6 +326,8 @@ internal fun SpecialKeysPanel(modifier: Modifier = Modifier, maxHeightFraction: 
                 K("Esc", KeyCode.ESC, SpecialKey.ESCAPE, "Escape")
                 K("Tab", KeyCode.TAB, SpecialKey.TAB, "Tab")
                 K("Enter", KeyCode.ENTER, SpecialKey.ENTER, "Enter")
+            }
+            KeyRow {
                 K("⌫", KeyCode.BACKSPACE, SpecialKey.BACKSPACE, stringResource(R.string.keys_desc_backspace), repeat = true)
                 K("Del", KeyCode.DELETE, SpecialKey.DELETE, "Delete")
                 K("Ins", KeyCode.INSERT, null, "Insert")
@@ -335,6 +337,8 @@ internal fun SpecialKeysPanel(modifier: Modifier = Modifier, maxHeightFraction: 
                 K("↑", KeyCode.UP, SpecialKey.UP, stringResource(R.string.keys_desc_up), repeat = true)
                 K("↓", KeyCode.DOWN, SpecialKey.DOWN, stringResource(R.string.keys_desc_down), repeat = true)
                 K("→", KeyCode.RIGHT, SpecialKey.RIGHT, stringResource(R.string.keys_desc_right), repeat = true)
+            }
+            KeyRow {
                 K("Home", KeyCode.HOME, SpecialKey.HOME, "Home")
                 K("End", KeyCode.END, SpecialKey.END, "End")
             }

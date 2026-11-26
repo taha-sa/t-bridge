@@ -113,10 +113,13 @@ impl Ring {
     }
 
     // ---- yazıcı ----
-    /// NV12 kareyi (`w*h*3/2` bayt) yazar. Başarısızsa false (boyut sınırı/uyuşmazlık).
+    /// NV12 kareyi (`w*h*3/2` bayt) yazar. Başarısızsa false (boyut sınırı/çift sayı kuralı/uyuşmazlık).
     pub fn write(&self, w: u32, h: u32, pts_us: u64, now_ms: u64, nv12: &[u8]) -> bool {
+        if w < 2 || h < 2 || w > MAX_W || h > MAX_H || !w.is_multiple_of(2) || !h.is_multiple_of(2) {
+            return false;
+        }
         let need = (w as usize) * (h as usize) * 3 / 2;
-        if w == 0 || h == 0 || w > MAX_W || h > MAX_H || nv12.len() != need {
+        if nv12.len() != need {
             return false;
         }
         let seq = self.a64(OFF_LATEST).load(Ordering::Relaxed) + 1;
@@ -164,13 +167,20 @@ impl Ring {
             let h = (*(s.add(20) as *const AtomicU32)).load(Ordering::Relaxed);
             let pts_us = (*(s.add(24) as *const AtomicU64)).load(Ordering::Relaxed);
             let len = (*(s.add(32) as *const AtomicU32)).load(Ordering::Relaxed) as usize;
+            // Meta verileri kullanmadan önce yuva üstbilgisinin ezilmediğini doğrula.
+            if (*(s as *const AtomicU64)).load(Ordering::Acquire) != seq {
+                return None;
+            }
+            if w < 2 || h < 2 || w > MAX_W || h > MAX_H || !w.is_multiple_of(2) || !h.is_multiple_of(2) {
+                return None;
+            }
             if len == 0 || len > MAX_FRAME || len != (w as usize) * (h as usize) * 3 / 2 {
                 return None;
             }
             out.resize(len, 0);
             std::ptr::copy_nonoverlapping(s.add(SLOT_HEADER), out.as_mut_ptr(), len);
             fence(Ordering::Acquire);
-            let begin = (*(s as *const AtomicU64)).load(Ordering::Relaxed);
+            let begin = (*(s as *const AtomicU64)).load(Ordering::Acquire);
             if begin != seq {
                 return None; // kopyalarken ezildi: yırtık okuma, at
             }
@@ -341,6 +351,8 @@ mod tests {
         assert!(!r.write(1280, 720, 0, 0, &frame(640, 360, 0)), "uzunluk uyuşmazlığı");
         assert!(!r.write(4096, 2160, 0, 0, &[]), "sınır üstü");
         assert!(!r.write(0, 0, 0, 0, &[]));
+        assert!(!r.write(1, 2, 0, 0, &[0u8; 3]), "tek sayı genişlik");
+        assert!(!r.write(3, 2, 0, 0, &[0u8; 9]), "tek sayı NV12");
     }
 
     #[test]

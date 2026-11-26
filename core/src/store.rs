@@ -3,12 +3,19 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::types::{FileSource, PeerInfo};
+
+static SAVE_LOCK: Mutex<()> = Mutex::new(());
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
     match fs::read(path) {
@@ -21,9 +28,24 @@ pub fn load_json<T: DeserializeOwned + Default>(path: &Path) -> T {
 }
 
 pub fn save_json<T: Serialize>(path: &Path, v: &T) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(v)?).with_context(|| format!("{}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("{}", path.display()))?;
+    let _g = SAVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_name = format!(
+        "{}.{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("state"),
+        std::process::id(),
+        seq
+    );
+    let tmp = path.with_file_name(tmp_name);
+    let bytes = serde_json::to_vec_pretty(v)?;
+    if let Err(e) = fs::write(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("{}", tmp.display()));
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("{}", path.display()));
+    }
     Ok(())
 }
 

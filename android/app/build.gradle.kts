@@ -11,8 +11,16 @@ val jniOut = layout.buildDirectory.dir("generated/jniLibs")
 
 // İmzalama: android/keystore.properties varsa release imzalı olur (yoksa debug anahtarı).
 // Sürüm tek kaynaktan: repo kökündeki version.txt (x.y.z → versionCode x*10000+y*100+z).
-val appVersion: String = repoRoot.resolve("version.txt").readText().trim()
-val appVersionCode: Int = appVersion.split('.').map { it.toInt() }.let { (a, b, c) -> a * 10000 + b * 100 + c }
+val appVersion: String = (findProperty("releaseVersion") as String?) ?: repoRoot.resolve("version.txt").readText().trim()
+val versionMatch = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-beta\.?(\d+))?$""").matchEntire(appVersion)
+    ?: error("Invalid releaseVersion")
+val appVersionCode: Int = versionMatch.groupValues.let { parts ->
+    require(parts[2].toInt() in 0..99 && parts[3].toInt() in 0..99)
+    val base = parts[1].toInt() * 10000 + parts[2].toInt() * 100 + parts[3].toInt()
+    val revision = parts[4].takeIf { it.isNotEmpty() }?.toInt() ?: 999
+    require(revision in 1..999 && (parts[4].isEmpty() || revision < 999))
+    Math.addExact(Math.multiplyExact(base, 1000), revision).also { require(it in 1..2100000000) }
+}
 
 val keyProps = Properties().apply {
     val f = rootProject.file("keystore.properties")
@@ -38,8 +46,9 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keyProps.isNotEmpty()) {
-                storeFile = rootProject.file(keyProps.getProperty("storeFile"))
+            val sf = keyProps.getProperty("storeFile")
+            if (!sf.isNullOrBlank()) {
+                storeFile = rootProject.file(sf)
                 storePassword = keyProps.getProperty("storePassword")
                 keyAlias = keyProps.getProperty("keyAlias")
                 keyPassword = keyProps.getProperty("keyPassword")
@@ -52,7 +61,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (keyProps.isNotEmpty()) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            if (!keyProps.getProperty("storeFile").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -107,6 +118,7 @@ val cargoHostBuild by tasks.registering(Exec::class) {
     group = "rust"
     workingDir = repoRoot
     inputs.dir(File(repoRoot, "core/src"))
+    inputs.file(File(repoRoot, "core/Cargo.toml"))
     outputs.file(hostLib)
     commandLine("cargo", "build", "-q", "-p", "kopru-core", "--lib")
 }
@@ -128,6 +140,7 @@ val uniffiBindgen by tasks.registering(Exec::class) {
 tasks.named("preBuild") { dependsOn(uniffiBindgen) }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.19.1")

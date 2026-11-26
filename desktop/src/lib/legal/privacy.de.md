@@ -26,3 +26,6 @@ Gemäß der EU-Datenschutz-Grundverordnung (DSGVO) und dem türkischen Datenschu
 ### 6. Jugendschutz & Kontakt
 Die Anwendungen richten sich nicht an Kinder unter 13 bzw. 16 Jahren. Für Fragen und Anliegen:  
 GitHub Issues / Discussions: [https://github.com/taha-sa](https://github.com/taha-sa)
+
+
+Android-Protokolle werden als begrenzte, rotierende Dateien im privaten App-Speicher abgelegt. Personenbezogene Daten werden vor dem Schreiben maskiert. Dies garantiert nicht die Entfernung aller vertraulichen Informationen. Fehlerberichte verwenden höchstens 200 lokale App-Protokollzeilen und werden erst nach Prüfung durch den Benutzer gesendet. Das Löschen der App-Daten entfernt die Protokolle.

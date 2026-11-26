@@ -40,11 +40,25 @@ fn pack(hi: u32, lo: u32) -> u64 {
 // ---------------------------------------------------------------- paylaşımlı bellek (kaynak yaratır)
 
 struct Shm {
-    _h: HANDLE,
+    h: HANDLE,
+    view: MEMORY_MAPPED_VIEW_ADDRESS,
     ring: Ring,
 }
 unsafe impl Send for Shm {}
 unsafe impl Sync for Shm {}
+
+impl Drop for Shm {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.view.Value.is_null() {
+                let _ = UnmapViewOfFile(self.view);
+            }
+            if !self.h.is_invalid() {
+                let _ = CloseHandle(self.h);
+            }
+        }
+    }
+}
 
 /// Kamerayı etkinleştiren kullanıcının SID'i: kayıt sırasında HKLM\SOFTWARE\Classes\CLSID\{..} altına `OwnerSid` olarak yazılır.
 fn read_owner_sid() -> Option<String> {
@@ -84,7 +98,7 @@ fn open_shm() -> Option<Shm> {
         if !existed || !ring.is_valid() {
             ring.init();
         }
-        Some(Shm { _h: h, ring })
+        Some(Shm { h, view, ring })
     }
 }
 
@@ -166,6 +180,10 @@ impl Stream {
 
     fn stop(&self) {
         self.st.0.lock().unwrap().started = false;
+        if let Some(shm) = &self.shm {
+            shm.ring.set_want(0, 0);
+            shm.ring.touch_consumer(0);
+        }
         unsafe {
             let _ = self.queue.QueueEventParamVar(MEStreamStopped.0 as u32, &GUID::zeroed(), S_OK, std::ptr::null());
         }
@@ -176,6 +194,10 @@ impl Stream {
             let mut g = self.st.0.lock().unwrap();
             g.shutdown = true;
             g.started = false;
+        }
+        if let Some(shm) = &self.shm {
+            shm.ring.set_want(0, 0);
+            shm.ring.touch_consumer(0);
         }
         self.st.1.notify_all();
         if let Some(j) = self.worker.lock().unwrap().take() {
@@ -188,15 +210,32 @@ impl Stream {
     }
 }
 
+struct CoUninitGuard(bool);
+impl Drop for CoUninitGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+fn fill_nv12_black(buf: &mut [u8], w: usize, h: usize) {
+    let y_len = w * h;
+    if buf.len() >= y_len {
+        buf[..y_len].fill(16);
+        buf[y_len..].fill(128);
+    }
+}
+
 /// İstek geldikçe (RequestSample) kare hızında örnek üretir: halkadaki en yeni kare, yoksa/bayatsa yer tutucu.
 fn worker_loop(st: Arc<(Mutex<StreamState>, Condvar)>, shm: Option<Arc<Shm>>, queue: IMFMediaEventQueue) {
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    }
+    let _co = CoUninitGuard(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).is_ok() });
     let interval = Duration::from_micros(1_000_000 / FPS as u64);
     let mut next = Instant::now();
     let mut last_seq = 0u64;
     let mut cur: Vec<u8> = Vec::new(); // son gösterilen kare (hedef boyutta)
+    let mut cur_dim = (0u32, 0u32);
+    let mut cur_has_live = false;
     let mut raw: Vec<u8> = Vec::new();
     let mut placeholder: Vec<u8> = Vec::new();
     let mut ph_dim = (0u32, 0u32);
@@ -222,8 +261,11 @@ fn worker_loop(st: Arc<(Mutex<StreamState>, Condvar)>, shm: Option<Arc<Shm>>, qu
         next = Instant::now() + interval;
 
         let need = (w * h * 3 / 2) as usize;
-        if cur.len() != need {
+        if cur.len() != need || cur_dim != (w, h) {
             cur = vec![0; need];
+            fill_nv12_black(&mut cur, w as usize, h as usize);
+            cur_dim = (w, h);
+            cur_has_live = false;
         }
         let mut have_live = false;
         if let Some(shm) = &shm {
@@ -235,8 +277,9 @@ fn worker_loop(st: Arc<(Mutex<StreamState>, Condvar)>, shm: Option<Arc<Shm>>, qu
                 if let Some(info) = ring.read_latest(last_seq, &mut raw) {
                     last_seq = info.seq;
                     frames::scale_nv12(&raw, info.w as usize, info.h as usize, &mut cur, w as usize, h as usize);
+                    cur_has_live = true;
                 }
-                have_live = true; // taze yazıcı var: yeni kare gelmediyse son kare tekrarlanır
+                have_live = cur_has_live;
             }
         }
         if !have_live {
@@ -245,6 +288,7 @@ fn worker_loop(st: Arc<(Mutex<StreamState>, Condvar)>, shm: Option<Arc<Shm>>, qu
                 ph_dim = (w, h);
             }
             cur.copy_from_slice(&placeholder);
+            cur_has_live = false;
             last_seq = 0;
         }
 
@@ -569,7 +613,15 @@ impl IMFAttributes_Impl for Activate_Impl {
         unsafe { self.attrs.GetStringLength(k) }
     }
     fn GetString(&self, k: *const GUID, buf: PWSTR, cch: u32, out: *mut u32) -> Result<()> {
-        unsafe { self.attrs.GetString(k, std::slice::from_raw_parts_mut(buf.0, cch as usize), Some(out)) }
+        let slice = if buf.0.is_null() {
+            if cch > 0 {
+                return Err(E_POINTER.into());
+            }
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(buf.0, cch as usize) }
+        };
+        unsafe { self.attrs.GetString(k, slice, (!out.is_null()).then_some(out)) }
     }
     fn GetAllocatedString(&self, k: *const GUID, pp: *mut PWSTR, cch: *mut u32) -> Result<()> {
         unsafe { self.attrs.GetAllocatedString(k, pp, cch) }
@@ -578,7 +630,15 @@ impl IMFAttributes_Impl for Activate_Impl {
         unsafe { self.attrs.GetBlobSize(k) }
     }
     fn GetBlob(&self, k: *const GUID, buf: *mut u8, cb: u32, out: *mut u32) -> Result<()> {
-        unsafe { self.attrs.GetBlob(k, std::slice::from_raw_parts_mut(buf, cb as usize), Some(out)) }
+        let slice = if buf.is_null() {
+            if cb > 0 {
+                return Err(E_POINTER.into());
+            }
+            &mut []
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(buf, cb as usize) }
+        };
+        unsafe { self.attrs.GetBlob(k, slice, (!out.is_null()).then_some(out)) }
     }
     fn GetAllocatedBlob(&self, k: *const GUID, pp: *mut *mut u8, cb: *mut u32) -> Result<()> {
         unsafe { self.attrs.GetAllocatedBlob(k, pp, cb) }
@@ -614,7 +674,15 @@ impl IMFAttributes_Impl for Activate_Impl {
         unsafe { self.attrs.SetString(k, *v) }
     }
     fn SetBlob(&self, k: *const GUID, buf: *const u8, cb: u32) -> Result<()> {
-        unsafe { self.attrs.SetBlob(k, std::slice::from_raw_parts(buf, cb as usize)) }
+        let slice = if buf.is_null() {
+            if cb > 0 {
+                return Err(E_POINTER.into());
+            }
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(buf, cb as usize) }
+        };
+        unsafe { self.attrs.SetBlob(k, slice) }
     }
     fn SetUnknown(&self, k: *const GUID, u: Ref<IUnknown>) -> Result<()> {
         unsafe { self.attrs.SetUnknown(k, u.as_ref()) }
@@ -659,6 +727,10 @@ impl IClassFactory_Impl for Factory_Impl {
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
     unsafe {
+        if riid.is_null() || ppv.is_null() {
+            return E_POINTER;
+        }
+        *ppv = std::ptr::null_mut();
         if rclsid.is_null() || *rclsid != CLSID_TBRIDGE_VCAM {
             return CLASS_E_CLASSNOTAVAILABLE;
         }

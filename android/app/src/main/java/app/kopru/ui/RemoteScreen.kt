@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -47,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.Switch
@@ -81,11 +84,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -182,8 +187,11 @@ fun RemoteScreen(ui: UiState) {
 private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
     val c = tb
     val shape = RoundedCornerShape(16.dp)
+    val scroll = rememberScrollState()
+    val density = LocalDensity.current
+    LaunchedEffect(selected) { scroll.animateScrollTo(with(density) { (selected.ordinal * 76).dp.roundToPx() }) }
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(c.s2).border(1.dp, c.line, shape).padding(4.dp).selectableGroup(),
+        Modifier.fillMaxWidth().clip(shape).background(c.s2).border(1.dp, c.line, shape).horizontalScroll(scroll).padding(4.dp).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Page.entries.forEach { p ->
@@ -191,7 +199,7 @@ private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
             val pLabel = stringResource(p.label)
             Column(
                 Modifier
-                    .weight(1f)
+                    .width(72.dp)
                     .height(56.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (sel) c.goldSoft else Color.Transparent)
@@ -214,28 +222,41 @@ private fun Segments(selected: Page, onSelect: (Page) -> Unit) {
 private fun PadPage(prefs: android.content.SharedPreferences) {
     val c = tb
     var sens by remember { mutableFloatStateOf(prefs.getFloat("sens", 1.6f)) }
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Touchpad(sens, Modifier.weight(1f).heightIn(min = 200.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TbButton(stringResource(R.string.remote_left_click), { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f), height = 56.dp)
-            TbButton(stringResource(R.string.remote_middle), { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(0.6f), height = 56.dp)
-            TbButton(stringResource(R.string.remote_right_click), { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f), height = 56.dp)
-        }
+    var help by remember { mutableStateOf(false) }
+    val helpTitle = stringResource(R.string.remote_help)
+    @Composable
+    fun SpeedControl() {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.remote_speed), Modifier.width(44.dp), color = c.muted, style = MaterialTheme.typography.labelLarge)
-            Slider(
-                sens,
-                { sens = it; prefs.edit().putFloat("sens", it).apply() },
-                valueRange = 0.6f..4f,
+            Text(stringResource(R.string.remote_speed), color = c.muted, style = MaterialTheme.typography.labelLarge)
+            Slider(sens, { sens = it; prefs.edit().putFloat("sens", it).apply() }, valueRange = 0.6f..4f,
                 modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4),
-            )
+                colors = SliderDefaults.colors(thumbColor = c.goldHi, activeTrackColor = c.gold, inactiveTrackColor = c.s4))
+            TextButton(onClick = { help = true }, modifier = Modifier.size(48.dp).semantics { contentDescription = helpTitle }, contentPadding = PaddingValues(0.dp)) { Text("?") }
         }
-        Text(
-            stringResource(R.string.remote_pad_help),
-            color = c.faint,
-            style = MaterialTheme.typography.bodySmall,
-        )
+    }
+    if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text(helpTitle) }, text = { Text(stringResource(R.string.remote_pad_help)) }, confirmButton = { TextButton(onClick = { help = false }) { Text(stringResource(R.string.remote_close)) } })
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (maxHeight < 260.dp && maxWidth > maxHeight) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Touchpad(sens, Modifier.weight(0.6f).fillMaxHeight())
+                Column(Modifier.weight(0.4f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TbButton(stringResource(R.string.remote_left_click), { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.fillMaxWidth(), height = 48.dp)
+                    TbButton(stringResource(R.string.remote_middle), { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.fillMaxWidth(), height = 48.dp)
+                    TbButton(stringResource(R.string.remote_right_click), { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.fillMaxWidth(), height = 48.dp)
+                    SpeedControl()
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Touchpad(sens, Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TbButton(stringResource(R.string.remote_left_click), { pc(PcCommand.Click(MouseButton.LEFT, false)) }, Modifier.weight(1f), height = 48.dp)
+                    TbButton(stringResource(R.string.remote_middle), { pc(PcCommand.Click(MouseButton.MIDDLE, false)) }, Modifier.weight(1f), height = 48.dp)
+                    TbButton(stringResource(R.string.remote_right_click), { pc(PcCommand.Click(MouseButton.RIGHT, false)) }, Modifier.weight(1f), height = 48.dp)
+                }
+                SpeedControl()
+            }
+        }
     }
 }
 
@@ -341,16 +362,17 @@ private fun PowerTile(label: String, icon: ImageVector, danger: Boolean, modifie
 }
 
 @Composable
-internal fun Chip(label: String, onClick: () -> Unit) {
+internal fun Chip(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     val c = tb
     val shape = RoundedCornerShape(12.dp)
     Box(
         Modifier
             .heightIn(min = 48.dp)
             .clip(shape)
+            .alpha(if (enabled) 1f else 0.55f)
             .background(c.s3)
             .border(1.dp, c.line2, shape)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -360,19 +382,21 @@ internal fun Chip(label: String, onClick: () -> Unit) {
 
 /** Touchpad: göreli hareket (ivmeli), dokun/çift parmak tık, iki parmak kaydırma, basılı tut-sürükle. */
 @Composable
-private fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
+internal fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
     val view = LocalView.current
     val c = tb
     val shape = RoundedCornerShape(16.dp)
     val scope = rememberCoroutineScope()
     val ripple = remember { Animatable(1f) }
     var rippleAt by remember { mutableStateOf(Offset.Zero) }
+    val padDescription = stringResource(R.string.remote_pad_help)
     Box(
         modifier
             .fillMaxWidth()
             .clip(shape)
             .background(c.cardBrush)
             .border(1.dp, c.goldEdge, shape)
+            .semantics { contentDescription = padDescription }
             .pointerInput(sens) {
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
@@ -470,6 +494,6 @@ private fun Touchpad(sens: Float, modifier: Modifier = Modifier) {
                 )
             }
         }
-        Text(stringResource(R.string.remote_page_pad).uppercase(), color = c.faint, style = MaterialTheme.typography.labelSmall)
+        Text(stringResource(R.string.remote_page_pad), color = c.faint, style = MaterialTheme.typography.labelSmall)
     }
 }

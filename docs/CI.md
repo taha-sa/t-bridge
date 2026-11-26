@@ -33,6 +33,6 @@ git tag -a v0.3.0 -m "Sürüm notu"; git push origin v0.3.0
 git tag -a v0.3.0-beta.1 -m "Beta notu"; git push origin v0.3.0-beta.1
 ```
 
-Beta notu: masaüstü ve Android güncelleyicileri yalnızca `releases/latest/download/latest.json` ve `android.json` dosyalarına bakar (GitHub `latest` ön sürümleri hariç tutar); `latest-beta.json` desteklenmiyor. Bu yüzden beta yayınlar yalnızca elle indirilir (kurulum .exe + .sig ve APK sürüm sayfasında). Dosyalara x.y.z yazılır (`-beta.N` yalnızca etikette ve başlıkta).
+Beta kanalı: masaüstü ve Android ayarlarında isteğe bağlıdır; varsayılan kararlı kanaldır. Beta yayını kendi `vX.Y.Z-beta.N` etiketiyle oluşturulur. `latest-beta.json` ve `android-beta.json`, `beta` adlı dönen ön sürümün varlıklarına da yüklenir. Kararlı `latest.json` / `android.json` korunur. Masaüstü sürümü SemVer beta son ekini taşır. Android versionCode = (major*10000 + minor*100 + patch)*1000 + sıra; beta sıra 1..998, aynı tabanın kararlı sürümü 999. Böylece beta güncellemeleri ve beta → kararlı geçiş artan sürüm koduyla yapılır. Daha eski bir kararlı tabana geri dönüş otomatik düşürme yapmaz. İmza denetimleri kanaldan bağımsız olarak korunur.
 
 Yerel yayın değişmedi: `node scripts/release.mjs 0.3.0 "not" [--no-publish]`. `--ci` yalnızca CI içindir (doğrulamayı atlar, anahtarları ortam değişkenlerinden okur, git commit/tag yapmaz).

@@ -128,6 +128,12 @@ pub fn registered_owner_sid() -> Option<String> {
 static INSTALL_CACHE: Mutex<Option<(Instant, (bool, bool))>> = Mutex::new(None);
 
 pub fn is_installed_for_me() -> bool {
+    let (mine, stale) = installed_state();
+    mine && !stale
+}
+
+/// Bu kullanıcı için kayıtlı mı (DLL eski olsa bile kaldırma düğmesinin görünmesi için).
+pub fn is_registered_for_me() -> bool {
     installed_state().0
 }
 
@@ -145,7 +151,7 @@ fn installed_state() -> (bool, bool) {
     }
     let mine = is_installed() && registered_owner_sid().is_some() && registered_owner_sid() == current_user_sid();
     let stale = mine && !installed_dll_matches(&install_dir().join(DLL_NAME), EXPECTED_DLL_SHA256);
-    let v = (mine && !stale, stale);
+    let v = (mine, stale);
     *INSTALL_CACHE.lock().unwrap() = Some((Instant::now(), v));
     v
 }
@@ -565,16 +571,20 @@ fn decode_thread(rx: Receiver<FrameMsg>, link: Arc<dyn PhoneLink>, in_use: Arc<A
             last_check = std::time::Instant::now();
             let tick = unsafe { GetTickCount64() };
             if let Some(r) = &ring {
-                // Tüketici 3 sn'dir dokunmadıysa kamera kapatıldı: bağlantıyı bırak.
-                if tick.saturating_sub(r.ring.consumer_ms()) > 3000 && r.ring.consumer_ms() != 0 {
+                // Tüketici 3 sn'dir dokunmadıysa (veya kapattıysa) kamera kapatıldı: bağlantıyı bırak.
+                let cm = r.ring.consumer_ms();
+                if cm == 0 || tick.saturating_sub(cm) > 3000 {
                     ring = None;
                     last_want = (0, 0);
                     link.request_stop(); // tüketici kapandı: telefon kamerayı/kodlayıcıyı durdursun
                 }
             }
-            if ring.is_none() {
-                ring = RingMap::open();
-                if ring.is_some() {
+            if ring.is_none()
+                && let Some(candidate) = RingMap::open()
+            {
+                let cm = candidate.ring.consumer_ms();
+                if cm != 0 && tick.saturating_sub(cm) <= 3000 {
+                    ring = Some(candidate);
                     need_key = true;
                     link.request_keyframe();
                 }

@@ -178,8 +178,18 @@ class MainActivity : ComponentActivity() {
         val data = i?.data ?: return
         if ((data.scheme != "tbridge" && data.scheme != "kopru") || data.host != "pair") return
         i.data = null
-        runCatching { Core.node?.pairUri(data.toString()) }
-            .onFailure { Toast.makeText(this, getString(R.string.main_err_pair_link), Toast.LENGTH_LONG).show() }
+        val uriStr = data.toString()
+        val label = data.getQueryParameter("n")?.takeIf { it.isNotBlank() }?.take(80)
+            ?: getString(R.string.svc_notif_default_pc)
+        android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage(label)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                runCatching { Core.node?.pairUri(uriStr) }
+                    .onFailure { Toast.makeText(this, getString(R.string.main_err_pair_link), Toast.LENGTH_LONG).show() }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     override fun onResume() {

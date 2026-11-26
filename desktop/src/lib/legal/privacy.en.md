@@ -26,3 +26,6 @@ Under the EU General Data Protection Regulation (GDPR) and the Turkish Data Prot
 ### 6. Children's Privacy & Contact
 T-Suite is not directed at children under the age of 13 (or local legal minimum age). For questions, inquiries, or feedback:  
 GitHub Issues & Discussions: [https://github.com/taha-sa](https://github.com/taha-sa)
+
+
+Android logs are kept as bounded, rotating files in private app storage. Personal-information masking runs before writing; it cannot guarantee removal of every secret. Error reports use at most 200 local application log lines and are sent only after user review. Clearing app data removes the logs.

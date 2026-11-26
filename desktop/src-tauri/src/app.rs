@@ -39,6 +39,8 @@ pub struct Settings {
     /// "dark" | "system" | "light"
     pub theme: String,
     pub auto_update: bool,
+    /// Opt-in preview feed; stable remains the default.
+    pub beta_updates: bool,
     /// Telefonun bu bilgisayarın ekranını görmesine izin ver (kapalıysa özellik tamamen devre dışı).
     pub screen_share: bool,
     /// "Her zaman izin ver" denen telefon kimlikleri (ilk seferde onay sorulur).
@@ -82,7 +84,7 @@ impl Default for Settings {
         Self {
             clipboard_sync: true,
             notif_mirror: true,
-            notif_sound: true,
+            notif_sound: false,
             notif_toast: false,
             transfer_toast: true,
             low_battery_warn: true,
@@ -91,6 +93,7 @@ impl Default for Settings {
             muted_apps: Vec::new(),
             theme: "dark".into(),
             auto_update: true,
+            beta_updates: false,
             screen_share: true,
             screen_allowed: Vec::new(),
             camera_enabled: false,
@@ -135,11 +138,17 @@ impl Shared {
     }
 
     pub fn save_settings(&self) {
+        static SAVE_LOCK: Mutex<()> = Mutex::new(());
+        let _g = lk(&SAVE_LOCK);
         let s = lk(&self.settings).clone();
         if let Ok(b) = serde_json::to_vec_pretty(&s) {
-            let tmp = self.settings_path.with_extension("tmp");
+            let tmp = self.settings_path.with_extension(format!("{}.tmp", std::process::id()));
             if std::fs::write(&tmp, b).is_ok() {
-                let _ = std::fs::rename(&tmp, &self.settings_path);
+                if std::fs::rename(&tmp, &self.settings_path).is_err() {
+                    let _ = std::fs::remove_file(&tmp);
+                }
+            } else {
+                let _ = std::fs::remove_file(&tmp);
             }
         }
     }
@@ -312,8 +321,20 @@ impl Shared {
                 lk(&self.notifications).retain(|x| &x.key != key);
             }
             Event::AppIcon { package, png } => {
+                // Boyut ve PNG imzası sınırı: sınırsız bellek/önbellek büyümesini ve geçersiz veriyi önler.
+                if png.len() > 256 * 1024 || !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+                    return;
+                }
                 let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png));
-                lk(&self.icons).insert(package.clone(), url.clone());
+                {
+                    let mut icons = lk(&self.icons);
+                    if !icons.contains_key(package.as_str()) && icons.len() >= 200
+                        && let Some(old) = icons.keys().next().cloned()
+                    {
+                        icons.remove(&old);
+                    }
+                    icons.insert(package.clone(), url.clone());
+                }
                 let _ = self.app.emit("kopru", serde_json::json!({ "type": "appIconUrl", "package": package, "url": url }));
                 return;
             }
@@ -370,7 +391,7 @@ mod tests {
         assert!(s.migrate());
         assert!(!s.notif_toast);
         assert!(!s.clipboard_sync);
-        assert!(s.notif_sound && s.notif_mirror);
+        assert!(!s.notif_sound && s.notif_mirror);
         assert_eq!(s.settings_version, SETTINGS_VERSION);
         assert!(!s.migrate());
     }

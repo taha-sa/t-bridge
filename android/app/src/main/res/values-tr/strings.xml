@@ -185,4 +185,6 @@
     <string name="crash_close">Kapat</string>
     <string name="crash_auto">Hata raporlarını otomatik hazırla</string>
     <string name="crash_auto_hint">Bir çökme olursa bir sonraki açılışta size gösterilecek bir rapor hazırlanır. Rapor yalnızca telefonunuzda kalır; göndermek sizin kararınızdır.</string>
+    <string name="set_beta">Beta güncellemeleri</string>
+    <string name="set_beta_hint">Önizleme sürümlerini alın. Bu sürümler daha az kararlı olabilir. Gelecekteki kararlı sürümleri almak için kapatın.</string>
 </resources>
