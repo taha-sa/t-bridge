@@ -72,8 +72,10 @@
     <string name="home_perm_battery_desc">Ekran kapalıyken bağlantı kopmasın.</string>
     <string name="home_perm_notif_post">Bildirim izni</string>
     <string name="home_perm_notif_post_desc">Durum ve \'dosya alındı\' bildirimleri için.</string>
-    <string name="home_perm_miui">MIUI: Otomatik başlatma</string>
-    <string name="home_perm_miui_desc">Durumu okunamıyor; açık olduğundan emin olun.</string>
+    <string name="home_perm_oem_autostart">%1$s: Otomatik başlatma</string>
+    <string name="home_perm_oem_autostart_desc">Durumu okunamıyor; arka plan ve otomatik başlatmanın açık olduğundan emin olun.</string>
+    <string name="home_perm_oem_samsung_title">Samsung: Arka plan pili</string>
+    <string name="home_perm_oem_samsung_desc">Pil ayarını \'Kısıtlanmamış\' yapın ve uyku uygulamalarından çıkarın.</string>
     <string name="home_setup_title">Kurulum</string>
     <string name="home_tip">İpucu: Ana ekrana “%1$s” widget\'ını ya da hızlı ayarlara “%2$s” kutucuğunu ekleyerek kopyaladığınızı tek dokunuşla gönderebilirsiniz.</string>
     <string name="files_toast_failed">Gönderilemedi. Dosyaları yeniden seçip tekrar deneyin.</string>

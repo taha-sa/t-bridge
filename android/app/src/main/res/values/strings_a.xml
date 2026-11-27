@@ -72,8 +72,10 @@
     <string name="home_perm_battery_desc">So the connection stays alive while the screen is off.</string>
     <string name="home_perm_notif_post">Notification permission</string>
     <string name="home_perm_notif_post_desc">For status and \'file received\' notifications.</string>
-    <string name="home_perm_miui">MIUI: Autostart</string>
-    <string name="home_perm_miui_desc">The status cannot be read; make sure it is turned on.</string>
+    <string name="home_perm_oem_autostart">%1$s: Autostart</string>
+    <string name="home_perm_oem_autostart_desc">Status cannot be read; make sure background and autostart permissions are enabled.</string>
+    <string name="home_perm_oem_samsung_title">Samsung: Background battery</string>
+    <string name="home_perm_oem_samsung_desc">Set Battery to \'Unrestricted\' and exclude T-Bridge from sleeping apps.</string>
     <string name="home_setup_title">Setup</string>
     <string name="home_tip">Tip: Add the “%1$s” widget to your home screen or the “%2$s” tile to quick settings to send what you copied with one tap.</string>
     <string name="files_toast_failed">Could not send. Select the files again and retry.</string>

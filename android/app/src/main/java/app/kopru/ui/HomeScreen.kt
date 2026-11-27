@@ -1,9 +1,9 @@
 package app.kopru.ui
 
 import androidx.compose.ui.res.stringResource
+import app.kopru.OemAutostart
 import app.kopru.R
 import android.Manifest
-import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -421,8 +421,7 @@ private fun PermissionsCard() {
         )
         add(
             Perm(stringResource(R.string.home_perm_battery), stringResource(R.string.home_perm_battery_desc), pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
-                @Suppress("BatteryLife")
-                it.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${it.packageName}")))
+                OemAutostart.openBatteryUnrestricted(it)
             },
         )
         if (Build.VERSION.SDK_INT >= 33) {
@@ -433,9 +432,19 @@ private fun PermissionsCard() {
                 ) { notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS) },
             )
         }
-        if (Build.MANUFACTURER.equals("Xiaomi", true) || Build.MANUFACTURER.equals("Redmi", true) || Build.MANUFACTURER.equals("POCO", true)) {
-            // MIUI bu ayarın durumunu uygulamalara bildirmez: ok = null (doğrulanamıyor).
-            add(Perm(stringResource(R.string.home_perm_miui), stringResource(R.string.home_perm_miui_desc), null) { openMiuiAutostart(it) })
+        OemAutostart.detect()?.let { oem ->
+            // Üreticiye özgü arka plan / otomatik başlatma ayarı (durumu Android API ile okunamıyor: ok = null).
+            val title = if (oem.kind == OemAutostart.Kind.SAMSUNG) {
+                stringResource(R.string.home_perm_oem_samsung_title)
+            } else {
+                stringResource(R.string.home_perm_oem_autostart, oem.brandLabel)
+            }
+            val desc = if (oem.kind == OemAutostart.Kind.SAMSUNG) {
+                stringResource(R.string.home_perm_oem_samsung_desc)
+            } else {
+                stringResource(R.string.home_perm_oem_autostart_desc)
+            }
+            add(Perm(title, desc, null) { OemAutostart.openSettings(it, oem) })
         }
     }
     val checkable = perms.filter { it.ok != null }
@@ -469,19 +478,4 @@ private fun Tip() {
 private fun enabledListener(ctx: Context): Boolean {
     val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: return false
     return flat.split(':').any { ComponentName.unflattenFromString(it)?.packageName == ctx.packageName }
-}
-
-private fun openMiuiAutostart(ctx: Context) {
-    val intents = listOf(
-        Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")),
-    )
-    for (i in intents) {
-        try {
-            ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            return
-        } catch (_: ActivityNotFoundException) {
-        } catch (_: SecurityException) {
-        }
-    }
 }

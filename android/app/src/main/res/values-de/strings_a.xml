@@ -72,8 +72,10 @@
     <string name="home_perm_battery_desc">Damit die Verbindung bei ausgeschaltetem Bildschirm bestehen bleibt.</string>
     <string name="home_perm_notif_post">Benachrichtigungsberechtigung</string>
     <string name="home_perm_notif_post_desc">Für Status- und „Datei empfangen“-Benachrichtigungen.</string>
-    <string name="home_perm_miui">MIUI: Autostart</string>
-    <string name="home_perm_miui_desc">Der Status kann nicht gelesen werden; stellen Sie sicher, dass die Option aktiviert ist.</string>
+    <string name="home_perm_oem_autostart">%1$s: Autostart</string>
+    <string name="home_perm_oem_autostart_desc">Der Status kann nicht gelesen werden; stellen Sie sicher, dass Hintergrund und Autostart aktiviert sind.</string>
+    <string name="home_perm_oem_samsung_title">Samsung: Hintergrund-Akku</string>
+    <string name="home_perm_oem_samsung_desc">Akku auf \'Uneingeschränkt\' stellen und aus Ruhemodus-Apps entfernen.</string>
     <string name="home_setup_title">Einrichtung</string>
     <string name="home_tip">Tipp: Fügen Sie das Widget „%1$s“ zum Startbildschirm oder die Kachel „%2$s“ zu den Schnelleinstellungen hinzu, um Kopiertes mit einem Fingertipp zu senden.</string>
     <string name="files_toast_failed">Senden nicht möglich. Wählen Sie die Dateien erneut aus und versuchen Sie es noch einmal.</string>
