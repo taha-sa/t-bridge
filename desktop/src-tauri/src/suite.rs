@@ -344,6 +344,10 @@ impl Hub {
             }
             match cmd.spawn() {
                 Ok(_) => log::info!("ekosistem: {} arka planda başlatıldı", c.id),
+                #[cfg(windows)]
+                Err(e) if e.raw_os_error() == Some(740) => {
+                    log::info!("ekosistem: {} yönetici izni gerektiriyor; sessiz arka plan başlatma atlandı", c.id);
+                }
                 Err(e) => log::warn!("ekosistem: {} başlatılamadı: {e}", c.id),
             }
         }
@@ -354,15 +358,24 @@ impl Hub {
             let g = self.apps.lock().unwrap();
             g.get(id).map(|e| e.m.exe_path.clone()).ok_or_else(|| crate::i18n::t("err.app.missing"))?
         };
-        if !std::path::Path::new(&exe).exists() {
+        let path = std::path::Path::new(&exe);
+        if !path.exists() {
             return Err(crate::i18n::t("err.app.nofile"));
         }
-        let mut c = std::process::Command::new(&exe);
+        let mut c = std::process::Command::new(path);
         c.args(extra);
-        if let Some(d) = std::path::Path::new(&exe).parent() {
+        if let Some(d) = path.parent() {
             c.current_dir(d);
         }
-        c.spawn().map(|_| ()).map_err(|e| e.to_string())
+        match c.spawn() {
+            Ok(_) => Ok(()),
+            #[cfg(windows)]
+            Err(e) if e.raw_os_error() == Some(740) => {
+                let minimized = extra.iter().any(|a| a == "--tray" || a == "--background");
+                spawn_elevated(path, extra, minimized)
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     async fn app_cmd(self: &Arc<Self>, id: &str, name: &str, data: Option<Value>) -> Result<Value, String> {
@@ -385,7 +398,7 @@ impl Hub {
             self.refresh_async().await;
             let args = self.apps.lock().unwrap().get(id).map(|e| launch_args(&e.m)).unwrap_or_default();
             self.launch(id, &args)?;
-            let deadline = Instant::now() + Duration::from_secs(12);
+            let deadline = Instant::now() + Duration::from_secs(20);
             loop {
                 self.refresh_async().await;
                 if connected(self) {
@@ -954,5 +967,79 @@ mod tests {
         assert!(t.allow("d", "download.progress", "2", t0 + Duration::from_millis(100)), "başka öğe bağımsız");
         assert!(t.allow("d", "download.completed", "1", t0), "ilerleme olmayanlar kısıtlanmaz");
         assert!(t.allow("d", "download.completed", "1", t0));
+    }
+
+    #[test]
+    fn quote_win_arg_handles_spaces_and_quotes() {
+        assert_eq!(quote_win_arg("--tray"), "--tray");
+        assert_eq!(quote_win_arg("a b"), "\"a b\"");
+        assert_eq!(quote_win_arg(""), "\"\"");
+        assert_eq!(quote_win_arg("a\"b"), "\"a\\\"b\"");
+    }
+}
+
+#[cfg(any(windows, test))]
+fn quote_win_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.chars().any(|c| matches!(c, ' ' | '\t' | '"')) {
+        return arg.to_string();
+    }
+    let mut out = String::from("\"");
+    let mut slashes = 0usize;
+    for ch in arg.chars() {
+        if ch == '\\' {
+            slashes += 1;
+        } else if ch == '"' {
+            for _ in 0..slashes * 2 + 1 {
+                out.push('\\');
+            }
+            out.push('"');
+            slashes = 0;
+        } else {
+            for _ in 0..slashes {
+                out.push('\\');
+            }
+            slashes = 0;
+            out.push(ch);
+        }
+    }
+    for _ in 0..slashes * 2 {
+        out.push('\\');
+    }
+    out.push('"');
+    out
+}
+
+#[cfg(windows)]
+fn spawn_elevated(exe: &std::path::Path, args: &[String], minimized: bool) -> Result<(), String> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWMINNOACTIVE, SW_SHOWNORMAL};
+    use windows::core::{PCWSTR, w};
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let exe_w = wide(&exe.to_string_lossy());
+    let params_str = args.iter().map(|a| quote_win_arg(a)).collect::<Vec<_>>().join(" ");
+    let params_w = (!params_str.is_empty()).then(|| wide(&params_str));
+    let dir_w = exe.parent().map(|d| wide(&d.to_string_lossy()));
+    let show = if minimized { SW_SHOWMINNOACTIVE } else { SW_SHOWNORMAL };
+    let h = unsafe {
+        ShellExecuteW(
+            None,
+            w!("runas"),
+            PCWSTR(exe_w.as_ptr()),
+            params_w.as_ref().map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr())),
+            dir_w.as_ref().map_or(PCWSTR::null(), |v| PCWSTR(v.as_ptr())),
+            show,
+        )
+    };
+    let code = h.0 as isize;
+    if code > 32 {
+        Ok(())
+    } else if code == 5 {
+        Err("UAC izni iptal edildi veya reddedildi.".into())
+    } else {
+        Err(format!("Yükseltilmiş başlatma başarısız (ShellExecute kodu {code})"))
     }
 }
